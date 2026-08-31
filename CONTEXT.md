@@ -6,7 +6,7 @@ It is intentionally implementation-free. Architecture, storage, provider and run
 
 ## Onboarding Submission
 
-An **Onboarding Submission** is the complete input package submitted through the website-generation onboarding form and is the authoritative starting point for a new Site generation.
+An **Onboarding Submission** is the immutable input package submitted through the website-generation onboarding form and is the authoritative starting point for a new Site generation.
 
 Each Site generation starts from a new Onboarding Submission; V2 has no Client Account or Client User concept.
 
@@ -14,9 +14,21 @@ _Avoid_: Client Account, Customer Account, User Profile.
 
 ## Business
 
-A **Business** is the real business described by an Onboarding Submission and represented by the generated Site. Its submitted facts are authoritative for identity, services, audience, location, contact details and other factual content.
+A **Business** is the real business described by an Onboarding Submission and represented by the generated Site. Its factual identity is limited to what the Onboarding Submission supports.
 
 _Avoid_: Client, Account, Customer when referring to the business represented by the Site.
+
+## Business Fact
+
+A **Business Fact** is a concrete claim about the Business that is directly supported by the Onboarding Submission. Missing facts must remain unknown rather than being invented.
+
+Examples include prices, locations, certifications, awards, years of experience, service coverage and quantitative claims.
+
+## Derived Content
+
+**Derived Content** is non-factual marketing language created from the Onboarding Submission, such as headlines, section labels, positioning language, summaries, SEO copy and image concepts.
+
+Derived Content may interpret or generalize safely, but it must never introduce unsupported Business Facts.
 
 ## Site
 
@@ -57,7 +69,7 @@ There are exactly two V2 modes:
 
 A **Reference** is an external website and/or supplied visual evidence used only to define the target visual architecture for a REFERENCE_BOUND Build.
 
-A Reference is a design source, not a source of Business facts, copy, branding, trademarks or imagery.
+A Reference is a design source, not a source of Business Facts, copy, branding, trademarks or imagery.
 
 ## Reference Suitability
 
