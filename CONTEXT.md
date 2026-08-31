@@ -66,11 +66,11 @@ _Avoid_: Site Generation, Build, Build Version, Deployment, treating one Onboard
 
 ## Site Configuration
 
-**Site Configuration** is mutable operational state that belongs to the Site but is not part of an immutable Build Version. It contains runtime settings that may change independently of website generation, such as the current Form Destination and Sender Identity.
+**Site Configuration** is mutable operational state that belongs to the Site but is not part of an immutable Build Version. It contains only settings whose effect can be applied at runtime without changing the generated website, such as the current Form Destination and Sender Identity.
 
-Changing Site Configuration does not create a Build, Revision Request or Site Generation and does not require rebuilding or republishing the Site unless the configuration change itself affects generated content or design.
+Changing Site Configuration does not create a Build, Revision Request or Site Generation and does not require rebuilding or republishing the Site. If a requested change alters generated content, design, page behavior or another Build artifact, it is not a Site Configuration change and must use the appropriate Revision Request or Site Generation path.
 
-_Avoid_: embedding mutable operational routing as authoritative state inside a Build Version.
+_Avoid_: using Site Configuration as a bypass for Build immutability or generated-content changes.
 
 ## Build
 
@@ -83,6 +83,14 @@ _Avoid_: using Build for an automated repair revision.
 A **Build Version** is an immutable candidate state within one Build, created only by the bounded automated generation/repair lifecycle. Human-requested creative or content changes do not create another Build Version; they start a new Build.
 
 _Avoid_: Revision, iteration when referring to the canonical automated candidate states.
+
+## Automated Repair
+
+An **Automated Repair** is a bounded machine-directed change made to bring a Build Version into compliance with the already-fixed Business inputs, Visual Blueprint and Implementation Contract.
+
+Automated Repair may change implementation details, CSS, content mapping, asset selection or other permitted realization details, and every material repair produces a new immutable Build Version. It must not introduce new human intent, alter Business Facts, replace the Reference, switch Build Mode or redefine the Visual Blueprint.
+
+_Avoid_: Revision Request, Blueprint rewrite, new creative direction, silent contract change.
 
 ## Build Record
 
@@ -102,13 +110,21 @@ _Avoid_: Build Record, Site.
 
 A **Preview** is the inspectable pre-publication Deployment of one exact Build Version used for automated QA and human review.
 
-A Preview may be replaced or deleted when superseded; Approval promotes that same Build Version toward publication rather than regenerating it.
+A Preview may be replaced or deleted when superseded; Approval authorizes that same Build Version for publication rather than regenerating it.
 
 _Avoid_: Published Version, a regenerated copy of an approved Build Version.
 
+## Publication
+
+**Publication** is the explicit operational act of making one exact approved Build Version the Site's active live version.
+
+Approval authorizes Publication but does not itself make the Build Version live. If Publication fails for operational reasons, Approval remains valid for that unchanged Build Version and Publication may be retried without new Approval; any change to the Build Version requires the normal release and Approval flow again.
+
+_Avoid_: Approval, regeneration during publish, treating failed publication as revoked Approval.
+
 ## Published Version
 
-A **Published Version** is the specific approved Build Version currently serving as the live Site.
+A **Published Version** is the specific approved Build Version currently serving as the live Site after successful Publication.
 
 Publishing a newer Build Version does not change the identity of the Site and must not regenerate the approved Build Version. When replaced, the immediately previous Published Version may become the temporary Rollback Version.
 
@@ -201,9 +217,17 @@ A **Visual Blueprint** is the binding design contract that translates the chosen
 
 For a REFERENCE_BOUND Build, it carries forward the Reference Analysis's identity-defining structural and signature traits while adapting branding, content, imagery and permitted implementation details to the Business. For an ORIGINAL_DESIGN Build, it is created directly from Business and creative inputs.
 
-Once generation begins, automated repair may correct implementation against the Visual Blueprint but must not silently redefine it. If the Visual Blueprint itself is wrong or impossible, human review or a new Build/Site Generation is required.
+Once generation begins, Automated Repair may correct implementation against the Visual Blueprint but must not silently redefine it. If the Visual Blueprint itself is wrong or impossible, the process must enter Blueprint Review Required or start a new Build/Site Generation as appropriate.
 
 _Avoid_: Implementation Plan, generated source, mutable repair target.
+
+## Blueprint Review Required
+
+**BLUEPRINT_REVIEW_REQUIRED** is the specific escalation signal that the current Visual Blueprint itself is materially wrong, contradictory, impossible within V2 capability or inconsistent with the governing design-origin contract.
+
+It blocks implementation-only Automated Repair because the defect cannot be corrected safely without human judgment about the Blueprint. BLUEPRINT_REVIEW_REQUIRED leads to HUMAN_REVIEW_REQUIRED and may result in a new Build or Site Generation depending on the human decision.
+
+_Avoid_: ordinary implementation defect, automatic Blueprint mutation, another repair iteration.
 
 ## Implementation Contract
 
@@ -259,23 +283,23 @@ _Avoid_: HUMAN_REVIEW_REQUIRED, minor polish issue.
 
 A Build Version is **Release Ready** only when that exact Build Version has passed all automated release gates and no Release Blocker remains.
 
-Release Ready is an automated quality state, not human Approval or publication. A Blueprint-level defect cannot be converted into Release Ready through implementation-only repair; it requires the explicit Blueprint-review path or a new Build/Site Generation.
+Release Ready is an automated quality state, not human Approval or Publication. A Blueprint-level defect cannot be converted into Release Ready through implementation-only repair; it requires the explicit Blueprint-review path or a new Build/Site Generation.
 
 _Avoid_: Approved, Published, or “good enough after repair” without re-evaluating the new Build Version.
 
 ## Approval
 
-**Approval** is the explicit human acceptance of one exact Release Ready Build Version for publication. Approval belongs only to that Build Version and never carries forward to another Build or superseded candidate.
+**Approval** is the explicit human acceptance of one exact Release Ready Build Version and authorization to publish that version. Approval belongs only to that Build Version and never carries forward to another Build or superseded candidate.
 
-A Revision Request after Approval creates a new Build that requires its own Approval before it can replace the Published Version.
+Approval and Publication are separate: an approved Build Version is not live until Publication succeeds. If Publication fails operationally, Approval remains valid for the unchanged Build Version and Publication may be retried. A Revision Request after Approval creates a new Build that requires its own Approval before it can replace the Published Version.
 
-_Avoid_: approving a Site generally or reusing Approval across Build Versions.
+_Avoid_: approving a Site generally, treating Approval as already live, or reusing Approval across Build Versions.
 
 ## Human Review Required
 
 **HUMAN_REVIEW_REQUIRED** is the escalation outcome when the bounded automated process cannot safely resolve the remaining Release Blocker, has exhausted its permitted repair path, or requires human judgment about the Visual Blueprint, Reference assumptions or another non-automatable decision.
 
-It is not a defect severity or a normal technical failure and must not trigger an unbounded automatic retry loop.
+It is not a defect severity or a normal technical failure and must not trigger an unbounded automatic retry loop. BLUEPRINT_REVIEW_REQUIRED is one specific reason the process may enter HUMAN_REVIEW_REQUIRED.
 
 _Avoid_: Release Blocker category, generic failure status, another retry instruction.
 
@@ -297,15 +321,19 @@ _Avoid_: Degraded when no useful result remains.
 
 ## Benchmark Site
 
-A **Benchmark Site** is one fixed reference-and-replacement-business test case in the REFERENCE_BOUND proof suite.
+A **Benchmark Site** is one fixed reference-and-replacement-business test case in the REFERENCE_BOUND proof suite. Its Reference Screenshot, frozen Reference Evidence and replacement Business inputs are fixed for comparable runs; the live Reference URL may be rechecked only to detect drift.
 
-A Benchmark Site counts as PASS only when the automated pipeline reaches the agreed release gates without manual source-code edits and within the agreed image-generation spend limit.
+A Benchmark Site must not be replaced merely because it is difficult or fails.
+
+_Avoid_: swapping a failed benchmark for an easier reference, silently refreshing the frozen target.
 
 ## Benchmark Pass
 
-A **Benchmark Pass** is a successful automated result for one Benchmark Site.
+A **Benchmark Pass** is achieved when one Benchmark Site reaches Release Ready through the automated pipeline without manual source-code edits and within the agreed image-generation spend limit.
 
-The REFERENCE_BOUND proof milestone is reached when at least 3 of the fixed 5 Benchmark Sites achieve Benchmark Pass.
+Human Approval and Publication are not required for Benchmark Pass because the benchmark measures automated generation/release quality rather than production authorization. The REFERENCE_BOUND proof milestone is reached when at least 3 of the fixed 5 Benchmark Sites achieve Benchmark Pass.
+
+_Avoid_: counting a manually corrected result, an approved-but-non-Release-Ready result, or a benchmark that exceeded the hard spend gate.
 
 ## Design Archetype
 
