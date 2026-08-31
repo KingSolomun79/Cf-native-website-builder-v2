@@ -6,17 +6,17 @@ It is intentionally implementation-free. Architecture, storage, provider and run
 
 ## Onboarding Submission
 
-An **Onboarding Submission** is the immutable input package submitted through the website-generation onboarding form and is the authoritative starting point for a new Site Generation.
+An **Onboarding Submission** is the immutable input package submitted through the website-generation onboarding form and is the authoritative starting point for one Site Generation.
 
-V2 has no Client Account or Client User concept.
+A Site may have multiple Onboarding Submissions over time when replacement Site Generations are started. V2 has no Client Account or Client User concept.
 
 _Avoid_: Client Account, Customer Account, User Profile.
 
 ## Site Generation
 
-A **Site Generation** is a fresh design-origin attempt to produce the same intended Site from an Onboarding Submission. Changing the Reference or switching Build Mode starts a new Site Generation for that Site rather than a Revision Request.
+A **Site Generation** is a fresh design-origin attempt to produce the same intended Site from one immutable Onboarding Submission. Changing the Reference or switching Build Mode starts a new Site Generation for that Site rather than a Revision Request, and that replacement Site Generation begins from a fresh Onboarding Submission.
 
-Only one Site Generation ultimately supplies the accepted/published Site; abandoned generations may be physically cleaned up while their lightweight Build Records remain.
+Each Site Generation is bound to exactly one Onboarding Submission. Only one Site Generation ultimately supplies the accepted/published Site; abandoned generations may be physically cleaned up while their lightweight Build Records remain.
 
 _Avoid_: a second Site, Revision when the design origin itself changes.
 
@@ -30,29 +30,29 @@ _Avoid_: treating a Revision Request as an automated Build Version or using it t
 
 ## Business
 
-A **Business** is the real business described by an Onboarding Submission and represented by the generated Site. Its factual identity is limited to what the Onboarding Submission supports.
+A **Business** is the real business represented by a Site and described by the Onboarding Submission bound to each Site Generation. Its factual identity for a given generation is limited to what that generation's Onboarding Submission supports.
 
 _Avoid_: Client, Account, Customer when referring to the business represented by the Site.
 
 ## Business Fact
 
-A **Business Fact** is a concrete claim about the Business that is directly supported by the Onboarding Submission. Missing facts must remain unknown rather than being invented.
+A **Business Fact** is a concrete claim about the Business that is directly supported by the Onboarding Submission governing the relevant Site Generation. Missing facts must remain unknown rather than being invented.
 
 Examples include prices, locations, certifications, awards, years of experience, service coverage and quantitative claims.
 
 ## Derived Content
 
-**Derived Content** is non-factual marketing language created from the Onboarding Submission, such as headlines, section labels, positioning language, summaries, SEO copy and image concepts.
+**Derived Content** is non-factual marketing language created from the governing Onboarding Submission, such as headlines, section labels, positioning language, summaries, SEO copy and image concepts.
 
 Derived Content may interpret or generalize safely, but it must never introduce unsupported Business Facts.
 
 ## Site
 
-A **Site** is the single intended customer-facing four-page website for one Business and Onboarding Submission. Multiple Site Generations may attempt to produce it, but they do not create multiple Sites.
+A **Site** is the stable identity of the single intended customer-facing four-page website for one Business. Multiple Site Generations, each potentially based on a different Onboarding Submission, may attempt to produce or replace that same Site without creating multiple Sites.
 
-A Site has one current Published Version at most and may have multiple Builds during generation and revision.
+A Site has one current Published Version at most. The Onboarding Submission belonging to the currently accepted Site Generation is authoritative for that generation; earlier submissions remain historical inputs to their own generations rather than defining the Site permanently.
 
-_Avoid_: Site Generation, Build, Build Version, Deployment.
+_Avoid_: Site Generation, Build, Build Version, Deployment, treating one Onboarding Submission as the permanent identity of the Site.
 
 ## Build
 
