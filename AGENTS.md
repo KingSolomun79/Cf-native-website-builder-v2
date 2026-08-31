@@ -1,94 +1,134 @@
-# Cloudflare Website Factory — Agent Guidelines
+# WAZIBIZ Website Builder V2 — Agent Guidelines
 
-## Project Overview
+This repository is a brownfield V2 fork. Existing V1 code may remain temporarily for infrastructure reuse, but V1 product semantics are not authoritative.
 
-A fully automated, Cloudflare-native pipeline that takes a Fluent Forms webhook from WordPress and produces a deployed, QA-reviewed, human-approved 4-page static website.
+## Mandatory reading order
 
-## Architecture
+Before coding, read:
 
-- **Orchestration**: Cloudflare Workflows (durable, retryable multi-step jobs)
-- **Agent State**: Durable Object (WebsiteAgent)
-- **Model Access**: AI Gateway BYOK with cross-provider fallback (all LLM calls through `callGatewayChat`)
-- **Database**: Single D1 database
-- **Object Storage**: Single R2 bucket, client/version-prefixed
-- **Email**: SMTP2Go (internal notifications + contact form delivery)
-- **QA**: Browser Run
-- **Preview Deploy**: Cloudflare REST API (3-step: assets upload → Worker create → URL retrieve)
-- **Production Deploy**: GitHub monorepo push → GitHub Actions → Wrangler → Cloudflare Workers
+1. `CONTEXT.md` — canonical domain language and semantics.
+2. `v2-docs/IMPLEMENTATION-PRD.md` — normative V2 implementation specification.
+3. `v2-docs/CAPABILITY-ENVELOPE.md` + `v2-docs/capability-envelope.json`.
+4. `v2-docs/FINAL-DECISION-RECORD.md`.
+5. `v2-docs/prompts/PROMPT-MANIFEST.md` and `v2-docs/prompts/00-domain-contract-v1.md`.
 
-## Deploy Pipeline
+If existing code, tests, migrations, root docs or retained prompt bodies conflict with those sources, treat the conflicting V1 behavior as migration work, not as V2 authority.
 
-```
-Approval received
-  → Collect site files from R2 (bundle + images)
-  → Push to GitHub monorepo (clients/{slug}/)
-    ├── dist/            (HTML, CSS, JS, sitemap, robots)
-    ├── worker.js        (contact form handler)
-    ├── wrangler.toml    (per-site config)
-    └── site-spec.json   (source spec)
-  → GitHub Actions triggers on push to clients/**
-    → Runs wrangler deploy per client
-    → Notifies factory via webhook on completion
-  → Factory records production_url, marks production_status: deployed
-  → Preview Worker deleted after 30 days
-```
+## Canonical V2 domain rules
 
-## Key Principles
+- No Client Account or Client User domain.
+- A Business has one stable Site identity.
+- Every new Site Generation begins from one fresh immutable Onboarding Submission.
+- Changing Reference or Build Mode starts a new Site Generation.
+- Human changes that preserve Reference/Build Mode use Revision Request -> new Build.
+- Business Fact changes use Fact Update; historical Onboarding Submissions remain immutable.
+- Human new intent creates a new Build.
+- Bounded Automated Repair creates a new immutable Build Version inside the same Build.
+- Automated Repair cannot change Business Facts, Reference, Build Mode or Visual Blueprint.
+- Blueprint-root defects emit `BLUEPRINT_REVIEW_REQUIRED` -> `HUMAN_REVIEW_REQUIRED`.
 
-1. The primary path writes structured JSON specs for deterministic rendering. The transitional reference-driven path may generate page-body HTML, which must pass deterministic safety and bundle validation before deployment.
-2. All LLM calls go through `src/lib/ai-gateway.ts` — never direct provider calls. Provider fallback chain: Zhipu GLM → OpenRouter (xiaomi/mimo-v2.5) → AI Gateway (GPT-4o).
-3. All generated assets are versioned immutably in R2 under `/{client_slug}/versions/v{n}/`.
-4. Secrets are Worker secrets set via `wrangler secret put` — never committed.
-5. If Fluent Forms supplies an inspiration URL, the webhook queues the workflow immediately; otherwise it places the job in `needs_input` and emails the developer to provide a reference URL or screenshot.
-6. The workflow proceeds only after a valid inspiration URL or uploaded screenshot is available, either from intake or the protected input form.
-7. The Vision AI strictly requires this developer-provided URL or screenshot; it must NEVER use a default fallback URL (to prevent wasted tokens).
-8. The accepted DesignBlueprint and InteractionBlueprint are the only active visual sources of truth. Legacy style selection and style-package fallbacks are prohibited.
+## Release lifecycle
 
-## Secrets
-
-Set via `wrangler secret put`:
-- `CF_AIG_TOKEN` — AI Gateway token
-- `CF_DEPLOY_API_TOKEN` — Cloudflare REST API token
-- `SMTP2GO_API_KEY` — SMTP2Go API key
-- `KIE_API_KEY` — Kie.ai API key
-- `WEBHOOK_SECRET` — Fluent Forms webhook signing secret
-- `APPROVAL_SECRET` — For signing approval/revision email tokens
-- `GITHUB_TOKEN` — GitHub personal access token (repo scope)
-- `GITHUB_WEBHOOK_SECRET` — Shared secret for verifying GitHub webhook callbacks
-- `GITHUB_REPO_OWNER` — GitHub org/user owning the sites monorepo
-- `GITHUB_REPO_NAME` — Sites monorepo name (e.g., `client-sites`)
-- `GITHUB_BRANCH` — Branch to push to (default: `main`)
-- `OPENROUTER_API_KEY` — OpenRouter API key (fallback + vision)
-- `ZHIPU_API_KEY` — Zhipu AI API key (primary LLM)
-
-### Configurable Vars (wrangler.jsonc)
-- `FALLBACK_MODEL` — OpenRouter model for text fallback (default: `xiaomi/mimo-v2.5`)
-- `ZHIPU_GATEWAY_PROVIDER` — AI Gateway custom-provider slug for Zhipu (default: `custom-zhipu`)
-- `ZHIPU_MODEL` — Zhipu model name (default: `glm-5-turbo`)
-- `VISION_MODEL` — OpenRouter vision model (default: `xiaomi/mimo-v2.5`)
-
-### GitHub Repo Secrets (set in GitHub repo Settings > Secrets)
-- `CF_DEPLOY_API_TOKEN` — Same Cloudflare API token used by factory
-- `CF_ACCOUNT_ID` — Cloudflare account ID
-- `GITHUB_WEBHOOK_SECRET` — Same shared secret as factory `GITHUB_WEBHOOK_SECRET`
-- `FACTORY_WEBHOOK_URL` — Factory Worker URL for deploy status callbacks
-
-## Status Transitions
-
-```
-queued → running → waiting_approval → approved → completed
-                              → rejected → rejected
-                              → revise_requested (≤3 times) → running → ...
-                              → timed_out → timed_out
-queued → running → failed_validation → failed_validation
-queued → running → needs_input → needs_input
-queued → running → failed → failed
+```text
+Build Version
+  -> Release Candidate
+  -> Release Ready
+  -> Approval
+  -> Publication
+  -> Published Version
 ```
 
-## Code Style
+Approval and Publication are separate. Publication deploys the exact approved Build Version without regeneration. Operational publication failure may be retried under the same Approval while that Build Version is unchanged.
 
-- No comments unless explicitly requested
-- Use Hono for routing
-- All env access through typed `Env` interface
-- All functions are pure where possible
-- Prefer `crypto.subtle` for HMAC operations
+Retain the immediately previous Published Version temporarily as Rollback Version. Rollback restores that exact version without a new Build/Approval and does not implicitly revert Site Configuration.
+
+## Generated Site contract
+
+- Exactly Home, About, Services, Contact for initial V2.
+- Static/framework-light semantic HTML + CSS + minimal JS.
+- Prefer shared `site.css` + `site.js`.
+- No universal WAZIBIZ layout template.
+- Reference-specific grids/overlaps/clipping/topology remain possible.
+- React/Tailwind/GSAP are not default generated-site dependencies.
+
+## REFERENCE_BOUND pipeline
+
+```text
+Onboarding Submission
+-> Business Fact normalization
+-> Reference Suitability
+-> Reference Evidence
+-> Reference Analysis
+-> Visual Blueprint
+-> Implementation Contract
+-> incremental Site generation
+-> Image Plan / Image Slots
+-> KIE waves
+-> assembly
+-> Technical Preflight
+-> Preview
+-> QA-A + QA-B
+-> bounded Automated Repair
+-> Release Ready OR HUMAN_REVIEW_REQUIRED
+-> Approval
+-> Publication
+```
+
+Reference Screenshot controls static composition. Reference URL supplements runtime/interaction/responsive evidence. Reference content/branding/assets/source are not copied as Business content.
+
+## Image rules
+
+- Normal target: 12 Accepted Images per completed Site.
+- Two waves: CRITICAL/HIGH homepage, then NORMAL/supporting.
+- Hard KIE image spend gate: USD 3.00/Site.
+- CSS crop/object-position, routing and remapping before regeneration where possible.
+- No temporary provider URL may ship.
+
+## QA and repair
+
+- QA-A: rendered visual/content quality + hard composition gates.
+- QA-B: browser/source/DOM/network/accessibility/SEO/form contract.
+- Release Ready requires zero P0/P1 Release Blocker and all mandatory gates.
+- One Fix Coordinator batch + at most one Release Blocker Fix.
+- Every material repair creates a new Build Version that must be re-evaluated.
+- Never create an unbounded retry/mutation loop.
+
+## Contact form and email
+
+V2 generated Sites use one central WAZIBIZ Form Service.
+
+Browser code never controls recipient, From sender, sender domain, template or credentials.
+
+- Form Destination and Sender Identity are mutable Site Configuration.
+- Default Sender Identity is a verified WAZIBIZ platform sender.
+- Visitor email may be validated Reply-To only.
+- A Form Submission becomes Accepted Submission when the platform validates and durably accepts responsibility.
+- Email Delivery happens downstream with bounded server-side retry.
+
+Any existing SMTP2Go/per-Site mail-worker implementation is V1 brownfield code unless explicitly retained by the V2 migration audit.
+
+## Prompt rules
+
+Do not invoke retained detailed prompt files directly by filename version. Runtime prompt IDs/versions come from `v2-docs/prompts/PROMPT-MANIFEST.md` and are composed as:
+
+```text
+00-domain-contract-v1.md
++
+retained full detailed stage body
+```
+
+The domain contract supersedes contradictory legacy clauses.
+
+## Brownfield implementation rule
+
+Audit before deleting infrastructure, but do not preserve obsolete V1 product architecture for compatibility. Classify modules as KEEP, KEEP+RENAME, EXTEND, REFACTOR, REPLACE or DELETE BEFORE V2 RELEASE.
+
+Final V2 release must remove superseded V1 generator paths, feature flags, prompt registry entries, dead schemas/types/tests/routes and production V1 invocation paths.
+
+## Engineering conventions
+
+- TypeScript/Hono/Cloudflare-native where existing infrastructure remains suitable.
+- Secrets only through Cloudflare bindings/secrets; never generated assets.
+- AI returns structured schema-validated outputs; application services perform idempotent writes.
+- Prefer deterministic extraction/validation for machine-measurable facts.
+- Persist Build-centric provenance, cost and error classification.
