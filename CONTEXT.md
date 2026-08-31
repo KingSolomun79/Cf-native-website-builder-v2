@@ -157,13 +157,13 @@ _Avoid_: raw measurements or invented observations presented as evidence.
 
 ## Visual Blueprint
 
-A **Visual Blueprint** is the binding design contract for a Build.
+A **Visual Blueprint** is the binding design contract that translates the chosen design origin into the intended Site for the Business.
 
-It defines the intended visual thesis, signature traits, composition, typography, spacing, surfaces, image system, motion language, responsive behavior and inner-page design vocabulary.
+For a REFERENCE_BOUND Build, it carries forward the Reference Analysis's identity-defining structural and signature traits while adapting branding, content, imagery and permitted implementation details to the Business. For an ORIGINAL_DESIGN Build, it is created directly from Business and creative inputs.
 
-For REFERENCE_BOUND Builds, it translates the Reference Analysis into a design contract for the new Business. For ORIGINAL_DESIGN Builds, it is created directly from Business and creative inputs.
+Once generation begins, automated repair may correct implementation against the Visual Blueprint but must not silently redefine it. If the Visual Blueprint itself is wrong or impossible, human review or a new Build/Site Generation is required.
 
-_Avoid_: Implementation Plan, generated source.
+_Avoid_: Implementation Plan, generated source, mutable repair target.
 
 ## Implementation Contract
 
