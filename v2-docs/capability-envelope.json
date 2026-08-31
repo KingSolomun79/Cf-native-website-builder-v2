@@ -1,0 +1,107 @@
+{
+  "version": "1.0.0",
+  "status": "FINAL",
+  "product": "WAZIBIZ Website Builder V2",
+  "modes": {
+    "implementation_order": ["REFERENCE_BOUND", "ORIGINAL_DESIGN"],
+    "reference_proof_required_before_original_design": true
+  },
+  "site_output": {
+    "pages": ["home", "about", "services", "contact"],
+    "arbitrary_page_count": false,
+    "cms": false,
+    "blog": false,
+    "architecture": "STATIC_FRAMEWORK_LIGHT",
+    "default_shared_files": ["site.css", "site.js"],
+    "large_frameworks_default_allowed": false
+  },
+  "reference": {
+    "static_composition_authority": "SUPPLIED_FULL_PAGE_SCREENSHOT",
+    "live_url_role": ["COMPUTED_STYLE", "RESPONSIVE_BEHAVIOR", "MOTION", "INTERACTION"],
+    "suitability_outcomes": ["SUPPORTED", "SUPPORTED_WITH_LIMITATIONS", "UNSUPPORTED"],
+    "measurement_allowed": true,
+    "wholesale_source_copying_allowed": false,
+    "target": "STRUCTURAL_VISUAL_REPRODUCTION"
+  },
+  "unsupported_primary_experiences": [
+    "WEBGL_THREEJS_PRIMARY",
+    "CANVAS_PRIMARY",
+    "PHYSICS_HEAVY_INTERACTION",
+    "COMPLEX_SCROLL_CHOREOGRAPHY",
+    "APPLICATION_GRADE_AUTHENTICATED_UI",
+    "RICH_PRODUCT_CONFIGURATOR",
+    "HUGE_ECOMMERCE_CATALOG",
+    "CMS_DEPENDENT_SITE"
+  ],
+  "motion": {
+    "supported": [
+      "HOVER_TRANSITIONS",
+      "FOCUS_STATES",
+      "SCROLL_REVEALS",
+      "STICKY_FIXED_BEHAVIOR",
+      "SIMPLE_PARALLAX",
+      "MODEST_SCROLL_LINKED_EFFECTS",
+      "LIGHTWEIGHT_CAROUSEL_SLIDER",
+      "MENU_TRANSITIONS"
+    ]
+  },
+  "images": {
+    "normal_accepted_target": 12,
+    "generation_waves": 2,
+    "hard_kie_budget_usd": 3.0,
+    "repair_reserve_percent_range": [20, 25],
+    "temporary_provider_urls_allowed_in_release": false,
+    "mobile_variant_policy": "ONLY_WHEN_SINGLE_MASTER_CANNOT_SATISFY_REQUIRED_COMPOSITION"
+  },
+  "qa": {
+    "qa_a_min_visual": 90,
+    "qa_a_min_content": 90,
+    "qa_b_min_technical": 90,
+    "p0_allowed": 0,
+    "p1_allowed": 0,
+    "hard_composition_gates_required": true,
+    "manual_source_edits_allowed_for_benchmark_pass": false
+  },
+  "automation": {
+    "main_fix_batches": 1,
+    "release_blocker_fix_batches": 1,
+    "unbounded_retry_allowed": false,
+    "human_approval_before_publish": true
+  },
+  "benchmark": {
+    "fixed_site_count": 5,
+    "minimum_automatic_passes_to_unlock_original_design": 3,
+    "failed_references_may_be_replaced": false,
+    "freeze_reference_evidence": true,
+    "use_replacement_business_briefs": true
+  },
+  "design": {
+    "industry_archetypes_are_authoritative": false,
+    "client_brand_overrides_reference_brand_identity": true,
+    "reference_logo_reuse_allowed": false,
+    "reference_photography_reuse_allowed": false,
+    "proprietary_font_copying_allowed": false,
+    "accessibility_may_override_reference_defects": true
+  },
+  "forms": {
+    "backend_required": true,
+    "architecture": "CENTRAL_MULTI_TENANT_WAZIBIZ_FORM_SERVICE",
+    "cloudflare_native_outbound_email": true,
+    "turnstile": true,
+    "rate_limiting": true,
+    "browser_controls_recipient": false,
+    "browser_controls_sender": false,
+    "visitor_email_role": "REPLY_TO",
+    "autoresponder_default": false,
+    "site_form_config_separate_from_immutable_build": true
+  },
+  "publishing": {
+    "immutable_build_version_required": true,
+    "human_approval_required": true
+  },
+  "repository_release": {
+    "v1_cleanup_required": true,
+    "permanent_v1_v2_feature_switch_allowed": false,
+    "production_v1_generation_route_allowed": false
+  }
+}
