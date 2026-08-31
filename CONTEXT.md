@@ -78,7 +78,7 @@ _Avoid_: Deployment, Build Version.
 
 ## Deployment
 
-A **Deployment** is a runnable instance of one exact Build Version. A Deployment may be a Preview or the Published Version; failed or superseded Deployments are disposable and should not be treated as permanent Build history.
+A **Deployment** is a runnable instance of one exact Build Version. A Deployment may be a Preview, Published Version or temporarily retained Rollback Version; failed or superseded Deployments that have no active rollback role are disposable and should not be treated as permanent Build history.
 
 _Avoid_: Build Record, Site.
 
@@ -94,7 +94,15 @@ _Avoid_: Published Version, a regenerated copy of an approved Build Version.
 
 A **Published Version** is the specific approved Build Version currently serving as the live Site.
 
-Publishing a newer Build Version does not change the identity of the Site and must not regenerate the approved Build Version.
+Publishing a newer Build Version does not change the identity of the Site and must not regenerate the approved Build Version. When replaced, the immediately previous Published Version may become the temporary Rollback Version.
+
+## Rollback Version
+
+A **Rollback Version** is the immediately previous Published Version retained temporarily so the Site can be restored to that exact approved Build Version without regeneration if the current Published Version has a production problem.
+
+A Rollback Version is not active publication and is retained only for the defined rollback window. Older superseded published Deployments may be removed once they no longer hold the rollback role; failed previews and never-published superseded Deployments do not receive rollback retention.
+
+_Avoid_: regenerated fallback, arbitrary historical Build Version, permanent archive of every published Deployment.
 
 ## Build Mode
 
