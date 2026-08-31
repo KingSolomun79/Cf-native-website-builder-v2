@@ -125,19 +125,25 @@ A URL-only Reference is valid only after a canonical Reference Screenshot and as
 
 ## Reference Suitability
 
-**Reference Suitability** describes whether a Reference falls within the design-reproduction capability of V2.
+**Reference Suitability** is the classification of whether V2 can reproduce the Reference within its supported design capability while preserving the Reference's core visual identity.
 
 Canonical outcomes:
 
-- **SUPPORTED** — the target can be reproduced within normal V2 capabilities.
-- **SUPPORTED_WITH_LIMITATIONS** — the target can be reproduced only with declared approximations.
-- **UNSUPPORTED** — the target depends materially on capabilities outside V2's supported design envelope.
+- **SUPPORTED** — the target can be reproduced within normal V2 capabilities without material approximation.
+- **SUPPORTED_WITH_LIMITATIONS** — the core visual identity can be preserved, but specific non-essential behaviors or effects require explicit approximations recorded in an Adaptation Contract.
+- **UNSUPPORTED** — one or more capabilities outside V2 are materially essential to the Reference's visual identity, so approximation would change the target rather than faithfully adapt it.
+
+_Avoid_: hiding an identity-defining unsupported feature inside a limitation.
 
 ## Adaptation Contract
 
-An **Adaptation Contract** is the explicit set of known approximations accepted for a SUPPORTED_WITH_LIMITATIONS Reference before generation begins.
+An **Adaptation Contract** is the explicit, concrete set of accepted approximations for a SUPPORTED_WITH_LIMITATIONS Reference, fixed before generation begins.
 
-QA evaluates the resulting Site against the Reference plus this declared contract, not against unsupported behavior that V2 already said it would not reproduce.
+Each adaptation must state what unsupported behavior is being replaced and the intended substitute outcome; vague instructions such as “simplify animation” are insufficient. QA evaluates the Build against the Reference plus this contract and must not treat an explicitly accepted difference as a defect.
+
+An Adaptation Contract cannot legalize removal of a capability that is essential to the Reference's visual identity; that case requires Reference Suitability to be UNSUPPORTED.
+
+_Avoid_: vague limitation note, post-hoc excuse for QA failure.
 
 ## Reference Evidence
 
