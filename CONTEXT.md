@@ -315,9 +315,27 @@ It must never select, constrain or determine a Visual Blueprint based solely on 
 
 ## Form Submission
 
-A **Form Submission** is a visitor's attempt to send the Site's contact form data to the Business.
+A **Form Submission** is one visitor-submitted contact message and its processing lifecycle. Client-side validation or a successful browser request alone does not make it accepted.
 
-A Form Submission is not successful merely because the browser accepted the click; it must be accepted by the platform's form-delivery process.
+A Form Submission becomes an Accepted Submission only after the platform has validated it and durably accepted responsibility for processing it.
+
+_Avoid_: equating button click or client-side success with platform acceptance.
+
+## Accepted Submission
+
+An **Accepted Submission** is a Form Submission that the platform has validated and durably accepted responsibility for processing.
+
+Once accepted, temporary downstream Email Delivery failure must not require the visitor to resubmit. The submission remains accepted while bounded delivery retry proceeds independently.
+
+_Avoid_: successful email delivery as a prerequisite for submission existence, visitor resubmission after transient delivery failure.
+
+## Email Delivery
+
+An **Email Delivery** is one outbound attempt to deliver an Accepted Submission to the current Form Destination.
+
+Temporary delivery failures may trigger bounded server-side retry without changing the Accepted Submission. A permanent delivery failure is recorded explicitly and surfaced operationally, but it does not erase or rewrite the Accepted Submission as though it never existed.
+
+_Avoid_: Form Submission, Accepted Submission, unbounded retry.
 
 ## Form Destination
 
