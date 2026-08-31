@@ -14,9 +14,11 @@ _Avoid_: Client Account, Customer Account, User Profile.
 
 ## Site Generation
 
-A **Site Generation** is a fresh design-origin process started from an Onboarding Submission. Changing the Reference or switching Build Mode starts a new Site Generation rather than a Revision Request.
+A **Site Generation** is a fresh design-origin attempt to produce the same intended Site from an Onboarding Submission. Changing the Reference or switching Build Mode starts a new Site Generation for that Site rather than a Revision Request.
 
-_Avoid_: Revision when the design origin itself changes.
+Only one Site Generation ultimately supplies the accepted/published Site; abandoned generations may be physically cleaned up while their lightweight Build Records remain.
+
+_Avoid_: a second Site, Revision when the design origin itself changes.
 
 ## Revision Request
 
@@ -46,11 +48,11 @@ Derived Content may interpret or generalize safely, but it must never introduce 
 
 ## Site
 
-A **Site** is the customer-facing four-page website produced by a Site Generation for one Business.
+A **Site** is the single intended customer-facing four-page website for one Business and Onboarding Submission. Multiple Site Generations may attempt to produce it, but they do not create multiple Sites.
 
 A Site has one current Published Version at most and may have multiple Builds during generation and revision.
 
-_Avoid_: Build, Build Version, Deployment.
+_Avoid_: Site Generation, Build, Build Version, Deployment.
 
 ## Build
 
@@ -93,13 +95,13 @@ There are exactly two V2 modes:
 - **REFERENCE_BOUND** — the Site's visual architecture is derived from an external Reference.
 - **ORIGINAL_DESIGN** — the Site's visual architecture is created from Business, audience, brand and creative direction without a Reference.
 
-Changing Build Mode starts a new Site Generation.
+Changing Build Mode starts a new Site Generation for the same Site.
 
 ## Reference
 
 A **Reference** is an external website and/or supplied visual evidence used only to define the target visual architecture for a REFERENCE_BOUND Site Generation.
 
-A Reference is a design source, not a source of Business Facts, copy, branding, trademarks or imagery. Replacing the Reference starts a new Site Generation.
+A Reference is a design source, not a source of Business Facts, copy, branding, trademarks or imagery. Replacing the Reference starts a new Site Generation for the same Site.
 
 ## Reference Suitability
 
