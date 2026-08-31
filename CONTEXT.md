@@ -1,0 +1,174 @@
+# WAZIBIZ Website Builder V2 — Domain Glossary
+
+This file defines the canonical domain vocabulary for Website Builder V2.
+
+It is intentionally implementation-free. Architecture, storage, provider and runtime decisions belong in the PRD and ADRs, not here.
+
+## Business
+
+A **Business** is the real local business whose website is being created. Its supplied facts are authoritative for identity, services, audience, location, contact details and other factual content.
+
+Do not use **Client** as a synonym for Business when referring to the organization represented by the generated website. A Client may later be the person or organization purchasing/managing the service; Business is the entity the website describes.
+
+## Site
+
+A **Site** is the customer-facing four-page website for one Business.
+
+A Site has one current published version at most, but may have multiple candidate Build Versions before or after publication.
+
+Do not use **Site** as a synonym for Build or Build Version.
+
+## Build
+
+A **Build** is one end-to-end attempt to create or revise a Site from a defined set of inputs.
+
+A Build may produce multiple Build Versions as bounded automated repair occurs.
+
+A Build is not considered released merely because generation completed.
+
+## Build Version
+
+A **Build Version** is an immutable candidate state of a Build.
+
+Examples include the initial generated candidate, a candidate after the main coordinated repair, and a candidate after the optional release-blocker repair.
+
+A Build Version may be previewed, evaluated, approved or rejected without changing earlier Build Versions.
+
+## Published Version
+
+A **Published Version** is the specific approved Build Version currently serving as the live Site.
+
+Publishing a newer Build Version does not change the identity of the Site.
+
+## Build Mode
+
+A **Build Mode** is the design-origin strategy used for a Build.
+
+There are exactly two V2 modes:
+
+- **REFERENCE_BOUND** — the Site's visual architecture is derived from an external Reference.
+- **ORIGINAL_DESIGN** — the Site's visual architecture is created from the Business, audience, brand and creative direction without a Reference.
+
+## Reference
+
+A **Reference** is an external website and/or supplied visual evidence used only to define the target visual architecture for a REFERENCE_BOUND Build.
+
+A Reference is a design source, not a source of Business facts, copy, branding, trademarks or imagery.
+
+## Reference Suitability
+
+**Reference Suitability** describes whether a Reference falls within the design-reproduction capability of V2.
+
+Canonical outcomes:
+
+- **SUPPORTED** — the target can be reproduced within normal V2 capabilities.
+- **SUPPORTED_WITH_LIMITATIONS** — the target can be reproduced only with declared approximations.
+- **UNSUPPORTED** — the target depends materially on capabilities outside V2's supported design envelope.
+
+## Adaptation Contract
+
+An **Adaptation Contract** is the explicit set of known approximations accepted for a SUPPORTED_WITH_LIMITATIONS Reference before generation begins.
+
+QA evaluates the resulting Site against the Reference plus this declared contract, not against unsupported behavior that V2 already said it would not reproduce.
+
+## Reference Evidence
+
+**Reference Evidence** is the observed visual and behavioral evidence collected from a Reference before interpretation.
+
+It may contain measurements, captures and observations, but it does not decide what the generated Site should do.
+
+## Reference Analysis
+
+A **Reference Analysis** is the structured interpretation of Reference Evidence that explains what makes the Reference visually and behaviorally distinctive.
+
+It describes the Reference; it does not yet specify the new Site.
+
+## Visual Blueprint
+
+A **Visual Blueprint** is the binding design contract for a Build.
+
+It defines the intended visual thesis, signature traits, composition, typography, spacing, surfaces, image system, motion language, responsive behavior and inner-page design vocabulary.
+
+For REFERENCE_BOUND Builds, it translates the Reference Analysis into a design contract for the new Business.
+
+For ORIGINAL_DESIGN Builds, it is created directly from Business and creative inputs.
+
+Do not use **Blueprint** to mean implementation plan or generated source.
+
+## Implementation Contract
+
+An **Implementation Contract** is the agreed mapping from a Visual Blueprint and Business content into a coherent Site implementation plan.
+
+It determines how the committed design and content are expressed across the four pages without changing the Visual Blueprint itself.
+
+## Image Slot
+
+An **Image Slot** is one planned visual role within a Site.
+
+Each Image Slot has a semantic purpose and compositional role. A generated image is successful only if it fulfills that role, not merely because it is visually attractive.
+
+## Accepted Image
+
+An **Accepted Image** is the image currently selected to fulfill an Image Slot for a specific Build Version.
+
+A later repair may produce a new image attempt without changing the identity or purpose of the Image Slot.
+
+## Release Candidate
+
+A **Release Candidate** is a Build Version that has completed generation and required preflight checks and is undergoing or has completed release QA.
+
+A Release Candidate is not yet approved for publication.
+
+## Release Blocker
+
+A **Release Blocker** is a P0 or P1 defect that prevents a Release Candidate from being considered release-ready.
+
+Minor imperfections and optional polish are not Release Blockers.
+
+## Release Ready
+
+A Build Version is **Release Ready** when all automated release gates have passed and no Release Blocker remains.
+
+Release Ready does not mean Published; human approval is still required.
+
+## Human Review Required
+
+**HUMAN_REVIEW_REQUIRED** means the bounded automated process cannot safely resolve the remaining release issue without human judgment or intervention.
+
+It is not equivalent to a normal technical failure and must not trigger an unbounded automatic retry loop.
+
+## Degraded
+
+A **Degraded** Build is one that completed enough processing to produce a usable preview or partial result, but did not satisfy the normal completion/release contract.
+
+Degradation must always be explicit; it is never a silent success state.
+
+## Benchmark Site
+
+A **Benchmark Site** is one fixed reference-and-replacement-business test case in the REFERENCE_BOUND proof suite.
+
+A Benchmark Site counts as PASS only when the automated pipeline reaches the agreed release gates without manual source-code edits and within the agreed image-generation spend limit.
+
+## Benchmark Pass
+
+A **Benchmark Pass** is a successful automated result for one Benchmark Site.
+
+The REFERENCE_BOUND proof milestone is reached when at least 3 of the fixed 5 Benchmark Sites achieve Benchmark Pass.
+
+## Design Archetype
+
+A **Design Archetype** is non-binding inspiration vocabulary only.
+
+It must never select, constrain or determine a Visual Blueprint based solely on industry/category.
+
+## Form Submission
+
+A **Form Submission** is a visitor's attempt to send the Site's contact form data to the Business.
+
+A Form Submission is not successful merely because the browser accepted the click; it must be accepted by the platform's form-delivery process.
+
+## Form Destination
+
+A **Form Destination** is the Business-approved recipient for contact messages from a Site.
+
+The visitor cannot choose or override the Form Destination.
