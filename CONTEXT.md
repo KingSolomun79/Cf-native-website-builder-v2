@@ -24,27 +24,35 @@ _Avoid_: a second Site, Revision when the design origin itself changes.
 
 A **Revision Request** is a human-requested change to an existing Site that preserves its Build Mode and Reference. It contains only the requested delta and starts a new Build derived from the previous Build's approved inputs.
 
-A Revision Request does not require a new Onboarding Submission.
+A Revision Request may update Business Facts, Derived Content or implementation details without requiring a new Onboarding Submission. Changing the Reference or Build Mode is not a Revision Request.
 
 _Avoid_: treating a Revision Request as an automated Build Version or using it to replace the Reference/Build Mode.
 
+## Fact Update
+
+A **Fact Update** is an explicit human-provided change to one or more Business Facts carried by a Revision Request into a new Build while the governing Onboarding Submission remains immutable.
+
+A Fact Update supersedes the affected fact for that Build and later Builds derived from it unless changed again, but it does not rewrite the historical Onboarding Submission or the facts that governed earlier Builds.
+
+_Avoid_: mutating an Onboarding Submission, silently changing historical Business Facts.
+
 ## Business
 
-A **Business** is the stable real-world entity represented by a Site across Site Generations. Its facts may change over time; V2 evaluates each Site Generation against the immutable Onboarding Submission that governed that generation rather than treating one submission as a timeless Business profile.
+A **Business** is the stable real-world entity represented by a Site across Site Generations. Its facts may change over time; V2 evaluates each Site Generation against the immutable Onboarding Submission that governed that generation together with any explicit Fact Updates applied through later Revision Requests.
 
 _Avoid_: Client, Account, Customer when referring to the business represented by the Site; treating one submission as the permanent Business record.
 
 ## Business Fact
 
-A **Business Fact** is a concrete claim about the Business that is directly supported by the Onboarding Submission governing the relevant Site Generation. Its validity is scoped to that submission unless another authoritative source is explicitly introduced.
+A **Business Fact** is a concrete claim about the Business that is directly supported by the governing Onboarding Submission or by an explicit Fact Update applied through a later Revision Request. Its validity is scoped to the Build inputs that govern the relevant Build.
 
-Later Onboarding Submissions may supersede earlier facts for new Site Generations without rewriting historical Builds or Build Records. Missing facts must remain unknown rather than being invented.
+Later Onboarding Submissions or Fact Updates may supersede earlier facts for future Builds without rewriting historical Builds or Build Records. Missing facts must remain unknown rather than being invented.
 
 Examples include prices, locations, certifications, awards, years of experience, service coverage and quantitative claims.
 
 ## Derived Content
 
-**Derived Content** is non-factual marketing language created from the governing Onboarding Submission, such as headlines, section labels, positioning language, summaries, SEO copy and image concepts.
+**Derived Content** is non-factual marketing language created from the governing Onboarding Submission and any applicable Revision Request, such as headlines, section labels, positioning language, summaries, SEO copy and image concepts.
 
 Derived Content may interpret or generalize safely, but it must never introduce unsupported Business Facts.
 
