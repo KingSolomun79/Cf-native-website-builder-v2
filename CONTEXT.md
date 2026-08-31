@@ -1,390 +1,152 @@
-# WAZIBIZ Website Builder V2 — Domain Glossary
+# WAZIBIZ Website Builder V2
 
-This file defines the canonical domain vocabulary for Website Builder V2.
+Canonical implementation-free domain language for Website Builder V2. Architecture, storage, providers, schemas and runtime mechanics belong in the implementation specification or ADRs; this file defines what domain terms mean.
 
-It is intentionally implementation-free. Architecture, storage, provider and runtime decisions belong in the PRD and ADRs, not here.
+## Language
 
-## Onboarding Submission
-
-An **Onboarding Submission** is the immutable input package and fact snapshot submitted through the website-generation onboarding form for one Site Generation. It records what is known or declared about the Business for that generation and is never rewritten when later facts change.
-
-A Site may have multiple Onboarding Submissions over time when replacement Site Generations are started. Later submissions may supersede earlier facts for future generations without changing the historical inputs that governed earlier Builds. V2 has no Client Account or Client User concept.
-
+**Onboarding Submission**: The immutable input package and Business fact snapshot submitted through the onboarding form for one Site Generation. A Site can have later submissions for replacement Site Generations, but an existing submission is never rewritten.
 _Avoid_: Client Account, Customer Account, User Profile, mutable Business profile.
 
-## Site Generation
+**Site Generation**: A fresh design-origin attempt to produce the same intended Site from exactly one immutable Onboarding Submission. Replacing the Reference or changing Build Mode starts a new Site Generation and fresh Onboarding Submission, not a Revision Request.
+_Avoid_: second Site, Revision when design origin changes.
 
-A **Site Generation** is a fresh design-origin attempt to produce the same intended Site from one immutable Onboarding Submission. Changing the Reference or switching Build Mode starts a new Site Generation for that Site rather than a Revision Request, and that replacement Site Generation begins from a fresh Onboarding Submission.
+**Revision Request**: A human-requested delta to an existing Site that preserves its Reference and Build Mode and starts a new Build derived from prior approved inputs. It may change Business Facts, Derived Content or generated implementation, but not the design origin.
+_Avoid_: Automated Repair, Build Version, Reference replacement.
 
-Each Site Generation is bound to exactly one Onboarding Submission. Only one Site Generation ultimately supplies the accepted/published Site; abandoned generations may be physically cleaned up while their lightweight Build Records remain.
+**Fact Update**: An explicit human-provided Business Fact change carried by a Revision Request into a new Build. It supersedes that fact for the new Build lineage without mutating the historical Onboarding Submission or earlier Builds.
+_Avoid_: editing historical intake, silent fact mutation.
 
-_Avoid_: a second Site, Revision when the design origin itself changes.
+**Business**: The stable real-world entity represented by a Site across Site Generations. Each Build evaluates the Business through the governing Onboarding Submission plus any applicable Fact Updates rather than through a persistent client account.
+_Avoid_: Client Account, Customer Account, User Profile.
 
-## Revision Request
+**Business Fact**: A concrete claim supported by the Build's governing Onboarding Submission or explicit Fact Update. Unsupported factual claims remain unknown rather than being invented.
+_Avoid_: inferred price, certification, award, location, service coverage or quantitative claim.
 
-A **Revision Request** is a human-requested change to an existing Site that preserves its Build Mode and Reference. It contains only the requested delta and starts a new Build derived from the previous Build's approved inputs.
+**Derived Content**: Non-factual marketing language created from supported Business inputs, such as headlines, summaries, positioning, SEO copy and image concepts. It may interpret safely but cannot introduce unsupported Business Facts.
+_Avoid_: fabricated fact presented as marketing copy.
 
-A Revision Request may update Business Facts, Derived Content or implementation details without requiring a new Onboarding Submission. Changing the Reference or Build Mode is not a Revision Request.
+**Site**: The stable identity of one intended customer-facing four-page website for one Business. Multiple Site Generations and Builds may attempt to produce or replace it, while at most one Published Version is active.
+_Avoid_: Site Generation, Build, Build Version, Deployment.
 
-_Avoid_: treating a Revision Request as an automated Build Version or using it to replace the Reference/Build Mode.
+**Site Configuration**: Mutable operational state for a Site whose effect can be applied without changing generated Build artifacts, such as Form Destination and Sender Identity. A change that alters generated content, design or page behavior is not Site Configuration.
+_Avoid_: Build-immutability bypass, generated-content setting.
 
-## Fact Update
+**Build**: One end-to-end attempt to create or revise a Site from one fixed approved set of Business, content and design inputs. New human intent starts a new Build.
+_Avoid_: automated repair iteration.
 
-A **Fact Update** is an explicit human-provided change to one or more Business Facts carried by a Revision Request into a new Build while the governing Onboarding Submission remains immutable.
+**Build Version**: An immutable candidate state within one Build, created by the bounded automated generation or repair lifecycle. Human-requested changes start a new Build rather than another Build Version.
+_Avoid_: Revision Request, human creative iteration.
 
-A Fact Update supersedes the affected fact for that Build and later Builds derived from it unless changed again, but it does not rewrite the historical Onboarding Submission or the facts that governed earlier Builds.
+**Automated Repair**: A bounded machine-directed change that brings a Build Version into compliance with already-fixed Business inputs, Visual Blueprint and Implementation Contract. A material repair creates a new Build Version and cannot change Business Facts, Reference, Build Mode or Visual Blueprint.
+_Avoid_: Revision Request, Blueprint rewrite, new creative direction.
 
-_Avoid_: mutating an Onboarding Submission, silently changing historical Business Facts.
-
-## Business
-
-A **Business** is the stable real-world entity represented by a Site across Site Generations. Its facts may change over time; V2 evaluates each Site Generation against the immutable Onboarding Submission that governed that generation together with any explicit Fact Updates applied through later Revision Requests.
-
-_Avoid_: Client, Account, Customer when referring to the business represented by the Site; treating one submission as the permanent Business record.
-
-## Business Fact
-
-A **Business Fact** is a concrete claim about the Business that is directly supported by the governing Onboarding Submission or by an explicit Fact Update applied through a later Revision Request. Its validity is scoped to the Build inputs that govern the relevant Build.
-
-Later Onboarding Submissions or Fact Updates may supersede earlier facts for future Builds without rewriting historical Builds or Build Records. Missing facts must remain unknown rather than being invented.
-
-Examples include prices, locations, certifications, awards, years of experience, service coverage and quantitative claims.
-
-## Derived Content
-
-**Derived Content** is non-factual marketing language created from the governing Onboarding Submission and any applicable Revision Request, such as headlines, section labels, positioning language, summaries, SEO copy and image concepts.
-
-Derived Content may interpret or generalize safely, but it must never introduce unsupported Business Facts.
-
-## Site
-
-A **Site** is the stable identity of the single intended customer-facing four-page website for one Business. Multiple Site Generations, each potentially based on a different Onboarding Submission, may attempt to produce or replace that same Site without creating multiple Sites.
-
-A Site has one current Published Version at most. The Onboarding Submission belonging to the currently accepted Site Generation is authoritative for that generation; earlier submissions remain historical inputs to their own generations rather than defining the Site permanently.
-
-_Avoid_: Site Generation, Build, Build Version, Deployment, treating one Onboarding Submission as the permanent identity of the Site.
-
-## Site Configuration
-
-**Site Configuration** is mutable operational state that belongs to the Site but is not part of an immutable Build Version. It contains only settings whose effect can be applied at runtime without changing the generated website, such as the current Form Destination and Sender Identity.
-
-Changing Site Configuration does not create a Build, Revision Request or Site Generation and does not require rebuilding or republishing the Site. If a requested change alters generated content, design, page behavior or another Build artifact, it is not a Site Configuration change and must use the appropriate Revision Request or Site Generation path.
-
-_Avoid_: using Site Configuration as a bypass for Build immutability or generated-content changes.
-
-## Build
-
-A **Build** is one end-to-end attempt to create or revise a Site from one fixed approved set of business, content and design inputs. A new human-requested content or creative change starts a new Build, even when derived from a previous Build.
-
-_Avoid_: using Build for an automated repair revision.
-
-## Build Version
-
-A **Build Version** is an immutable candidate state within one Build, created only by the bounded automated generation/repair lifecycle. Human-requested creative or content changes do not create another Build Version; they start a new Build.
-
-_Avoid_: Revision, iteration when referring to the canonical automated candidate states.
-
-## Automated Repair
-
-An **Automated Repair** is a bounded machine-directed change made to bring a Build Version into compliance with the already-fixed Business inputs, Visual Blueprint and Implementation Contract.
-
-Automated Repair may change implementation details, CSS, content mapping, asset selection or other permitted realization details, and every material repair produces a new immutable Build Version. It must not introduce new human intent, alter Business Facts, replace the Reference, switch Build Mode or redefine the Visual Blueprint.
-
-_Avoid_: Revision Request, Blueprint rewrite, new creative direction, silent contract change.
-
-## Build Record
-
-A **Build Record** is the compact retained history of a Build's outcome and diagnostic facts, including pass/fail state, QA outcome, failure cause and relevant cost/version provenance.
-
-A Build Record may remain after superseded or failed generated artifacts and Deployments are removed.
-
+**Build Record**: The compact retained diagnostic history of a Build, including outcome, QA, failure cause, cost and relevant prompt/model/schema provenance. It may remain after disposable artifacts and Deployments are removed.
 _Avoid_: Deployment, Build Version.
 
-## Deployment
-
-A **Deployment** is a runnable instance of one exact Build Version. A Deployment may be a Preview, Published Version or temporarily retained Rollback Version; failed or superseded Deployments that have no active rollback role are disposable and should not be treated as permanent Build history.
-
+**Deployment**: A runnable instance of one exact Build Version. It can serve as a Preview, Published Version or temporarily retained Rollback Version; deployments with no active role are disposable.
 _Avoid_: Build Record, Site.
 
-## Preview
+**Preview**: The inspectable pre-publication Deployment of one exact Build Version used for automated QA and human review. Approval and Publication operate on that same immutable Build Version rather than regenerating it.
+_Avoid_: Published Version, regenerated approval copy.
 
-A **Preview** is the inspectable pre-publication Deployment of one exact Build Version used for automated QA and human review.
+**Publication**: The explicit operational act of making one exact approved Build Version the live Site. Approval authorizes Publication but is distinct from it; an operational publication failure can be retried for the unchanged approved Build Version.
+_Avoid_: Approval, regeneration during publish.
 
-A Preview may be replaced or deleted when superseded; Approval authorizes that same Build Version for publication rather than regenerating it.
+**Published Version**: The exact approved Build Version currently serving as the live Site after successful Publication. Replacing it does not change Site identity.
+_Avoid_: latest mutable Build, Preview.
 
-_Avoid_: Published Version, a regenerated copy of an approved Build Version.
+**Rollback Version**: The immediately previous Published Version retained temporarily so the Site can be restored without regeneration. It is not active publication and exists only for the defined rollback window.
+_Avoid_: arbitrary historical version, permanent archive.
 
-## Publication
+**Rollback**: The operational restoration of the Rollback Version as the active Published Version without a new Build, Build Version, Approval or regeneration. Publication history is preserved and mutable Site Configuration does not roll back unless explicitly requested.
+_Avoid_: new release, history rewrite.
 
-**Publication** is the explicit operational act of making one exact approved Build Version the Site's active live version.
+**Build Mode**: The design-origin strategy for a Site Generation: `REFERENCE_BOUND` or `ORIGINAL_DESIGN`. Changing mode starts a new Site Generation.
+_Avoid_: style preset, industry archetype.
 
-Approval authorizes Publication but does not itself make the Build Version live. If Publication fails for operational reasons, Approval remains valid for that unchanged Build Version and Publication may be retried without new Approval; any change to the Build Version requires the normal release and Approval flow again.
+**Reference**: The external design source for a `REFERENCE_BOUND` Site Generation, consisting of a Reference Screenshot, Reference URL or both. It is a design source only and never a source of Business Facts, copied branding, trademarks, imagery or copy.
+_Avoid_: content source, brand source.
 
-_Avoid_: Approval, regeneration during publish, treating failed publication as revoked Approval.
+**Reference Screenshot**: The frozen visual evidence authoritative for static composition, geometry, hierarchy, section order, proportions, image placement and whitespace. It may be user supplied or canonically captured from the Reference URL.
+_Avoid_: live behavioral evidence.
 
-## Published Version
+**Reference URL**: The live address that supplements the Reference Screenshot with behavioral and runtime evidence such as fonts, hover, motion, sticky behavior and responsive transformations. URL-only input becomes valid only after canonical screenshot/evidence capture.
+_Avoid_: static-composition authority when it conflicts with the frozen screenshot.
 
-A **Published Version** is the specific approved Build Version currently serving as the live Site after successful Publication.
+**Reference Suitability**: The pre-generation classification of whether V2 can preserve the Reference's core visual identity: `SUPPORTED`, `SUPPORTED_WITH_LIMITATIONS`, or `UNSUPPORTED`. Identity-defining unsupported behavior cannot be hidden as a limitation.
+_Avoid_: post-hoc suitability excuse.
 
-Publishing a newer Build Version does not change the identity of the Site and must not regenerate the approved Build Version. When replaced, the immediately previous Published Version may become the temporary Rollback Version.
+**Adaptation Contract**: The concrete set of accepted approximations fixed before generation for a `SUPPORTED_WITH_LIMITATIONS` Reference. QA treats these declared differences as intentional, but the contract cannot legalize removal of identity-defining features.
+_Avoid_: vague limitation, post-hoc QA exemption.
 
-## Rollback Version
+**Reference Evidence**: The descriptive record of observed or measured Reference facts, captures and behaviors before interpretation. It records what exists without inferring importance or design intent and is never rewritten to fit later analysis.
+_Avoid_: inferred intent presented as evidence.
 
-A **Rollback Version** is the immediately previous Published Version retained temporarily so the Site can be restored to that exact approved Build Version without regeneration if the current Published Version has a production problem.
+**Reference Analysis**: The structured interpretation of Reference Evidence that identifies hierarchy, relationships, signature traits, likely design intent and identity-defining characteristics. It may interpret Evidence but cannot overwrite or fabricate it.
+_Avoid_: raw measurement, invented observation.
 
-A Rollback Version is not active publication and is retained only for the defined rollback window. Older superseded published Deployments may be removed once they no longer hold the rollback role; failed previews and never-published superseded Deployments do not receive rollback retention.
+**Visual Blueprint**: The binding design contract translating the chosen design origin into the intended Site for the Business. Automated Repair may correct implementation against it but cannot silently redefine it.
+_Avoid_: Implementation Contract, generated source, mutable repair target.
 
-_Avoid_: regenerated fallback, arbitrary historical Build Version, permanent archive of every published Deployment.
+**Blueprint Review Required**: `BLUEPRINT_REVIEW_REQUIRED` is the specific escalation signal that the Visual Blueprint itself is materially wrong, contradictory, impossible or inconsistent with the design-origin contract. It leads to human review rather than implementation-only repair.
+_Avoid_: normal implementation defect, automatic Blueprint mutation.
 
-## Rollback
+**Implementation Contract**: The binding realization plan for expressing the Visual Blueprint and Business content across the four pages. It may choose technical structure and responsive realization but cannot change topology, signature traits, first viewport, image roles or visual thesis.
+_Avoid_: alternate design direction, Blueprint rewrite.
 
-A **Rollback** is the operational restoration of the Rollback Version as the Site's active Published Version. It reactivates that exact previously approved Build Version without creating a new Build, Build Version or Approval and without regenerating source.
+**Image Slot**: A stable visual requirement inside a Build, defined by semantic purpose and compositional role before image generation. Crop, remapping or another generated candidate does not create a new slot; changing the role does.
+_Avoid_: generated image candidate, arbitrary placeholder.
 
-Rollback changes current publication state but never rewrites history: the replaced version remains recorded as a Build Version that was previously approved and published. Mutable Site Configuration does not roll back with the Build Version unless explicitly requested.
-
-_Avoid_: new Build, new Approval, regeneration, erasing prior publication history.
-
-## Build Mode
-
-A **Build Mode** is the design-origin strategy used for a Site Generation.
-
-There are exactly two V2 modes:
-
-- **REFERENCE_BOUND** — the Site's visual architecture is derived from an external Reference.
-- **ORIGINAL_DESIGN** — the Site's visual architecture is created from Business, audience, brand and creative direction without a Reference.
-
-Changing Build Mode starts a new Site Generation for the same Site.
-
-## Reference
-
-A **Reference** is the external design source used to define the target visual architecture for a REFERENCE_BOUND Site Generation. It may contain a Reference Screenshot, a Reference URL, or both.
-
-A Reference is a design source, not a source of Business Facts, copy, branding, trademarks or imagery. Replacing the Reference starts a new Site Generation for the same Site.
-
-## Reference Screenshot
-
-A **Reference Screenshot** is the frozen visual representation of a Reference and is authoritative for static composition, geometry, hierarchy, section order, proportions, image placement and whitespace.
-
-A user-supplied full-page screenshot or a canonical screenshot captured from a Reference URL may serve this role.
-
-## Reference URL
-
-A **Reference URL** is the live website address that supplements a Reference Screenshot with behavioral and runtime evidence such as hover, motion, sticky behavior, typography and responsive transformations.
-
-A URL-only Reference is valid only after a canonical Reference Screenshot and associated evidence have been captured and frozen for that Site Generation.
-
-## Reference Suitability
-
-**Reference Suitability** is the classification of whether V2 can reproduce the Reference within its supported design capability while preserving the Reference's core visual identity.
-
-Canonical outcomes:
-
-- **SUPPORTED** — the target can be reproduced within normal V2 capabilities without material approximation.
-- **SUPPORTED_WITH_LIMITATIONS** — the core visual identity can be preserved, but specific non-essential behaviors or effects require explicit approximations recorded in an Adaptation Contract.
-- **UNSUPPORTED** — one or more capabilities outside V2 are materially essential to the Reference's visual identity, so approximation would change the target rather than faithfully adapt it.
-
-_Avoid_: hiding an identity-defining unsupported feature inside a limitation.
-
-## Adaptation Contract
-
-An **Adaptation Contract** is the explicit, concrete set of accepted approximations for a SUPPORTED_WITH_LIMITATIONS Reference, fixed before generation begins.
-
-Each adaptation must state what unsupported behavior is being replaced and the intended substitute outcome; vague instructions such as “simplify animation” are insufficient. QA evaluates the Build against the Reference plus this contract and must not treat an explicitly accepted difference as a defect.
-
-An Adaptation Contract cannot legalize removal of a capability that is essential to the Reference's visual identity; that case requires Reference Suitability to be UNSUPPORTED.
-
-_Avoid_: vague limitation note, post-hoc excuse for QA failure.
-
-## Reference Evidence
-
-**Reference Evidence** is the descriptive record of observable or measurable facts, captures and behaviors collected from a Reference before interpretation. It records what is present without deciding why it matters or what the generated Site should do.
-
-Reference Evidence is never rewritten to match a later interpretation.
-
-_Avoid_: inferred importance, design intent, signature-trait judgments.
-
-## Reference Analysis
-
-A **Reference Analysis** is the structured interpretation of Reference Evidence that identifies hierarchy, relationships, signature traits, likely design intent and which observed characteristics carry the Reference's visual identity.
-
-It may rank or contextualize Evidence, but it must not overwrite, contradict or fabricate Reference Evidence.
-
-_Avoid_: raw measurements or invented observations presented as evidence.
-
-## Visual Blueprint
-
-A **Visual Blueprint** is the binding design contract that translates the chosen design origin into the intended Site for the Business.
-
-For a REFERENCE_BOUND Build, it carries forward the Reference Analysis's identity-defining structural and signature traits while adapting branding, content, imagery and permitted implementation details to the Business. For an ORIGINAL_DESIGN Build, it is created directly from Business and creative inputs.
-
-Once generation begins, Automated Repair may correct implementation against the Visual Blueprint but must not silently redefine it. If the Visual Blueprint itself is wrong or impossible, the process must enter Blueprint Review Required or start a new Build/Site Generation as appropriate.
-
-_Avoid_: Implementation Plan, generated source, mutable repair target.
-
-## Blueprint Review Required
-
-**BLUEPRINT_REVIEW_REQUIRED** is the specific escalation signal that the current Visual Blueprint itself is materially wrong, contradictory, impossible within V2 capability or inconsistent with the governing design-origin contract.
-
-It blocks implementation-only Automated Repair because the defect cannot be corrected safely without human judgment about the Blueprint. BLUEPRINT_REVIEW_REQUIRED leads to HUMAN_REVIEW_REQUIRED and may result in a new Build or Site Generation depending on the human decision.
-
-_Avoid_: ordinary implementation defect, automatic Blueprint mutation, another repair iteration.
-
-## Implementation Contract
-
-An **Implementation Contract** is the binding realization plan for expressing a Visual Blueprint and the Business content across the four pages of the Site.
-
-It may choose page structure, content allocation, component boundaries, responsive realization, image-slot mapping and other implementation-facing details, but it must not change the Visual Blueprint's topology, signature traits, first-viewport composition, image roles or visual thesis.
-
-If the Visual Blueprint cannot be realized within V2 capability, the Implementation Contract must surface an explicit blocker rather than silently simplify or reinterpret the design.
-
-_Avoid_: alternate design direction, Blueprint rewrite, silent simplification.
-
-## Image Slot
-
-An **Image Slot** is a stable visual requirement within a Build, defined by its semantic purpose and compositional role before image generation begins.
-
-Cropping, object-position changes, remapping or generating another candidate do not create a new Image Slot. If the semantic or compositional role itself changes, that change belongs in a new Build/Blueprint path rather than silently repurposing the existing slot.
-
-_Avoid_: generated image candidate, arbitrary asset placeholder.
-
-## Image Attempt
-
-An **Image Attempt** is one generated candidate created to satisfy a specific Image Slot.
-
-Multiple Image Attempts may exist for the same Image Slot; creating another attempt does not change the Image Slot's identity or requirements.
-
+**Image Attempt**: One generated candidate created to satisfy a specific Image Slot. Multiple attempts may exist for the same slot.
 _Avoid_: Image Slot, Accepted Image.
 
-## Accepted Image
-
-An **Accepted Image** is the Image Attempt selected to fulfill an Image Slot for a specific Build Version because it satisfies that slot's semantic and compositional requirements.
-
-A later repair may select or generate another Image Attempt without changing the underlying Image Slot.
-
+**Accepted Image**: The Image Attempt selected to fulfill an Image Slot for an exact Build Version because it satisfies the slot's semantic and compositional requirements.
 _Avoid_: any generated image regardless of fit.
 
-## Release Candidate
+**Release Candidate**: One exact Build Version that completed generation and required preflight and is undergoing automated release QA. A repair that changes it creates a new Build Version and therefore a new Release Candidate.
+_Avoid_: mutated candidate treated as the same version.
 
-A **Release Candidate** is one exact Build Version that has completed generation and required preflight checks and is undergoing automated release QA.
-
-A Release Candidate may still contain defects and may enter the bounded repair process. Any repair that changes the candidate produces a new immutable Build Version, which becomes a new Release Candidate and must be evaluated on its own.
-
-_Avoid_: treating a repaired candidate as the same Build Version.
-
-## Release Blocker
-
-A **Release Blocker** is a concrete P0 or P1 defect that prevents a Release Candidate from being considered Release Ready. A Release Blocker may be automatically repairable within the bounded repair process or may ultimately require human escalation.
-
-P2/P3 imperfections and optional polish are not Release Blockers when all mandatory release gates pass.
-
+**Release Blocker**: A concrete P0 or P1 defect that prevents Release Ready. P2/P3 imperfections and optional polish are not Release Blockers when mandatory release gates pass.
 _Avoid_: HUMAN_REVIEW_REQUIRED, minor polish issue.
 
-## Release Ready
+**Release Ready**: The automated quality state of an exact Build Version that passed every required release gate and has no Release Blocker. It is distinct from Approval and Publication.
+_Avoid_: Approved, Published, good-enough unrechecked repair.
 
-A Build Version is **Release Ready** only when that exact Build Version has passed all automated release gates and no Release Blocker remains.
+**Approval**: Explicit human acceptance of one exact Release Ready Build Version and authorization to publish it. Approval does not itself make the Site live, remains valid through an operational publication retry of the unchanged version, and never carries to another Build Version.
+_Avoid_: Site-wide approval, automatic publication, inherited approval.
 
-Release Ready is an automated quality state, not human Approval or Publication. A Blueprint-level defect cannot be converted into Release Ready through implementation-only repair; it requires the explicit Blueprint-review path or a new Build/Site Generation.
+**Human Review Required**: `HUMAN_REVIEW_REQUIRED` is the escalation outcome when bounded automation cannot safely resolve a Release Blocker, has exhausted its permitted repair path, or requires human judgment. It is not a defect severity and cannot trigger an unbounded retry loop.
+_Avoid_: Release Blocker category, generic failure, retry instruction.
 
-_Avoid_: Approved, Published, or “good enough after repair” without re-evaluating the new Build Version.
+**Degraded**: A Build outcome where a genuinely useful Preview or partial result exists but one or more non-optional Build/release requirements remain unsatisfied. It is never Release Ready or automatically publishable.
+_Avoid_: silent success, unusable failure.
 
-## Approval
+**Failed**: A Build outcome where no usable candidate or meaningful partial result remains for the intended contract. If the output is not genuinely useful for inspection, diagnosis or salvage, it is Failed rather than Degraded.
+_Avoid_: Degraded without useful output.
 
-**Approval** is the explicit human acceptance of one exact Release Ready Build Version and authorization to publish that version. Approval belongs only to that Build Version and never carries forward to another Build or superseded candidate.
+**Benchmark Site**: One fixed Reference-and-replacement-Business test case in the `REFERENCE_BOUND` proof suite, with frozen screenshot/evidence and stable replacement inputs. It cannot be swapped merely because it is difficult or fails.
+_Avoid_: moving benchmark target, easier replacement reference.
 
-Approval and Publication are separate: an approved Build Version is not live until Publication succeeds. If Publication fails operationally, Approval remains valid for the unchanged Build Version and Publication may be retried. A Revision Request after Approval creates a new Build that requires its own Approval before it can replace the Published Version.
+**Benchmark Pass**: A Benchmark Site reaching Release Ready through the automated pipeline without manual source-code edits and within the agreed image-generation spend limit. Human Approval and Publication are not required because the benchmark measures automated generation/release quality.
+_Avoid_: manually corrected result, approval as benchmark criterion.
 
-_Avoid_: approving a Site generally, treating Approval as already live, or reusing Approval across Build Versions.
+**Design Archetype**: Non-binding inspiration vocabulary only. It must never automatically select or constrain a Visual Blueprint based on industry.
+_Avoid_: industry-to-layout rule, design authority.
 
-## Human Review Required
+**Form Submission**: One visitor-submitted contact message and its processing lifecycle. Browser success or client-side validation alone does not make it accepted.
+_Avoid_: button click treated as delivery success.
 
-**HUMAN_REVIEW_REQUIRED** is the escalation outcome when the bounded automated process cannot safely resolve the remaining Release Blocker, has exhausted its permitted repair path, or requires human judgment about the Visual Blueprint, Reference assumptions or another non-automatable decision.
+**Accepted Submission**: A Form Submission the platform has validated and durably accepted responsibility for processing. Temporary downstream Email Delivery failure does not require visitor resubmission.
+_Avoid_: email delivery as prerequisite for submission existence.
 
-It is not a defect severity or a normal technical failure and must not trigger an unbounded automatic retry loop. BLUEPRINT_REVIEW_REQUIRED is one specific reason the process may enter HUMAN_REVIEW_REQUIRED.
+**Email Delivery**: One outbound attempt to deliver an Accepted Submission to the current Form Destination. Temporary failures may receive bounded server-side retry; permanent failure is recorded without erasing the Accepted Submission.
+_Avoid_: unbounded retry, rewriting submission history.
 
-_Avoid_: Release Blocker category, generic failure status, another retry instruction.
+**Form Destination**: The currently approved recipient for a Site's contact messages, stored as mutable Site Configuration. The visitor cannot control it, and changing it requires no Build or Publication.
+_Avoid_: browser-controlled recipient, Build-embedded authoritative recipient.
 
-## Degraded
+**Sender Identity**: The authenticated address or domain the platform is authorized to use as the outbound `From` identity. V2 defaults to a verified WAZIBIZ platform sender; a Business-owned domain is optional only after verification and remains Site Configuration.
+_Avoid_: visitor-controlled From, unverified Business domain.
 
-A **Degraded** Build is one that produced a genuinely usable Preview or partial result, but one or more non-optional parts of the normal Build/release contract were not satisfied.
-
-A Degraded Build is never Release Ready and must never publish automatically. It may be surfaced to a human for inspection, diagnosis or salvage only when the remaining result is still useful.
-
-_Avoid_: silent success, Release Ready, unusable failure.
-
-## Failed
-
-A **Failed** Build is one that could not produce a usable candidate or meaningful partial result for its intended contract.
-
-If the remaining output is not genuinely useful for human inspection, diagnosis or salvage, the Build is Failed rather than Degraded.
-
-_Avoid_: Degraded when no useful result remains.
-
-## Benchmark Site
-
-A **Benchmark Site** is one fixed reference-and-replacement-business test case in the REFERENCE_BOUND proof suite. Its Reference Screenshot, frozen Reference Evidence and replacement Business inputs are fixed for comparable runs; the live Reference URL may be rechecked only to detect drift.
-
-A Benchmark Site must not be replaced merely because it is difficult or fails.
-
-_Avoid_: swapping a failed benchmark for an easier reference, silently refreshing the frozen target.
-
-## Benchmark Pass
-
-A **Benchmark Pass** is achieved when one Benchmark Site reaches Release Ready through the automated pipeline without manual source-code edits and within the agreed image-generation spend limit.
-
-Human Approval and Publication are not required for Benchmark Pass because the benchmark measures automated generation/release quality rather than production authorization. The REFERENCE_BOUND proof milestone is reached when at least 3 of the fixed 5 Benchmark Sites achieve Benchmark Pass.
-
-_Avoid_: counting a manually corrected result, an approved-but-non-Release-Ready result, or a benchmark that exceeded the hard spend gate.
-
-## Design Archetype
-
-A **Design Archetype** is non-binding inspiration vocabulary only.
-
-It must never select, constrain or determine a Visual Blueprint based solely on industry/category.
-
-## Form Submission
-
-A **Form Submission** is one visitor-submitted contact message and its processing lifecycle. Client-side validation or a successful browser request alone does not make it accepted.
-
-A Form Submission becomes an Accepted Submission only after the platform has validated it and durably accepted responsibility for processing it.
-
-_Avoid_: equating button click or client-side success with platform acceptance.
-
-## Accepted Submission
-
-An **Accepted Submission** is a Form Submission that the platform has validated and durably accepted responsibility for processing.
-
-Once accepted, temporary downstream Email Delivery failure must not require the visitor to resubmit. The submission remains accepted while bounded delivery retry proceeds independently.
-
-_Avoid_: successful email delivery as a prerequisite for submission existence, visitor resubmission after transient delivery failure.
-
-## Email Delivery
-
-An **Email Delivery** is one outbound attempt to deliver an Accepted Submission to the current Form Destination.
-
-Temporary delivery failures may trigger bounded server-side retry without changing the Accepted Submission. A permanent delivery failure is recorded explicitly and surfaced operationally, but it does not erase or rewrite the Accepted Submission as though it never existed.
-
-_Avoid_: Form Submission, Accepted Submission, unbounded retry.
-
-## Form Destination
-
-A **Form Destination** is the currently approved recipient for contact messages from a Site and is part of mutable Site Configuration rather than an immutable Build Version.
-
-Changing the Form Destination does not create a Build, Revision Request or Site Generation and does not require rebuilding or republishing the Site. The visitor can never choose or override the Form Destination, and Rollback does not change it unless explicitly requested.
-
-_Avoid_: browser-controlled recipient, Build-embedded authoritative destination, automatic rollback of recipient configuration.
-
-## Sender Identity
-
-A **Sender Identity** is the authenticated email address or domain the platform is authorized to use as the outbound From identity for Email Delivery.
-
-V2 defaults to a verified WAZIBIZ platform Sender Identity. A Business-owned sender domain may be supported later as optional Site Configuration only after that domain is verified. Changing Sender Identity is an operational configuration change, not a Build or Revision Request.
-
-_Avoid_: visitor-controlled From address, unverified Business domain, treating Form Destination as sender identity.
-
-## Reply-To
-
-**Reply-To** is the visitor-provided email address attached to an outbound Email Delivery so the Business can reply directly to the visitor without using that visitor address as the authenticated Sender Identity.
-
-The visitor email may populate Reply-To after validation, but must never become the transactional From identity.
-
-_Avoid_: visitor email as From, conflating Reply-To with Sender Identity.
+**Reply-To**: The validated visitor email attached to Email Delivery so the Business can reply directly without using that visitor address as the authenticated Sender Identity.
+_Avoid_: visitor email as From, Sender Identity.
