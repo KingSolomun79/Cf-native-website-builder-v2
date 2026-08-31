@@ -6,19 +6,25 @@ It is intentionally implementation-free. Architecture, storage, provider and run
 
 ## Onboarding Submission
 
-An **Onboarding Submission** is the immutable input package submitted through the website-generation onboarding form and is the authoritative starting point for a new Site generation.
+An **Onboarding Submission** is the immutable input package submitted through the website-generation onboarding form and is the authoritative starting point for a new Site Generation.
 
-Each Site generation starts from a new Onboarding Submission; V2 has no Client Account or Client User concept.
+V2 has no Client Account or Client User concept.
 
 _Avoid_: Client Account, Customer Account, User Profile.
 
+## Site Generation
+
+A **Site Generation** is a fresh design-origin process started from an Onboarding Submission. Changing the Reference or switching Build Mode starts a new Site Generation rather than a Revision Request.
+
+_Avoid_: Revision when the design origin itself changes.
+
 ## Revision Request
 
-A **Revision Request** is a human-requested change to an existing Site after its initial Build has entered review. It contains only the requested delta and starts a new Build derived from the previous Build's approved inputs.
+A **Revision Request** is a human-requested change to an existing Site that preserves its Build Mode and Reference. It contains only the requested delta and starts a new Build derived from the previous Build's approved inputs.
 
-A Revision Request does not require a new Onboarding Submission unless the request is for a completely new Site generation.
+A Revision Request does not require a new Onboarding Submission.
 
-_Avoid_: treating a Revision Request as an automated Build Version.
+_Avoid_: treating a Revision Request as an automated Build Version or using it to replace the Reference/Build Mode.
 
 ## Business
 
@@ -40,15 +46,15 @@ Derived Content may interpret or generalize safely, but it must never introduce 
 
 ## Site
 
-A **Site** is the customer-facing four-page website created from one Onboarding Submission for one Business.
+A **Site** is the customer-facing four-page website produced by a Site Generation for one Business.
 
 A Site has one current Published Version at most and may have multiple Builds during generation and revision.
 
-_Avoid_: Build, Build Version.
+_Avoid_: Build, Build Version, Deployment.
 
 ## Build
 
-A **Build** is one end-to-end attempt to create or revise a Site from one fixed approved set of business, content and design inputs. A new human-requested content or creative change starts a new Build, even when it is derived from a previous Build.
+A **Build** is one end-to-end attempt to create or revise a Site from one fixed approved set of business, content and design inputs. A new human-requested content or creative change starts a new Build, even when derived from a previous Build.
 
 _Avoid_: using Build for an automated repair revision.
 
@@ -58,6 +64,20 @@ A **Build Version** is an immutable candidate state within one Build, created on
 
 _Avoid_: Revision, iteration when referring to the canonical automated candidate states.
 
+## Build Record
+
+A **Build Record** is the compact retained history of a Build's outcome and diagnostic facts, including pass/fail state, QA outcome, failure cause and relevant cost/version provenance.
+
+A Build Record may remain after superseded or failed generated artifacts and Deployments are removed.
+
+_Avoid_: Deployment, Build Version.
+
+## Deployment
+
+A **Deployment** is a runnable preview or published instance of a Build Version. Failed or superseded Deployments are disposable and should not be treated as permanent Build history.
+
+_Avoid_: Build Record, Site.
+
 ## Published Version
 
 A **Published Version** is the specific approved Build Version currently serving as the live Site.
@@ -66,18 +86,20 @@ Publishing a newer Build Version does not change the identity of the Site.
 
 ## Build Mode
 
-A **Build Mode** is the design-origin strategy used for a Build.
+A **Build Mode** is the design-origin strategy used for a Site Generation.
 
 There are exactly two V2 modes:
 
 - **REFERENCE_BOUND** — the Site's visual architecture is derived from an external Reference.
-- **ORIGINAL_DESIGN** — the Site's visual architecture is created from the Business, audience, brand and creative direction without a Reference.
+- **ORIGINAL_DESIGN** — the Site's visual architecture is created from Business, audience, brand and creative direction without a Reference.
+
+Changing Build Mode starts a new Site Generation.
 
 ## Reference
 
-A **Reference** is an external website and/or supplied visual evidence used only to define the target visual architecture for a REFERENCE_BOUND Build.
+A **Reference** is an external website and/or supplied visual evidence used only to define the target visual architecture for a REFERENCE_BOUND Site Generation.
 
-A Reference is a design source, not a source of Business Facts, copy, branding, trademarks or imagery.
+A Reference is a design source, not a source of Business Facts, copy, branding, trademarks or imagery. Replacing the Reference starts a new Site Generation.
 
 ## Reference Suitability
 
@@ -113,9 +135,7 @@ A **Visual Blueprint** is the binding design contract for a Build.
 
 It defines the intended visual thesis, signature traits, composition, typography, spacing, surfaces, image system, motion language, responsive behavior and inner-page design vocabulary.
 
-For REFERENCE_BOUND Builds, it translates the Reference Analysis into a design contract for the new Business.
-
-For ORIGINAL_DESIGN Builds, it is created directly from Business and creative inputs.
+For REFERENCE_BOUND Builds, it translates the Reference Analysis into a design contract for the new Business. For ORIGINAL_DESIGN Builds, it is created directly from Business and creative inputs.
 
 _Avoid_: Implementation Plan, generated source.
 
