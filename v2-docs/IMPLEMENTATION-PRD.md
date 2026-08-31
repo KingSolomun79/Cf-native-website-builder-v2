@@ -2,66 +2,148 @@
 ## Final Implementation PRD, Architecture and Coding-Agent Specification
 
 **Status:** FINAL / AUTHORITATIVE  
+**Version:** 2.0.0  
 **Date:** 2026-08-31  
 **Repository:** `KingSolomun79/Cf-native-website-builder-v2`  
 **Runtime:** Cloudflare-native  
 **Generated output:** static/framework-light HTML + CSS + minimal JS  
 **Image generation:** KIE.ai  
 **Browser/reference/QA:** Cloudflare browser infrastructure / Browser Run  
-**Contact delivery:** centralized WAZIBIZ Form Service using Cloudflare-native outbound email  
+**Contact delivery:** central WAZIBIZ Form Service + Cloudflare-native outbound email
 
-> This document is the normative implementation specification for Website Builder V2. If an older prompt, V1 file, root document or previous PRD conflicts with this file, this file wins.
+> `../CONTEXT.md` is authoritative for domain vocabulary and semantics. This PRD is authoritative for implementation requirements. If an older prompt, V1 file, root document or earlier PRD conflicts with either, the canonical domain model and this PRD win.
 
 ---
 
 # 1. Product Goal
 
-Build a Cloudflare-native website-generation system that creates four-page local-business websites with substantially higher design fidelity, stronger imagery, deterministic QA and bounded autonomous repair.
+Build a Cloudflare-native website-generation system that creates high-quality four-page local-business Sites with strong design fidelity, distinctive visual quality, reliable imagery, deterministic validation, bounded autonomous repair, explicit human Approval and immutable Publication.
 
-V2 has two product modes:
+V2 has exactly two Build Modes:
 
-1. `REFERENCE_BOUND` — reproduce the visual architecture of a supplied reference while replacing content, branding, imagery and business facts.
-2. `ORIGINAL_DESIGN` — create a distinctive visual system from business/audience/brand context without a reference.
+1. `REFERENCE_BOUND` — recreate the visual architecture of an external Reference while replacing its content, branding, imagery and Business Facts.
+2. `ORIGINAL_DESIGN` — create a distinctive visual system from Business, audience, brand, offer, conversion and creative-direction inputs without an external Reference.
 
-Implementation order is deliberate:
+Implementation order:
 
 ```text
 REFERENCE_BOUND
-  -> prove on fixed benchmark
+  -> prove on fixed five-site benchmark
+  -> minimum 3/5 Benchmark Pass
   -> then implement ORIGINAL_DESIGN
 ```
 
-`ORIGINAL_DESIGN` remains part of V2, but reference fidelity is the first proof target.
+A Benchmark Pass means the exact result reaches Release Ready automatically, without manual source-code edits and within the hard KIE image-generation budget. Human Approval and Publication are not benchmark criteria.
 
 ---
 
-# 2. Repository Strategy
+# 2. Canonical Domain Model
 
-This repository is a dedicated V2 fork of the original builder.
+Implementation must use `../CONTEXT.md` terminology exactly.
 
-The original V1 repository remains preserved separately.
+Core identity hierarchy:
 
-During construction, V1 code may temporarily remain when it is useful as infrastructure or comparison material. At V2 acceptance, all superseded V1 product logic must be removed.
+```text
+Business
+  -> Site
+      -> Site Generation
+          -> Build
+              -> Build Version
+```
 
-Core rule:
+Release lifecycle for an exact Build Version:
 
-> Reuse proven infrastructure, not obsolete product architecture.
+```text
+Build Version
+  -> Release Candidate
+      -> Release Ready
+          -> Approval
+              -> Publication
+                  -> Published Version
+```
 
-Reuse candidates after audit:
+## 2.1 No client-account domain
+
+V2 has no Client Account, Client User, Customer Account or persistent mutable Client Profile concept.
+
+A completely new Site Generation starts from one fresh immutable Onboarding Submission. The Business is the stable real-world entity; the Site is the stable website identity for that Business.
+
+## 2.2 Onboarding Submission
+
+An Onboarding Submission is an immutable fact/input snapshot for one Site Generation.
+
+It must not be mutated later. Replacement Site Generations may use later Onboarding Submissions, while earlier submissions remain historical inputs to the Builds they governed.
+
+## 2.3 Revision Request and Fact Update
+
+A human-requested change that preserves both Reference and Build Mode is a Revision Request and starts a new Build.
+
+A Revision Request may contain a Fact Update. A Fact Update supersedes affected Business Facts for the new Build lineage without mutating the historical Onboarding Submission or previous Builds.
+
+Examples that normally remain Revision Requests:
+
+- phone/email/address changes;
+- opening-hours changes;
+- service additions/removals;
+- Business description changes;
+- new approved imagery/content;
+- design adjustments inside the existing Reference/design-origin contract.
+
+Changing Reference or Build Mode is not a Revision Request; it starts a new Site Generation from a fresh Onboarding Submission.
+
+## 2.4 Build and Build Version
+
+A Build represents one fixed set of approved Business/content/design inputs.
+
+Human new intent starts a new Build.
+
+A Build Version is an immutable candidate state within that Build. Bounded Automated Repair may create `v2`, `v3`, etc., but it remains inside the same Build only while the governing Business inputs, Reference, Build Mode, Visual Blueprint and human intent remain fixed.
+
+## 2.5 Automated Repair
+
+Automated Repair may modify realization details only, including:
+
+- HTML/CSS/JS implementation;
+- CSS geometry/crop/object-position;
+- content mapping within already-approved facts;
+- asset routing;
+- Image Attempt selection;
+- bounded image regeneration where permitted;
+- technical metadata and form integration defects;
+- other Implementation Contract-compliant realization details.
+
+Automated Repair must never:
+
+- introduce new human intent;
+- add/change Business Facts;
+- replace Reference;
+- change Build Mode;
+- redefine the Visual Blueprint;
+- silently change a declared Adaptation Contract.
+
+Every material Automated Repair creates a new immutable Build Version and therefore a new Release Candidate that must be re-evaluated.
+
+---
+
+# 3. Repository Strategy
+
+This repository is the dedicated V2 fork of the original builder. V1 remains preserved separately.
+
+During implementation, proven infrastructure may be reused after audit, including:
 
 - Worker bootstrap;
 - Wrangler/environment/bindings;
 - Cloudflare Workflows foundation;
 - D1/R2 utilities;
-- KIE.ai client/auth/task/callback code;
+- KIE client/auth/task/callback infrastructure;
 - browser/screenshot utilities;
-- preview/deployment/domain plumbing;
+- deployment/domain plumbing;
 - approval infrastructure;
-- logging;
+- logging/observability;
 - provider/AI Gateway wrappers;
-- reliable validation/tests.
+- robust validation/tests.
 
-Do not retain merely for compatibility:
+Do not preserve obsolete product logic for compatibility:
 
 - old generator intelligence;
 - old design-analysis logic;
@@ -69,49 +151,50 @@ Do not retain merely for compatibility:
 - old QA/self-review loops;
 - hardcoded generic section architecture;
 - permanent V1/V2 switches;
-- dead schemas/types/routes/tests.
+- superseded schemas/types/routes/tests/prompts.
 
-V1 cleanup is a formal release gate.
+V1 cleanup is a formal V2 release gate. No production route may invoke V1 after acceptance.
 
 ---
 
-# 3. V2 Capability Envelope
+# 4. V2 Capability Envelope
 
-The detailed capability boundary is also maintained in `CAPABILITY-ENVELOPE.md`.
+The human and machine boundaries are maintained in:
+
+- `CAPABILITY-ENVELOPE.md`
+- `capability-envelope.json`
 
 V2 supports:
 
-- exactly four pages in the initial product: Home, About, Services, Contact;
+- exactly Home, About, Services, Contact;
 - static/framework-light output;
 - semantic HTML;
-- shared site-specific CSS and minimal JS;
+- shared Site-specific CSS and minimal JS;
 - responsive layouts;
-- ordinary CSS/JS motion, hover, reveal, sticky behavior, simple parallax, justified lightweight sliders/carousels;
-- KIE-generated site imagery;
+- ordinary CSS/JS motion;
+- hover/focus/active behavior;
+- reveals, sticky behavior, simple parallax and justified lightweight sliders/carousels;
+- KIE-generated Site imagery;
 - central form delivery;
 - deterministic SEO foundations;
-- immutable versioned publishing.
+- immutable versioned Publication.
 
-Normally unsupported for V2:
+Normally unsupported:
 
-- WebGL/Three.js/canvas as primary experience;
+- WebGL/Three.js/canvas as the primary experience;
 - physics-heavy interaction;
-- complex scroll choreography requiring a specialized runtime;
+- complex specialized scroll choreography;
 - authenticated application UIs;
-- rich product configurators;
+- rich configurators/state machines;
+- huge ecommerce/catalog architecture;
 - CMS/blog as a core dependency;
-- arbitrary page counts;
-- huge ecommerce/catalog architectures.
-
-A reference may be `SUPPORTED_WITH_LIMITATIONS` only when limitations are declared before generation.
+- arbitrary page counts.
 
 ---
 
-# 4. Final Product Constraints
+# 5. Generated Site Output Contract
 
-## 4.1 Output architecture
-
-Default generated site:
+Default generated artifact:
 
 ```text
 index.html
@@ -126,70 +209,60 @@ manifest.json
 
 Prefer one shared `site.css` and one shared `site.js`.
 
-Page-specific CSS/JS is allowed only for genuinely unique reference behavior.
+Page-specific CSS/JS is allowed only when genuinely required by the Visual Blueprint/Implementation Contract.
 
 Do not use React, Tailwind, GSAP or comparable large libraries by default.
 
-## 4.2 Technical interfaces are standardized; design is not
-
-Standardize:
+Standardize technical interfaces, not visual composition:
 
 - semantic header/nav/main/footer;
 - one H1 per page;
-- metadata insertion hooks;
+- metadata hooks;
 - image-slot linkage;
-- Contact form contract;
+- Contact form platform contract;
 - accessibility fundamentals;
 - small token layer;
 - assembly/versioning contracts.
 
-Do not standardize page composition into a universal WAZIBIZ template.
-
-Reference-specific:
-
-- grids;
-- overlaps;
-- clipping;
-- image placement;
-- section topology;
-- asymmetry;
-- spacing exceptions;
-- component composition;
-
-must remain possible.
+Reference-specific grids, overlaps, clipping, wrappers, asymmetry, spacing exceptions and component topology must remain possible.
 
 ---
 
-# 5. Core Authority Order
+# 6. Authority Order Inside a Build
 
-Across the pipeline, resolve conflicts in this order:
+Where implementation inputs conflict, resolve in this order:
 
-1. verified client/business facts;
-2. explicit client requirements;
-3. accessibility/security/platform constraints;
-4. client brand requirements;
-5. Visual Blueprint;
-6. supplied reference screenshot for static homepage composition in reference mode;
-7. live reference evidence for interaction/responsive/computed details;
-8. Image Plan;
+1. supported Business Facts from governing Onboarding Submission + applicable Fact Updates;
+2. explicit human requirements for the current Build;
+3. security/accessibility/platform constraints;
+4. Business brand requirements;
+5. Adaptation Contract where applicable;
+6. Visual Blueprint;
+7. Reference Screenshot for static composition in `REFERENCE_BOUND`;
+8. Reference URL/Reference Evidence for interaction/responsive/computed details;
 9. Implementation Contract;
-10. QA findings;
-11. general best practice only when higher authorities leave room.
+10. Image Slot requirements;
+11. QA findings;
+12. general best practice where higher authorities leave room.
 
-Reference content is never business truth.
+Reference content is never Business truth.
 
 ---
 
-# 6. Design-Archetype Decision
+# 7. Design Archetype Rule
 
-`design_archetypes.md` must not be used as a decision-making authority.
+`design_archetypes.md` is non-authoritative and should be removed from final V2 product logic.
 
-Industry must not deterministically choose a visual style.
-
-Original Design must derive from:
+No runtime rule may implement:
 
 ```text
-business facts
+industry -> predefined visual archetype
+```
+
+`ORIGINAL_DESIGN` must derive from:
+
+```text
+Business Facts
 + audience
 + offer/service model
 + physical/service environment
@@ -199,19 +272,11 @@ business facts
 + design reasoning
 ```
 
-The archetype file may remain only as optional inspiration vocabulary.
-
-No runtime rule may implement:
-
-```text
-industry -> predefined design archetype
-```
-
 ---
 
-# 7. REFERENCE_BOUND Fidelity Definition
+# 8. REFERENCE_BOUND Fidelity Definition
 
-Reference mode reproduces **visual architecture**, not just mood.
+`REFERENCE_BOUND` means structural visual reproduction, not style resemblance.
 
 Target fidelity includes:
 
@@ -219,7 +284,7 @@ Target fidelity includes:
 - first-viewport topology;
 - section proportions;
 - major text/image mass;
-- grid and container relationships;
+- grid/container relationships;
 - whitespace rhythm;
 - surface/light-dark sequence;
 - typography character;
@@ -228,63 +293,51 @@ Target fidelity includes:
 - responsive transformations;
 - ordinary motion/interaction behavior.
 
-The generated site must use:
+The new Site uses new Business content, branding and imagery.
 
-- new client content;
-- new client branding;
-- new business-appropriate imagery;
-- factual client data.
-
-Never copy:
-
-- reference logo;
-- proprietary graphics;
-- photography;
-- trademarks;
-- proprietary font files;
-- HTML/CSS/JS source wholesale.
-
-Measurement is allowed. Implementation copying is not.
+Never copy the Reference logo, proprietary graphics, photography, trademarks, proprietary font files or implementation source wholesale. Measurement and independent reimplementation are allowed.
 
 ---
 
-# 8. Reference Evidence Authority
+# 9. Reference, Screenshot and URL
 
-## 8.1 Screenshot
+A Reference is the design source for one `REFERENCE_BOUND` Site Generation.
 
-The supplied full-page screenshot is authoritative for static homepage composition:
+## 9.1 Reference Screenshot
+
+The frozen Reference Screenshot is authoritative for static composition:
 
 - page silhouette;
 - region order;
 - proportions;
-- image placement;
+- image placement/mass;
 - whitespace;
 - surfaces;
 - static component appearance.
 
-## 8.2 Live URL
+## 9.2 Reference URL
 
-The live URL supplements evidence for:
+The Reference URL supplements evidence for:
 
-- computed fonts;
-- exact CSS where measurable;
+- computed typography/styles;
 - hover/focus;
-- transitions;
-- animation;
+- transitions/animation;
 - sticky/fixed behavior;
 - responsive transformations;
 - breakpoints;
-- mobile navigation behavior.
+- mobile-navigation behavior.
 
-If the screenshot and current live URL disagree on something visible in the screenshot, the screenshot wins and the discrepancy is persisted.
+If current live behavior conflicts with static composition visible in the frozen screenshot, the screenshot wins and the discrepancy is recorded.
+
+URL-only Reference input is valid only after a canonical screenshot/evidence package is captured and frozen.
 
 ---
 
-# 9. Reference Suitability Gate
+# 10. Reference Suitability Gate
 
-Add a deterministic-first stage before Reference Analyzer.
+Run before Reference Analysis.
 
-Output:
+Canonical outcomes:
 
 ```ts
 type ReferenceSuitability =
@@ -293,39 +346,46 @@ type ReferenceSuitability =
   | "UNSUPPORTED";
 ```
 
-Check deterministically where possible:
+Check deterministically first where possible:
 
 - canvas/WebGL/Three.js dependence;
-- application-like/authenticated behavior;
+- application/authenticated behavior;
 - dominant video dependence;
 - extreme scroll-jacking;
 - complex stateful interaction;
 - unsupported page/product scale;
 - rendering patterns outside capability envelope.
 
-AI may classify ambiguity only after evidence exists.
+AI may interpret ambiguity only after deterministic evidence exists.
 
-For `SUPPORTED_WITH_LIMITATIONS`, persist an adaptation contract:
+`SUPPORTED_WITH_LIMITATIONS` requires a concrete Adaptation Contract before generation:
 
 ```ts
-interface ReferenceAdaptationContract {
-  unsupportedFeatures: string[];
-  requiredApproximations: string[];
+interface AdaptationContract {
+  version: string;
+  unsupportedFeatures: Array<{
+    feature: string;
+    reason: string;
+  }>;
+  acceptedApproximations: Array<{
+    replaces: string;
+    substituteOutcome: string;
+  }>;
   qaExceptions: string[];
 }
 ```
 
-The limitation contract is frozen before generation and used by QA.
+An Adaptation Contract cannot legalize removal of an identity-defining unsupported feature. That case is `UNSUPPORTED`.
 
 ---
 
-# 10. Versioned ReferenceEvidence Contract
+# 11. Reference Evidence
 
-Do not pass loose browser dumps directly to the Analyzer.
+Reference Evidence records observations and measurements before interpretation.
 
-Create a runtime-validated `ReferenceEvidence` schema.
+Do not pass loose browser dumps directly to AI.
 
-Minimum content:
+Minimum versioned schema:
 
 ```ts
 interface ReferenceEvidence {
@@ -365,11 +425,11 @@ interface ReferenceEvidence {
 }
 ```
 
-Machine-extract before AI wherever measurable:
+Machine-extract where measurable:
 
-- element geometry;
+- geometry;
 - section boundaries;
-- font family/weight/size/line height;
+- typography;
 - colors;
 - radii;
 - container widths;
@@ -378,117 +438,46 @@ Machine-extract before AI wherever measurable:
 - image geometry;
 - responsive changes.
 
----
-
-# 11. Final REFERENCE_BOUND Pipeline
-
-```text
-CLIENT INTAKE
-    ↓
-NORMALIZE BUSINESS TRUTH
-    ↓
-REFERENCE SUITABILITY GATE
-    ↓
-SUPPORTED / SUPPORTED_WITH_LIMITATIONS ?
-    ↓ yes
-REFERENCE ACQUISITION
-    ↓
-REFERENCE EVIDENCE EXTRACTOR
-    ↓
-ReferenceEvidence v1
-    ↓
-REFERENCE ANALYZER
-    ↓
-ReferenceAnalysis
-    ↓
-VISUAL BLUEPRINT GENERATOR
-    ↓
-VisualBlueprint
-    ↓
-IMPLEMENTATION PLANNER
-    ↓
-ImplementationContract
-    ↓
-INCREMENTAL WEBSITE GENERATION
-    ↓
-HTML/CSS/JS + IMAGE_PLAN
-    ↓
-RUNTIME SCHEMA + DETERMINISTIC VALIDATION
-    ↓
-IMAGE WAVE 1
-    ↓
-IMAGE WAVE 2
-    ↓
-R2 PERSISTENCE + ASSET MANIFEST
-    ↓
-SITE ASSEMBLY
-    ↓
-TECHNICAL PREFLIGHT
-    ↓
-PREVIEW DEPLOY
-    ↓
-STANDARD QA EVIDENCE CAPTURE
-    ↓
-VISUAL GEOMETRY COMPARATOR
-    ↓
-QA-A + QA-B independently
-    ↓
-PASS? ── yes ──> READY_FOR_APPROVAL
-    │
-    no
-    ↓
-FIX COORDINATOR (one batch)
-    ↓
-CONFIRMATION QA
-    ↓
-PASS? ── yes ──> READY_FOR_APPROVAL
-    │
-    no
-    ↓
-OPTIONAL RELEASE BLOCKER FIX (one narrow batch)
-    ↓
-RERUN FAILED CONFIRMATION DOMAIN(S)
-    ↓
-PASS? ── yes ──> READY_FOR_APPROVAL
-    │
-    no
-    ↓
-HUMAN_REVIEW_REQUIRED
-```
-
-No unbounded mutation loop is allowed.
+Reference Evidence must never be rewritten to match later interpretation.
 
 ---
 
-# 12. Reference Analyzer
+# 12. Reference Analysis
 
-Reference Analyzer remains separate from Blueprint generation.
+Reference Analysis interprets Reference Evidence.
 
-Responsibility:
+Responsibilities:
 
-- interpret evidence;
-- describe the reference system;
-- identify confidence/ambiguity;
-- record visual and photographic grammar;
-- record responsive/motion behavior;
-- do not redesign;
-- do not map client content;
-- do not choose implementation architecture.
+- describe the visual system;
+- identify hierarchy/relationships;
+- identify signature traits;
+- infer likely design intent with confidence;
+- describe photographic grammar;
+- describe responsive/motion behavior;
+- identify what carries visual identity.
 
-Persist exact prompt/model/schema provenance with output.
+It must not:
+
+- redesign;
+- map Business content into a new design;
+- fabricate observations;
+- choose implementation architecture;
+- overwrite Reference Evidence.
+
+Persist prompt/model/schema provenance.
 
 ---
 
-# 13. Visual Blueprint Generator
+# 13. Visual Blueprint
 
-The Blueprint is the binding visual contract.
+The Visual Blueprint is the binding design contract.
 
 It must define at minimum:
 
 - visual thesis;
 - 3–8 signature traits;
 - fidelity priorities;
-- design tokens;
+- tokens;
 - global grid/container logic;
 - spacing rhythm;
 - typography roles;
@@ -497,42 +486,50 @@ It must define at minimum:
 - header/navigation language;
 - homepage first viewport;
 - ordered homepage regions;
-- image system and photography grammar;
+- image system/photography grammar;
 - image role contracts;
 - motion grammar;
 - responsive contract;
-- inner-page design vocabulary;
+- inner-page vocabulary;
 - anti-fallback rules;
 - accessibility/reference adaptations;
 - declared capability limitations.
 
-The Blueprint must not copy reference brand identity.
+For `REFERENCE_BOUND`, it translates Reference Analysis into the intended Business Site while preserving identity-defining structure/signature traits and replacing branding/content/assets.
 
-Client brand colors replace reference brand colors while preserving role and distribution when relevant.
+For `ORIGINAL_DESIGN`, it is created directly from Business/audience/brand/creative inputs.
+
+Once generation begins, downstream Automated Repair may correct implementation against the Blueprint but may not redefine it.
+
+If the Blueprint itself is materially wrong, contradictory or impossible, emit:
+
+```text
+BLUEPRINT_REVIEW_REQUIRED
+```
+
+This leads to `HUMAN_REVIEW_REQUIRED`. Human resolution may result in a new Build or new Site Generation depending on whether design origin changes.
 
 ---
 
-# 14. Implementation Planner
+# 14. Implementation Contract
 
-Add a new stage between Blueprint and Website Generator.
+The Implementation Planner creates the binding realization plan from Visual Blueprint + Business content.
 
-The Planner converts the binding Blueprint into a technical Implementation Contract.
-
-It decides:
+It may decide:
 
 - semantic page skeletons;
 - shared CSS/token architecture;
 - shared JS needs;
 - component boundaries;
-- exact file plan;
-- content allocation by Blueprint region;
+- file plan;
+- Business content allocation by Blueprint region;
 - responsive implementation strategy;
-- image-slot placement strategy;
+- Image Slot mapping;
 - approved dependencies;
-- form integration hooks;
+- form hooks;
 - metadata/assembly strategy.
 
-It does **not** change:
+It may not change:
 
 - visual thesis;
 - first viewport;
@@ -541,9 +538,9 @@ It does **not** change:
 - image roles;
 - Blueprint intent.
 
-If an implementation conflict exists, return a blocker.
+If realization is impossible inside the capability envelope, surface an explicit blocker rather than silently simplifying.
 
-Suggested output:
+Minimum shape:
 
 ```ts
 interface ImplementationContract {
@@ -570,11 +567,11 @@ interface ImplementationContract {
 
 ---
 
-# 15. Website Generation Strategy
+# 15. Incremental Website Generation
 
-Do not ask one model response to emit an enormous four-page site atomically.
+Do not ask one model call to emit the complete four-page Site atomically.
 
-Generate incrementally while sharing the same Blueprint + Implementation Contract:
+Generate incrementally under the same fixed Visual Blueprint + Implementation Contract:
 
 1. shared design tokens/CSS;
 2. shared header/footer/runtime JS;
@@ -582,18 +579,18 @@ Generate incrementally while sharing the same Blueprint + Implementation Contrac
 4. About;
 5. Services;
 6. Contact;
-7. IMAGE_PLAN;
+7. Image Plan;
 8. deterministic cross-file assembly validation.
 
 These are generation steps, not independent designers.
 
-All output must remain visually consistent through the shared contracts.
+Default CSS/JS architecture remains `site.css` + `site.js`, with exceptions only when required by contract.
 
 ---
 
-# 16. Website Content Rules
+# 16. Business Fact and Content Rules
 
-Use only normalized client facts.
+Use only supported Business Facts from the governing Onboarding Submission plus applicable Fact Updates.
 
 Never invent:
 
@@ -612,21 +609,17 @@ Never invent:
 - leadership claims;
 - results metrics.
 
-Missing data is omitted.
+Missing factual data remains unknown/omitted.
 
-Content requirements are semantic, not permission to create generic sections.
-
-Avoid generic AI filler and keyword stuffing.
+Derived Content may create safe non-factual marketing language but cannot smuggle unsupported facts into copy.
 
 ---
 
-# 17. Image Plan
+# 17. Image Plan and Image Slots
 
-Website generation produces HTML/CSS/JS plus a structured `IMAGE_PLAN`.
+Image Slots are stable semantic/compositional requirements defined before generation.
 
-The Website Generator decides the business subject and composition role, not the final provider prompt.
-
-Each image slot must include:
+Each Image Slot should include:
 
 - id;
 - page;
@@ -637,103 +630,82 @@ Each image slot must include:
 - priority;
 - subject;
 - shot type;
-- orientation;
-- aspect ratio;
+- orientation/aspect ratio;
 - camera angle/distance;
 - lighting;
-- crop desktop/intermediate/mobile;
+- desktop/intermediate/mobile crop intent;
 - human-presence rules;
 - background style;
 - color/temperature;
-- composition/negative space/text-safe area;
+- negative-space/text-safe requirements;
 - depth of field;
-- realism;
-- visual tone;
+- realism/visual tone;
 - mobile behavior;
 - avoidance rules.
 
-HTML references image slots as unresolved internal placeholders until assembly, e.g.:
+HTML may reference unresolved internal slot placeholders during generation:
 
 ```html
 <img src="IMG:home-hero-primary" data-image-id="home-hero-primary" alt="...">
 ```
 
-No final release may retain an unresolved `IMG:` token.
+Release Ready output must contain no unresolved `IMG:` token.
+
+An Image Attempt is one candidate for one slot. An Accepted Image is the selected attempt for an exact Build Version.
+
+Crop/object-position/remap/new attempt does not create a new slot. Changing the semantic/compositional role requires a new Build/Blueprint path.
 
 ---
 
-# 18. Image Quantity and Cost Budget
+# 18. Image Quantity, Waves and Budget
 
-Normal V2 target:
+Normal target:
 
 ```text
-12 accepted images / completed four-page site
+12 Accepted Images / completed four-page Site
 ```
 
-This is not a target of 12 generation attempts.
+This is not 12 generation attempts.
 
-Hard provider budget:
+Hard KIE spend gate:
 
 ```text
-KIE spend <= USD 3.00 per completed site
+KIE image spend <= USD 3.00 per completed Site
 ```
 
-Reserve approximately 20–25% for repair.
+Reserve ~20–25% for repair where practical.
 
-The orchestrator must budget expected spend before submitting generation tasks.
+Generation waves:
 
-No image generation call may be launched when it would violate the hard budget unless an explicit human override capability is later designed.
+1. Wave 1 — all CRITICAL slots + HIGH homepage slots.
+2. Wave 2 — remaining NORMAL/supporting slots.
 
----
+Use concurrency within waves.
 
-# 19. Two-Wave Image Generation
-
-Wave 1:
-
-- all CRITICAL slots;
-- HIGH homepage slots.
-
-Wave 2:
-
-- remaining NORMAL/supporting slots.
-
-Use concurrency within each wave.
-
-Do not generate all assets sequentially without reason.
-
-Do not spend the complete budget before CRITICAL/HIGH results are known.
-
----
-
-# 20. Image Repair Priority
-
-For every image defect use this order:
+Repair priority:
 
 1. CSS/object-position/container fix;
 2. asset-routing fix;
 3. content remap;
-4. image regeneration;
+4. Image Attempt regeneration;
 5. prompt repair + regeneration;
-6. Blueprint review only when contract itself is contradictory.
+6. Blueprint Review only when the contract itself is defective.
 
-Regenerate only affected slots.
+Generate dedicated mobile variants only when one master cannot satisfy the required composition.
 
-Mobile-specific generation only when a single master cannot satisfy the Blueprint.
-
-Persist every accepted image to project-controlled storage before release.
-
-No temporary KIE provider URL may remain in release output.
+Persist every Accepted Image to project-controlled storage before Release Ready. No temporary provider URL may ship.
 
 ---
 
-# 21. Runtime Validation of AI Boundaries
+# 19. AI Boundary Validation
 
-Every AI output must have a versioned runtime schema.
+Every AI output is runtime validated by versioned schema.
 
-Required schema families include:
+Required families include:
 
-- NormalizedBusinessIntake;
+- normalized Onboarding/Business inputs;
 - ReferenceSuitability;
+- AdaptationContract;
 - ReferenceEvidence;
 - ReferenceAnalysis;
 - VisualBlueprint;
@@ -757,41 +729,38 @@ model result
   -> still invalid: fail stage
 ```
 
-Do not allow malformed AI JSON to propagate downstream.
-
-Use the repo's existing robust validation approach if suitable; otherwise use Zod or equivalent.
+Malformed AI output must never propagate downstream.
 
 ---
 
-# 22. Retry Policy
+# 20. Retry Policy
 
 No blind retry loops.
 
-Rules:
-
-- deterministic transient infrastructure: bounded normal retry;
-- malformed AI structure: one targeted repair;
-- semantic AI failure: retry only with explicit corrective feedback when a stage contract permits it;
+- deterministic transient infrastructure: bounded retry;
+- malformed AI structure: one targeted schema-repair attempt;
+- semantic AI failure: retry only with explicit corrective feedback where the stage contract permits;
 - KIE: priority/budget/attempt limits;
 - browser capture: bounded infrastructure retry;
-- QA mutation: only Fix Coordinator + optional Release Blocker Fix.
+- QA mutation: exactly one Fix Coordinator batch + at most one Release Blocker Fix.
 
-Persist attempt number and failure class.
+Persist attempt and failure class.
 
 ---
 
-# 23. Model Routing and Prompt Provenance
+# 21. Prompt and Model Governance
 
 Different stages may use different configured models.
 
-Do not hardcode one provider/model throughout product logic.
+Do not hardcode one model/provider throughout product logic.
 
-Persist with each AI artifact:
+Persist:
 
 ```ts
 interface AiProvenance {
   promptId: string;
   promptVersion: string;
+  promptDomainContractVersion: string;
   model: string;
   schemaVersion: string;
   attempt: number;
@@ -801,27 +770,34 @@ interface AiProvenance {
 }
 ```
 
-Prompts are independently versioned product artifacts.
+Canonical prompt runtime composition is defined by:
 
-Benchmark runs should freeze model/settings/prompt/schema versions where supported.
+- `prompts/PROMPT-MANIFEST.md`
+- `prompts/00-domain-contract-v1.md`
+
+Each executable stage prompt is composed as:
+
+```text
+00-domain-contract-v1.md
++
+full retained detailed stage-prompt body named in PROMPT-MANIFEST.md
+```
+
+The manifest runtime version supersedes the historical version suffix in the retained body filename.
+
+The domain contract is authoritative over contradictory legacy clauses, including obsolete presentation-only/no-submit Contact-form rules.
 
 ---
 
-# 24. Immutable Build Artifact Model
+# 22. Artifact and Retention Model
 
-Persist complete immutable artifacts for every build version.
+Canonical generated source for each Build Version is immutable while needed for active QA, Publication or Rollback.
 
-Recommended path model:
+Recommended artifact path:
 
 ```text
 builds/{buildId}/v{buildVersion}/
   source/
-    index.html
-    about.html
-    services.html
-    contact.html
-    site.css
-    site.js
   assets/
   manifest.json
   evidence/
@@ -829,19 +805,44 @@ builds/{buildId}/v{buildVersion}/
   qa/
 ```
 
-D1 tracks metadata/state/indexes.
+D1 stores workflow state, metadata, indexes, Build Records and mutable Site Configuration.
 
-R2/project-controlled storage holds canonical source/evidence/assets.
+R2/project-controlled storage holds source/evidence/assets where retention requires it.
 
-Do not rebuild production by stitching together mutable AI fragments.
+## 22.1 Build Record
+
+Retain lightweight Build Records even after disposable failed/superseded artifacts are cleaned up.
+
+Build Record should include at least:
+
+- Build and version identifiers;
+- Site/Site Generation identity;
+- outcome;
+- QA scores/gates;
+- root cause;
+- cost;
+- prompt/model/schema provenance;
+- publication/approval history where applicable.
+
+## 22.2 Disposable Deployments
+
+Failed and superseded Preview Deployments are cleanup candidates. Do not accumulate Workers/Deployments indefinitely.
+
+## 22.3 Published and Rollback retention
+
+At most one current Published Version is active.
+
+When Publication replaces it, retain the immediately previous Published Version as Rollback Version for a bounded rollback window. Older superseded published Deployments may be removed once they no longer hold the rollback role.
+
+Benchmark evidence may be retained longer for reproducibility.
 
 ---
 
-# 25. Canonical Build State Machine
+# 23. Canonical Workflow State Machine
 
-Use an explicit state machine rather than inferring stage completion from incidental rows.
+Use explicit state rather than inferring completion from incidental rows.
 
-Recommended states:
+Suggested canonical states:
 
 ```text
 INTAKE_READY
@@ -863,27 +864,24 @@ QA
 FIX
 CONFIRMATION
 RELEASE_BLOCKER_FIX
-READY_FOR_APPROVAL
+RELEASE_READY
 APPROVED
+PUBLISHING
 PUBLISHED
 DEGRADED
 FAILED
 HUMAN_REVIEW_REQUIRED
 ```
 
-One primary `WebsiteBuildWorkflow` owns lifecycle orchestration.
+`BLUEPRINT_REVIEW_REQUIRED` is a specific escalation signal/reason, not a normal retry state; it routes to `HUMAN_REVIEW_REQUIRED`.
 
-Use helper services for bounded operations.
-
-Do not create nested workflow sprawl without a Cloudflare operational reason.
+One primary `WebsiteBuildWorkflow` owns lifecycle orchestration. Use helpers/services for bounded operations. Introduce child workflows only if Cloudflare operational limits materially require them.
 
 ---
 
-# 26. Mutation Boundary
+# 24. Mutation Boundary
 
-AI agents return structured decisions/plans.
-
-They do not receive arbitrary direct D1/R2 mutation authority.
+AI agents return structured decisions/plans and do not receive arbitrary D1/R2 mutation authority.
 
 Pattern:
 
@@ -897,31 +895,28 @@ AI result
 Examples:
 
 - Fix Coordinator returns a Repair Plan;
-- Repair Service applies validated file/asset changes;
+- Repair Service creates the next Build Version;
 - Image Prompt Generator returns prompt records;
-- Image Service creates provider tasks and persists results.
-
-This separation is mandatory for auditability and security.
+- Image Service creates provider tasks and persists Image Attempts;
+- Publication Service publishes an already-approved exact Build Version.
 
 ---
 
-# 27. Technical Preflight
+# 25. Technical Preflight
 
-Before expensive QA reasoning, run deterministic/browser preflight.
-
-At minimum reject release candidates with:
+Before expensive QA, reject Release Candidates with at least:
 
 - missing core page;
 - malformed final HTML;
 - missing H1;
 - broken internal navigation;
-- unresolved `IMG:` placeholders;
-- missing CRITICAL images;
-- broken image URLs;
-- prohibited temporary provider URLs;
+- unresolved `IMG:` placeholder;
+- missing CRITICAL Accepted Image;
+- broken image URL;
+- temporary provider URL;
 - invalid JSON-LD;
 - missing required metadata;
-- fatal JS errors;
+- fatal JS error;
 - material page-level horizontal overflow;
 - Contact form contract failure;
 - duplicate critical IDs;
@@ -931,9 +926,9 @@ Only a preflight-passing candidate enters full QA.
 
 ---
 
-# 28. Standard QA Evidence Bundle
+# 26. Standard QA Evidence Bundle
 
-Every release candidate uses a standardized evidence set.
+Every Release Candidate uses a standardized evidence set.
 
 Home:
 
@@ -942,7 +937,7 @@ Home:
 - mobile ~390 full page;
 - first-viewport captures.
 
-About, Services, Contact:
+About/Services/Contact:
 
 - desktop full page;
 - mobile full page.
@@ -950,54 +945,46 @@ About, Services, Contact:
 Also persist:
 
 - geometry metrics;
-- page load/runtime evidence;
+- runtime/load evidence;
 - network/console evidence for QA-B;
 - image manifest;
-- implementation provenance.
-
-Avoid QA agents independently creating inconsistent evidence sets.
+- Implementation Contract/provenance.
 
 ---
 
-# 29. Visual Geometry Comparator
+# 27. Visual Geometry Comparator
 
-Add a deterministic structural comparator for reference mode.
-
-Do **not** use raw pixel similarity because content and imagery intentionally differ.
-
-Compare normalized properties such as:
+For `REFERENCE_BOUND`, compare normalized structural properties rather than raw pixels:
 
 - first-viewport height ratio;
 - region count/order;
 - region height distribution;
-- container width ratio;
-- image mass position/size;
+- container-width ratio;
+- image-mass position/size;
 - major column ratios;
 - dominant alignment;
 - surface/light-dark sequence;
 - whitespace distribution;
 - major header/footer mass.
 
-Output becomes evidence for QA-A, not a standalone release verdict.
+Comparator output is evidence for QA-A, not a standalone verdict.
 
 ---
 
-# 30. QA-A — Visual + Content
+# 28. QA-A — Visual and Content
 
-QA-A judges rendered output rather than source implementation.
+QA-A judges rendered output, not implementation internals.
 
-Inputs should prioritize:
+Primary inputs:
 
-- frozen reference screenshot;
+- Reference Screenshot in `REFERENCE_BOUND`;
 - Visual Blueprint;
-- adaptation contract;
-- standardized final screenshots;
-- geometry-comparator evidence;
-- business data;
-- IMAGE_PLAN;
-- generated-image records.
-
-QA-A should not normally require source code.
+- Adaptation Contract;
+- standardized candidate screenshots;
+- geometry evidence;
+- supported Business Facts;
+- Image Plan/Image Slot records;
+- Accepted Images.
 
 Release condition:
 
@@ -1010,20 +997,20 @@ AND fabrication = false
 AND hard visual gates pass
 ```
 
-Hard visual gates include at minimum:
+Hard gates include:
 
 - first viewport materially correct;
 - page silhouette/region order materially correct;
 - dominant text/image mass materially correct;
 - CRITICAL signature traits preserved;
-- mobile preserves the same visual identity;
+- mobile preserves visual identity;
 - CRITICAL imagery serves required role.
 
-A 90+ score cannot compensate for a failed hard gate.
+A high aggregate score cannot compensate for a failed hard gate.
 
 ---
 
-# 31. QA-B — Browser + Technical
+# 29. QA-B — Browser and Technical
 
 QA-B owns:
 
@@ -1031,65 +1018,65 @@ QA-B owns:
 - internal navigation;
 - mobile menu;
 - responsive mechanics;
-- horizontal overflow;
-- keyboard/focus;
-- accessibility;
-- Contact form behavior;
+- overflow;
+- keyboard/focus/accessibility;
+- central Form Service behavior;
 - Turnstile integration where configured;
-- browser runtime/console/network;
-- image-plan/manifest/R2 resolution;
-- no temporary provider URLs;
+- runtime/console/network;
+- image manifest/storage resolution;
+- no provider URLs;
 - image loading/LCP/CLS risks;
 - metadata/canonical/OG;
 - truthful JSON-LD;
 - crawlability;
-- implementation contract integrity.
+- Implementation Contract integrity.
 
 QA-B may inspect source/DOM/network/runtime.
 
-Technical pass target remains >=90 with zero P0/P1 and all release gates passing.
+Technical pass target: >=90, P0=0, P1=0 and all mandatory gates passing.
 
 ---
 
-# 32. Fix Coordinator
+# 30. Release Blocker and Repair
 
-The Fix Coordinator is the only main QA-stage mutation planner.
+A Release Blocker is P0/P1 only. P2/P3 imperfections or optional polish do not prevent Release Ready when all mandatory gates pass.
+
+## 30.1 Fix Coordinator
+
+The Fix Coordinator creates exactly one coordinated main Automated Repair plan after failed QA.
 
 It must:
 
 - merge QA-A/QA-B findings;
-- validate P0/P1 against actual evidence;
+- validate blockers against evidence;
 - deduplicate root causes;
-- repair at narrowest correct level;
+- repair at the narrowest correct level;
 - preserve already-correct work;
-- distinguish implementation defects from image-generation defects;
+- distinguish implementation/image defects;
 - respect KIE budget;
-- create exactly one coordinated main repair batch.
+- never change Business Facts/Reference/Build Mode/Visual Blueprint.
 
-It cannot mutate the Blueprint.
-
-If the Blueprint is the root contradiction:
+If Blueprint is the root cause:
 
 ```text
 BLUEPRINT_REVIEW_REQUIRED
 ```
 
-Do not silently redesign through QA repair.
+## 30.2 Confirmation
 
----
+After applied repair creates a new Build Version:
 
-# 33. Confirmation and Hard Automation Limit
+- QA-A Confirmation rechecks previous/changed visual blocker domains;
+- QA-B Confirmation rechecks previous/changed technical blocker domains;
+- any domain plausibly affected by the repair must also rerun.
 
-After the Fix Coordinator:
+## 30.3 Release Blocker Fix
 
-- QA-A Confirmation rechecks only previous/changed visual blockers;
-- QA-B Confirmation rechecks only previous/changed technical blockers.
+If confirmation still has valid P0/P1, allow at most one narrow final Automated Repair batch.
 
-If one or both fail with valid P0/P1 blockers, allow at most one narrow Release Blocker Fix.
+Then rerun failed/affected confirmation domains.
 
-Then rerun only failed confirmation domains unless the repair plausibly affected another domain.
-
-If confirmation still fails:
+If a valid Release Blocker remains:
 
 ```text
 HUMAN_REVIEW_REQUIRED
@@ -1099,218 +1086,31 @@ No further automated mutation.
 
 ---
 
-# 34. Contact Form Architecture
-
-The previous “presentation-only form” rule is superseded.
-
-V2 requires a real working Contact form backed by one central multi-tenant WAZIBIZ Form Service.
-
-Generated sites remain static and do not contain mail credentials or custom mail-worker logic.
-
-Flow:
-
-```text
-visitor
-  ↓
-static contact form
-  ↓
-POST WAZIBIZ Form Service
-  ↓
-origin + schema + Turnstile + rate validation
-  ↓
-site_id -> SiteFormConfig
-  ↓
-approved sender/destination resolution
-  ↓
-Cloudflare-native outbound email
-  ↓
-delivery/audit metadata
-```
-
----
-
-# 35. Contact Form Browser Contract
-
-The generated Contact page must include a semantic form, with stable platform field names.
-
-Minimum:
-
-```html
-<form id="contact-form">
-  name
-  email
-  message
-</form>
-```
-
-Optional fields may include phone/subject when useful.
-
-Browser payload may contain:
-
-- public site/form identifier;
-- visitor fields;
-- Turnstile token;
-- client-safe metadata required by the service.
-
-Browser payload must **not** control:
-
-- recipient (`to`);
-- sender (`from`);
-- sender domain;
-- email template;
-- internal routing;
-- authentication credentials.
-
-Use visitor email as Reply-To, not arbitrary From.
-
----
-
-# 36. SiteFormConfig
-
-Maintain form operational configuration separately from immutable website artifacts.
-
-Example:
-
-```ts
-interface SiteFormConfig {
-  siteId: string;
-  enabled: boolean;
-  allowedOrigins: string[];
-  destinationEmail: string;
-  senderIdentity: string;
-  turnstileRequired: boolean;
-  retentionPolicy?: string;
-}
-```
-
-This configuration is intentionally mutable.
-
-Changing a destination email must not require rebuilding/reapproving website design.
-
----
-
-# 37. Form Security and Abuse Controls
-
-Required:
-
-- allowed-origin validation;
-- server-side field schema validation;
-- length limits;
-- content/header-injection defenses;
-- Cloudflare Turnstile;
-- rate limiting;
-- no client-selected destination;
-- no secret leakage;
-- no full form body logging to browser console;
-- bounded delivery retries for transient server/provider failures.
-
-Do not build a CRM in V2.
-
-Persist minimal audit metadata such as:
-
-- submission ID;
-- site ID;
-- timestamp;
-- delivery status;
-- outbound message ID when available;
-- failure code;
-- abuse/rate metadata needed for operations.
-
-Message-body retention should be minimal/configurable.
-
----
-
-# 38. Form UX
-
-Do not report success until the form service accepts the submission for delivery.
-
-Generated UI must support:
-
-- submitting/pending state;
-- accepted/success state;
-- usable error state;
-- accessible messages;
-- retry after recoverable failure.
-
-Visitor autoresponder is off by default in V2.
-
----
-
-# 39. SEO Foundation
-
-V2 guarantees technical/on-page foundations only:
-
-- unique title/page;
-- unique meta description/page;
-- canonical when final base URL is known;
-- semantic headings;
-- crawlable navigation;
-- truthful minimal JSON-LD;
-- Open Graph where appropriate;
-- correct alt semantics;
-- no reference-domain/content leakage.
-
-Do not turn builder generation into a full SEO campaign/content-management system.
-
----
-
-# 40. Fonts
-
-Typography is first-class reference evidence.
-
-Rules:
-
-- use supplied/legally accessible/public web fonts where appropriate;
-- never copy proprietary font files from reference;
-- when unavailable, record `REFERENCE_FONT_UNAVAILABLE` and use a declared closest approved substitute;
-- validate actual font loading before release QA.
-
-QA evaluates the declared limitation rather than pretending an unavailable proprietary font was reproducible.
-
----
-
-# 41. Accessibility versus Fidelity
-
-Do not reproduce clear accessibility failures just because the reference has them.
-
-Adapt while preserving design character:
-
-- insufficient contrast;
-- invisible focus;
-- materially undersized touch targets;
-- hover-only critical functionality;
-- motion incompatible with reduced-motion preference.
-
-Record the adaptation in the Blueprint/adaptation contract.
-
----
-
-# 42. Build Status and Degradation
+# 31. Degraded and Failed
 
 Never silently degrade.
 
-At minimum distinguish:
+`DEGRADED` means a genuinely useful Preview/partial result exists but one or more non-optional Build/release requirements remain unsatisfied. Degraded is never Release Ready and never auto-publishes.
 
-- normal in-progress stage states;
-- `READY_FOR_APPROVAL`;
-- `COMPLETED` where used operationally;
-- `DEGRADED`;
-- `FAILED`;
-- `HUMAN_REVIEW_REQUIRED`;
-- `APPROVED`;
-- `PUBLISHED`.
+`FAILED` means no usable candidate or meaningful partial result remains for inspection/diagnosis/salvage.
 
-A preview may exist for a degraded/failed build, but it must never be represented as a release PASS.
+A Degraded or Failed state must not be represented as release PASS.
 
 ---
 
-# 43. Human Approval and Publishing
+# 32. Release Ready, Approval and Publication
 
-Automated QA determines release readiness.
+## 32.1 Release Ready
 
-Human/customer approval determines publication.
+Release Ready is the automated quality state of one exact Build Version after all release gates pass and no Release Blocker remains.
 
-Approval references an immutable build identity:
+It is not Approval and not Publication.
+
+## 32.2 Approval
+
+Approval is explicit human acceptance of one exact Release Ready Build Version and authorization to publish it.
+
+Approval identity includes at least:
 
 ```text
 build_id
@@ -1318,16 +1118,210 @@ build_version
 artifact_manifest_hash
 ```
 
-Production deploys exactly that version.
+Approval never carries to another Build Version.
 
-A later revision creates a new version and requires separate approval.
+## 32.3 Publication
+
+Publication is a separate explicit operational act.
+
+It must deploy the exact approved Build Version without regeneration.
+
+If Publication fails operationally while the Build Version remains unchanged, retry Publication using the same Approval.
+
+Any Build Version change requires Release Ready + fresh Approval again.
+
+## 32.4 Published Version
+
+The successfully published exact Build Version becomes the current Published Version.
+
+A Site has at most one current Published Version.
 
 ---
 
-# 44. Observability
+# 33. Rollback
 
-Every relevant event/log must include:
+When a new Published Version replaces the old one, retain the immediately previous Published Version temporarily as Rollback Version.
 
+Rollback:
+
+- restores that exact prior approved Build Version;
+- performs no regeneration;
+- creates no new Build;
+- creates no new Build Version;
+- requires no new Approval;
+- preserves the historical fact that the replaced version was once published.
+
+Mutable Site Configuration does not roll back unless explicitly requested.
+
+A later corrected replacement must follow the normal Release Ready -> Approval -> Publication flow.
+
+---
+
+# 34. Site Configuration
+
+Site Configuration is mutable operational state only.
+
+Initial V2 Site Configuration includes form/email routing settings such as:
+
+```ts
+interface SiteConfiguration {
+  siteId: string;
+  form: {
+    enabled: boolean;
+    allowedOrigins: string[];
+    formDestination: string;
+    senderIdentity: string;
+    turnstileRequired: boolean;
+    retentionPolicy?: string;
+  };
+}
+```
+
+Changing Form Destination or verified Sender Identity:
+
+- does not create a Build;
+- does not create a Revision Request;
+- does not require website rebuild;
+- does not require Approval/Publication;
+- survives website Rollback unless explicitly changed.
+
+If a requested setting changes generated content/design/page behavior, it is not Site Configuration and must use the proper Build lifecycle.
+
+---
+
+# 35. Form Submission Architecture
+
+V2 requires a real working Contact form backed by one central multi-tenant WAZIBIZ Form Service.
+
+Generated Sites remain static and contain no mail credentials or custom per-Site mail Worker logic.
+
+Flow:
+
+```text
+visitor
+  -> static Contact form
+  -> POST WAZIBIZ Form Service
+  -> origin/schema/Turnstile/rate validation
+  -> Accepted Submission
+  -> resolve current Site Configuration
+  -> Form Destination + Sender Identity
+  -> Cloudflare-native Email Delivery
+  -> bounded retry / delivery audit
+```
+
+---
+
+# 36. Browser Form Contract
+
+Minimum semantic form fields:
+
+- name;
+- email;
+- message.
+
+Optional phone/subject are allowed where useful.
+
+Browser payload may contain only:
+
+- public Site/form identifier;
+- visitor fields;
+- Turnstile token;
+- client-safe metadata required by service.
+
+Browser payload must not control:
+
+- recipient;
+- From sender;
+- sender domain;
+- email template;
+- internal routing;
+- credentials.
+
+Visitor email may be validated and used as Reply-To. It must never become transactional `From`.
+
+---
+
+# 37. Accepted Submission and Email Delivery
+
+A Form Submission becomes an Accepted Submission only when the platform has validated it and durably accepted responsibility for processing it.
+
+Browser success must not be shown merely because client-side validation or a network request succeeded.
+
+After acceptance:
+
+- transient Email Delivery failure triggers bounded server-side retry;
+- visitor must not be required to resubmit;
+- permanent delivery failure is recorded and surfaced operationally;
+- the Accepted Submission remains accepted and is not rewritten as nonexistent.
+
+Persist minimal audit/processing data needed for reliability and operations. Message-body retention must remain minimal/configurable; V2 is not a CRM.
+
+Visitor autoresponder is off by default.
+
+---
+
+# 38. Sender Identity
+
+V2 defaults to one verified WAZIBIZ platform Sender Identity for outbound email.
+
+A Business-owned sender domain may be supported later only after verification and remains mutable Site Configuration.
+
+Never use arbitrary visitor-provided email as `From`.
+
+---
+
+# 39. Form Security
+
+Required:
+
+- allowed-origin validation;
+- server-side field schema validation;
+- length limits;
+- content/header-injection defenses;
+- Turnstile;
+- rate limiting;
+- no browser-selected destination/sender;
+- no secret leakage;
+- no full form body logging to browser console;
+- bounded delivery retries;
+- explicit delivery failure classification.
+
+---
+
+# 40. SEO Foundation
+
+V2 guarantees technical/on-page foundations only:
+
+- unique title/page;
+- unique meta description/page;
+- canonical when final base URL known;
+- semantic headings;
+- crawlable navigation;
+- truthful minimal JSON-LD;
+- Open Graph where appropriate;
+- correct alt semantics;
+- no Reference-domain/content leakage.
+
+Full SEO campaign/content management is separate.
+
+---
+
+# 41. Fonts and Accessibility
+
+Typography is first-class Reference Evidence.
+
+Use supplied/legally accessible/public web fonts where appropriate. Never copy proprietary Reference font files. When unavailable, declare `REFERENCE_FONT_UNAVAILABLE` and use an approved closest substitute.
+
+Do not reproduce clear accessibility failures merely for fidelity. Adapt contrast, focus, touch targets, hover-only critical functionality and reduced-motion behavior while preserving design character. Record adaptations in Blueprint/Adaptation Contract.
+
+---
+
+# 42. Observability
+
+Every relevant event/log includes:
+
+- siteId;
+- siteGenerationId;
 - buildId;
 - buildVersion;
 - stage;
@@ -1336,100 +1330,78 @@ Every relevant event/log must include:
 - model/provider where applicable;
 - cost where known;
 - result;
-- error classification.
+- error/root-cause classification.
 
-A developer must be able to answer “why did this build fail?” using one build-centric trace.
+A developer must be able to answer “why did this Build fail?” from one Build-centric trace.
 
 ---
 
-# 45. Benchmark Program
+# 43. Benchmark Program
 
-Freeze exactly five materially different reference sites before optimizing against their results.
-
-Required categories:
+Freeze exactly five materially different Benchmark Sites before optimizing against results:
 
 1. asymmetric/editorial;
 2. image-heavy hospitality/travel;
 3. restrained corporate/professional;
 4. bold trades/local service;
-5. difficult but supported responsive/motion reference.
+5. difficult but supported responsive/motion Reference.
 
-Do not replace a failed reference because it is inconvenient.
+Do not replace a failing Benchmark Site because it is inconvenient.
 
 Freeze:
 
-- canonical full-page screenshots;
-- reference evidence snapshot;
-- adaptation contracts;
-- model/settings where possible;
-- prompt versions;
-- schema versions;
-- standardized replacement-business briefs.
+- canonical Reference Screenshot;
+- initial Reference Evidence;
+- Adaptation Contract;
+- prompt/model/schema settings where possible;
+- standardized replacement-Business inputs.
 
-Use business briefs from different contexts than the reference company so the benchmark tests adaptation rather than content copying.
+The live Reference URL may be rechecked for drift, but the frozen target is not silently refreshed.
 
 ---
 
-# 46. REFERENCE_BOUND Proof Threshold
+# 44. Benchmark Pass
 
-The reference pipeline is sufficiently proven to begin Original Design when:
-
-```text
-at least 3 of 5 fixed benchmark sites PASS automatically
-```
-
-A benchmark PASS requires:
+A Benchmark Pass requires the exact candidate to reach Release Ready through the automated pipeline with:
 
 - zero manual source-code edits;
 - QA-A visual >=90;
 - QA-A content >=90;
-- all hard visual gates pass;
+- all hard composition gates;
 - QA-B >=90;
-- P0 = 0;
-- P1 = 0;
+- P0=0;
+- P1=0;
 - no fabrication;
 - four valid pages;
-- bounded mutation budget only;
-- KIE spend <= USD 3.00/site;
-- required Contact form integration functional where exercised.
+- bounded Automated Repair only;
+- KIE image spend <= USD 3.00/Site;
+- Contact form capability functional where exercised.
 
-3/5 unlocks work on Original Design. It does not mark reference quality as permanently finished.
+Approval and Publication are not required for Benchmark Pass.
+
+At least 3/5 Benchmark Pass unlocks `ORIGINAL_DESIGN` implementation work. It does not mean `REFERENCE_BOUND` quality work ends.
 
 ---
 
-# 47. Benchmark Runner
+# 45. Benchmark Runner and Root Cause
 
-Build a dedicated benchmark harness.
+Record for each run:
 
-For every run record:
-
-- benchmark/reference ID;
-- replacement business brief ID;
-- suitability result;
-- limitation contract;
-- build ID/version;
+- Benchmark Site ID;
+- replacement Business brief/input ID;
+- Reference Suitability;
+- Adaptation Contract version;
+- Build ID/version;
 - prompt/model/schema versions;
 - QA-A score/gates;
 - QA-B score/gates;
 - KIE spend;
-- total AI/browser usage metrics where available;
-- number/type of repair cycles;
+- model/browser usage where available;
+- repair count/type;
 - final PASS/FAIL;
-- root cause.
+- primary root cause.
 
-Example summary columns:
-
-```text
-Site | Suitability | QA-A | QA-B | KIE Spend | Final | Primary Root Cause
-```
-
----
-
-# 48. Failure Root-Cause Taxonomy
-
-Every failed benchmark/build should classify a primary failure cause.
-
-Minimum taxonomy:
+Minimum root-cause taxonomy:
 
 ```text
 REFERENCE_UNSUITABLE
@@ -1448,13 +1420,9 @@ FORM_SERVICE
 PLATFORM_RUNTIME
 ```
 
-Secondary causes may be recorded.
-
-This taxonomy is required to improve the system rationally after benchmark runs.
-
 ---
 
-# 49. Implementation Phases
+# 46. Implementation Phases
 
 ## Phase 0 — Brownfield audit
 
@@ -1465,229 +1433,129 @@ docs/architecture/v1-fork-audit.md
 docs/architecture/v2-migration-manifest.md
 ```
 
-Classify relevant V1 modules:
+Classify modules as KEEP, KEEP+RENAME, EXTEND, REFACTOR, REPLACE, DELETE BEFORE V2 RELEASE.
 
-```text
-KEEP
-KEEP + RENAME
-EXTEND
-REFACTOR
-REPLACE
-DELETE BEFORE V2 RELEASE
-```
-
-## Phase 1 — Contracts and state
+## Phase 1 — Domain contracts/state
 
 Implement:
 
-- canonical build state machine;
+- `CONTEXT.md` vocabulary in code types/names;
+- Site/Site Generation/Build/Build Version identities;
+- Onboarding Submission immutability;
+- Revision Request/Fact Update model;
+- state machine;
 - runtime schemas;
-- artifact/provenance model;
-- normalized business intake;
-- prompt/model/schema versioning;
-- build-centric logging.
+- provenance;
+- Build Records;
+- Site Configuration separation;
+- Build-centric logging.
 
-## Phase 2 — Suitability and evidence
+## Phase 2 — Suitability/evidence
 
-Implement:
-
-- deterministic suitability scan;
-- adaptation contract;
-- ReferenceEvidence extractor;
-- frozen evidence persistence.
+Implement deterministic Suitability Gate, Adaptation Contract, Reference Evidence extractor and frozen evidence persistence.
 
 ## Phase 3 — Reference intelligence
 
-Implement/update:
+Implement Reference Analysis, Visual Blueprint and geometry-comparator contract.
 
-- Reference Analyzer;
-- Visual Blueprint Generator;
-- geometry comparator contract.
+## Phase 4 — Planning/generation
 
-## Phase 4 — Implementation planning and site generation
-
-Implement:
-
-- Implementation Planner;
-- incremental shared-contract generation;
-- canonical static artifact structure;
-- deterministic validation.
+Implement Implementation Planner, incremental generation, canonical static artifact structure and deterministic assembly validation.
 
 ## Phase 5 — Images
 
-Implement:
-
-- Image Plan schema;
-- provider-aware prompt generator;
-- two-wave KIE orchestration;
-- hard USD 3 budget control;
-- R2 persistence/manifest;
-- bounded regeneration.
+Implement Image Slot/Image Attempt/Accepted Image schemas, provider prompt generation, two-wave orchestration, USD 3 budget control, persistent assets and bounded regeneration.
 
 ## Phase 6 — Form service
 
-Implement:
+Implement central Form Service, Site Configuration, Form Destination, Sender Identity, Turnstile, origin/rate/schema validation, Accepted Submission persistence, Cloudflare-native Email Delivery, bounded retry and UX contract.
 
-- multi-tenant SiteFormConfig;
-- form endpoint;
-- Turnstile;
-- origin/rate/schema validation;
-- Cloudflare-native outbound email;
-- audit metadata;
-- browser success/error contract.
+## Phase 7 — QA/repair
 
-## Phase 7 — Preflight/QA/repair
+Implement Technical Preflight, standard evidence, geometry comparator, QA-A, QA-B, Fix Coordinator, confirmations, Release Blocker Fix, BLUEPRINT_REVIEW_REQUIRED and hard automation stop.
 
-Implement:
+## Phase 8 — Approval/Publication/Rollback
 
-- Technical Preflight;
-- standardized evidence capture;
-- Visual Geometry Comparator;
-- QA-A;
-- QA-B;
-- Fix Coordinator;
-- confirmation agents;
-- Release Blocker Fix.
+Implement Release Ready, exact Build Version Approval, separate idempotent Publication, Rollback Version retention and Rollback semantics.
 
-## Phase 8 — Benchmark proof
+## Phase 9 — Benchmark proof
 
-Freeze five references + replacement briefs and run the benchmark until the system reaches at least 3/5 automatic PASS without manual source edits.
+Freeze five Benchmark Sites and run until at least 3/5 Benchmark Pass.
 
-## Phase 9 — Original Design
+## Phase 10 — Original Design
 
-Only after benchmark proof:
+Implement/re-enable `ORIGINAL_DESIGN` Blueprint flow and quality suite. Keep Design Archetypes non-binding.
 
-- implement/re-enable Original-Design Blueprint flow;
-- ensure industry archetypes are non-binding;
-- run a separate original-design quality suite.
+## Phase 11 — V1 removal/final audit
 
-## Phase 10 — V1 removal / final audit
-
-Remove all superseded V1 product logic and temporary migration scaffolding.
+Delete superseded V1 product logic, switches, prompts, schemas/types/tests/routes and obsolete docs. No V1 production route remains.
 
 ---
 
-# 50. Mandatory Prompt Reconciliation
+# 47. Repository Release Acceptance
 
-The prompt files in `v2-docs/prompts/` remain important stage specifications, but several were authored before the final grilling decisions.
+Before V2 release:
 
-Before wiring them into production runtime, reconcile them against this PRD.
-
-Mandatory changes include at least:
-
-1. Add prompt/spec for Reference Suitability interpretation if AI is needed.
-2. Add ReferenceEvidence schema/consumer assumptions to Reference Analyzer.
-3. Add Implementation Planner prompt/schema.
-4. Update Website Generator to consume `ImplementationContract` and support incremental file generation.
-5. Update Website Generator Contact form instructions: remove obsolete prohibition on backend submission; generate the platform form-client contract only.
-6. Update QA-B form checks to validate real Form Service/Turnstile behavior instead of requiring absence of submission logic.
-7. Update QA-B Confirmation accordingly.
-8. Update Fix Coordinator/Release Blocker Fix so form defects may be repaired only within the platform form contract.
-9. Ensure all QA visual pass rules include hard composition gates.
-10. Add prompt/schema provenance fields where runtime artifact contracts require them.
-
-Until reconciled, conflicting prompt clauses are **not authoritative**.
-
----
-
-# 51. Security Requirements
-
-At minimum:
-
-- secrets only in Cloudflare bindings/secrets;
-- no KIE/API/email credentials in generated assets;
-- AI agents do not receive unrestricted mutation authority;
-- provider callbacks validated/idempotent;
-- no client-controlled outbound email destination;
-- Turnstile + rate limiting for public forms;
-- no form data logged unnecessarily;
-- project-controlled persistent image URLs only;
-- prompt-injection resistance for reference content;
-- reference-site text/code treated as untrusted evidence;
-- production publication references immutable approved artifacts.
-
----
-
-# 52. Acceptance Criteria — REFERENCE_BOUND Implementation
-
-A single site is release-ready only when:
-
-- reference was supported or supported with declared limitations;
-- normalized business facts validate;
-- evidence/analysis/Blueprint/ImplementationContract schemas validate;
-- all four pages exist;
-- static output is framework-light and crawlable;
-- hard visual geometry/composition gates pass;
-- QA-A >=90 visual and >=90 content;
-- QA-B >=90;
-- P0/P1 = 0;
-- no fabricated business facts;
-- CRITICAL images resolve from persistent project storage;
-- no temporary provider URL/unresolved image placeholder;
-- KIE spend remains <= USD 3;
-- Contact form reaches the central WAZIBIZ Form Service and passes technical/security checks;
-- SEO foundation passes;
-- bounded automated repair limit respected;
-- immutable build artifacts/provenance preserved;
-- build is `READY_FOR_APPROVAL`.
-
-Publication additionally requires explicit human approval.
-
----
-
-# 53. Acceptance Criteria — V2 Repository Release
-
-V2 repository is not considered complete merely because a demo site works.
-
-Before final V2 release:
-
-- at least 3/5 fixed REFERENCE_BOUND benchmark sites pass automatically;
+- canonical domain model implemented consistently;
+- no Client Account/Client User product model introduced;
+- 3/5 fixed Benchmark Sites pass automatically;
 - benchmark harness exists;
-- Original Design implementation follows only after reference proof;
-- central form service works;
+- central Form Service works;
+- prompt composition uses canonical manifest/domain contract;
 - runtime schemas exist for AI boundaries;
-- immutable artifact/version model works;
-- build-centric observability works;
-- V1 legacy generator path is deleted;
+- immutable Build Version model works;
+- Release Ready/Approval/Publication are separate and correct;
+- Rollback Version/rollback behavior works;
+- Build Records survive cleanup of disposable Deployments;
+- Site Configuration is independent from immutable Builds;
+- Build-centric observability works;
+- V1 generator path deleted;
 - V1/V2 routing flags removed;
-- superseded prompt/runtime registry entries removed;
+- superseded prompt registry entries removed;
 - dead schemas/types/tests removed;
-- docs describe V2 as the only active builder in this repo;
-- no production route can invoke V1;
-- migration manifest is resolved.
+- no production route invokes V1.
 
 ---
 
-# 54. Coding-Agent Rules
+# 48. Coding-Agent Rules
 
-When implementing this PRD:
-
-1. Audit before rewriting infrastructure.
-2. Do not preserve V1 product logic for compatibility.
-3. Prefer deterministic extraction/validation over AI when the property is machine-measurable.
-4. Keep AI stages narrow and schema-bound.
-5. Persist immutable artifacts/provenance.
-6. Never silently degrade.
-7. Never create unbounded retries or QA loops.
-8. Never mutate the Blueprint from implementation/QA stages.
-9. Never let generated browser code choose mail recipients/senders.
-10. Never exceed the hard KIE budget through uncontrolled retry.
-11. Do not introduce a universal visual template under the guise of components/tokens.
-12. Do not use design archetypes as an automatic design selector.
-13. Keep generated customer sites static/framework-light.
-14. Keep the build workflow understandable as one primary orchestrated lifecycle.
-15. Treat this document as authoritative when older files disagree.
+1. Read `../CONTEXT.md` before implementation and use its terms exactly.
+2. Audit infrastructure before rewriting it.
+3. Do not preserve V1 product logic for compatibility.
+4. Prefer deterministic extraction/validation when machine-measurable.
+5. Keep AI stages narrow and schema-bound.
+6. Persist prompt/model/schema provenance.
+7. Never silently degrade.
+8. Never create unbounded retries or QA loops.
+9. Human new intent creates a new Build; Automated Repair creates a new Build Version only inside fixed contracts.
+10. Never mutate Business Facts through Automated Repair.
+11. Never mutate the Visual Blueprint through implementation/QA repair.
+12. Emit `BLUEPRINT_REVIEW_REQUIRED` for Blueprint-root defects.
+13. Never let browser code choose mail recipients/senders.
+14. Use verified platform Sender Identity by default and visitor email only as Reply-To.
+15. Never exceed KIE hard budget through uncontrolled retry.
+16. Do not introduce a universal visual template.
+17. Do not use Design Archetypes as automatic design selectors.
+18. Keep generated Sites static/framework-light.
+19. Publication deploys the exact approved Build Version without regeneration.
+20. Approval and Publication are separate.
+21. Rollback restores exact prior Published Version without creating a Build.
+22. Do not roll back Site Configuration implicitly.
+23. Clean up failed/superseded Deployments while retaining required Build Records and Rollback Version.
+24. Use only prompt versions declared by `prompts/PROMPT-MANIFEST.md`.
 
 ---
 
-# 55. Documentation Source of Truth
+# 49. Documentation Source of Truth
 
 Read in this order:
 
-1. `v2-docs/IMPLEMENTATION-PRD.md`
-2. `v2-docs/CAPABILITY-ENVELOPE.md`
-3. `v2-docs/FINAL-DECISION-RECORD.md`
-4. `v2-docs/prompts/*` after reconciliation to the PRD
-5. root/V1 documents only for retained infrastructure context
+1. `../CONTEXT.md` — canonical domain vocabulary/semantics.
+2. `IMPLEMENTATION-PRD.md` — normative implementation specification.
+3. `CAPABILITY-ENVELOPE.md` + `capability-envelope.json` — support boundary.
+4. `FINAL-DECISION-RECORD.md` — locked decisions/rationale.
+5. `prompts/PROMPT-MANIFEST.md`.
+6. `prompts/00-domain-contract-v1.md` + retained detailed prompt body.
+7. root/V1 documentation only for explicitly retained infrastructure context.
 
-The goal is one coherent V2 system, not a compatibility layer between competing specifications.
+The goal is one coherent V2 system, not compatibility between competing specifications.
