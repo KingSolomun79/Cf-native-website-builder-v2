@@ -215,9 +215,11 @@ _Avoid_: treating a repaired candidate as the same Build Version.
 
 ## Release Blocker
 
-A **Release Blocker** is a P0 or P1 defect that prevents a Release Candidate from being considered Release Ready.
+A **Release Blocker** is a concrete P0 or P1 defect that prevents a Release Candidate from being considered Release Ready. A Release Blocker may be automatically repairable within the bounded repair process or may ultimately require human escalation.
 
-Minor imperfections and optional polish are not Release Blockers.
+P2/P3 imperfections and optional polish are not Release Blockers when all mandatory release gates pass.
+
+_Avoid_: HUMAN_REVIEW_REQUIRED, minor polish issue.
 
 ## Release Ready
 
@@ -237,9 +239,11 @@ _Avoid_: approving a Site generally or reusing Approval across Build Versions.
 
 ## Human Review Required
 
-**HUMAN_REVIEW_REQUIRED** means the bounded automated process cannot safely resolve the remaining release issue without human judgment or intervention.
+**HUMAN_REVIEW_REQUIRED** is the escalation outcome when the bounded automated process cannot safely resolve the remaining Release Blocker, has exhausted its permitted repair path, or requires human judgment about the Visual Blueprint, Reference assumptions or another non-automatable decision.
 
-It is not equivalent to a normal technical failure and must not trigger an unbounded automatic retry loop.
+It is not a defect severity or a normal technical failure and must not trigger an unbounded automatic retry loop.
+
+_Avoid_: Release Blocker category, generic failure status, another retry instruction.
 
 ## Degraded
 
