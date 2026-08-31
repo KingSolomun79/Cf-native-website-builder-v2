@@ -20,19 +20,15 @@ Do not use **Site** as a synonym for Build or Build Version.
 
 ## Build
 
-A **Build** is one end-to-end attempt to create or revise a Site from a defined set of inputs.
+A **Build** is one end-to-end attempt to create or revise a Site from one fixed approved set of business, content and design inputs. A new human-requested content or creative change starts a new Build, even when it is derived from a previous Build.
 
-A Build may produce multiple Build Versions as bounded automated repair occurs.
-
-A Build is not considered released merely because generation completed.
+_Avoid_: using Build for an automated repair revision.
 
 ## Build Version
 
-A **Build Version** is an immutable candidate state of a Build.
+A **Build Version** is an immutable candidate state within one Build, created only by the bounded automated generation/repair lifecycle. Human-requested creative or content changes do not create another Build Version; they start a new Build.
 
-Examples include the initial generated candidate, a candidate after the main coordinated repair, and a candidate after the optional release-blocker repair.
-
-A Build Version may be previewed, evaluated, approved or rejected without changing earlier Build Versions.
+_Avoid_: Revision, iteration when referring to the canonical automated candidate states.
 
 ## Published Version
 
