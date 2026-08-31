@@ -107,9 +107,21 @@ Changing Build Mode starts a new Site Generation for the same Site.
 
 ## Reference
 
-A **Reference** is an external website and/or supplied visual evidence used only to define the target visual architecture for a REFERENCE_BOUND Site Generation.
+A **Reference** is the external design source used to define the target visual architecture for a REFERENCE_BOUND Site Generation. It may contain a Reference Screenshot, a Reference URL, or both.
 
 A Reference is a design source, not a source of Business Facts, copy, branding, trademarks or imagery. Replacing the Reference starts a new Site Generation for the same Site.
+
+## Reference Screenshot
+
+A **Reference Screenshot** is the frozen visual representation of a Reference and is authoritative for static composition, geometry, hierarchy, section order, proportions, image placement and whitespace.
+
+A user-supplied full-page screenshot or a canonical screenshot captured from a Reference URL may serve this role.
+
+## Reference URL
+
+A **Reference URL** is the live website address that supplements a Reference Screenshot with behavioral and runtime evidence such as hover, motion, sticky behavior, typography and responsive transformations.
+
+A URL-only Reference is valid only after a canonical Reference Screenshot and associated evidence have been captured and frozen for that Site Generation.
 
 ## Reference Suitability
 
