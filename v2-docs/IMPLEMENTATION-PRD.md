@@ -1,275 +1,821 @@
 # WAZIBIZ CF-Native Website Builder V2
-## Fork-Based Implementation PRD, Architecture and AI Coding Agent Guide
+## Complete Fork-Based Implementation PRD, Architecture & AI Coding Agent Guide
 
-**Source:** fork of the existing CF-native website builder  
-**Target:** clean standalone V2 repository  
+**Source repository:** Existing `CF-native-website-builder`  
+**Target repository:** Fork dedicated to Website Builder V2  
+**V1 repository:** Preserved permanently as the historical/stable V1 implementation  
+**V2 repository:** Becomes a clean standalone V2 implementation  
 **Runtime:** Cloudflare-native  
-**Images:** KIE.ai  
-**Browser/reference/QA:** existing Cloudflare browser infrastructure / Browser Run  
-**Strategy:** reuse proven infrastructure during construction; remove all superseded V1 product logic before V2 release.
+**Image generation:** KIE.ai  
+**Browser/reference/QA tooling:** Existing Cloudflare browser infrastructure / Browser Run  
+**Implementation model:** Brownfield code reuse during construction, clean V2 repository at completion
 
 ---
 
-## 1. Repository strategy
+# 1. Repository Strategy
 
-V1 remains preserved in its own repository. This fork becomes the future V2 product.
+We are NOT upgrading V1 in place.
 
-Development sequence:
+We are forking the current repository and building V2 inside the fork.
 
-```text
-Fork V1
- -> audit
- -> identify reusable infrastructure
- -> build clean V2 pipeline
- -> validate side-by-side during development
- -> remove all superseded V1 code
- -> final V2 architecture audit
- -> V2 release
+Final repository structure at organizational level:
+
+```text id="w09yp0"
+Wazibiz-Webdesign-Kenya/
+│
+├── CF-native-website-builder
+│   └── V1 frozen / maintained independently
+│
+└── CF-native-website-builder-v2
+    └── clean V2 implementation
 ```
 
-Temporary V1/V2 coexistence inside the fork is allowed only during implementation. The released V2 repository must not contain permanent legacy generator paths, old prompts, old QA loops, obsolete image prompting, compatibility flags or dead migration scaffolding.
+The V2 fork may initially contain V1 code because it originates from V1.
 
-Final rule:
+That is temporary.
 
-> Keep the proven platform code. Delete the superseded product logic.
+The finished V2 repository must NOT permanently contain:
+
+- old website generator;
+- old reference-analysis workflow;
+- old image prompting logic;
+- old QA implementation superseded by V2;
+- V1/V2 routing switches;
+- long-lived feature flags selecting old vs new;
+- dead compatibility adapters;
+- unused database fields created only for V1;
+- abandoned prompts;
+- deprecated build states;
+- duplicate orchestration systems.
+
+The V1 repository remains available if historical code is needed.
+
+Therefore V2 has no reason to become a compatibility museum.
 
 ---
 
-## 2. Reuse candidates
+# 2. Core Migration Principle
 
-Audit before deciding, but strongly prefer reuse of working:
+Development follows:
 
-- Cloudflare Worker bootstrap and bindings;
-- Wrangler/environment configuration;
-- authentication and API/webhook routing;
+```text id="rw5tno"
+FORK V1
+   ↓
+AUDIT
+   ↓
+IDENTIFY REUSABLE INFRASTRUCTURE
+   ↓
+BUILD CLEAN V2 PIPELINE
+   ↓
+VERIFY V2
+   ↓
+REMOVE ALL SUPERSEDED V1 CODE
+   ↓
+FINAL V2 ARCHITECTURE AUDIT
+   ↓
+V2 RELEASE
+```
+
+The desired philosophy is:
+
+> Reuse proven infrastructure, not obsolete architecture.
+
+---
+
+# 3. What We Reuse
+
+The implementation agent must first inspect the fork.
+
+Reuse working infrastructure where it remains appropriate.
+
+Strong reuse candidates include:
+
+- Cloudflare Worker bootstrap;
+- Wrangler configuration;
+- environment handling;
+- Worker bindings;
+- secrets;
 - Cloudflare Workflows integration;
-- D1/R2 utilities;
-- AI Gateway/provider wrappers;
-- KIE.ai client/auth/task plumbing;
-- existing callback/polling helpers that remain sound;
+- D1 access utilities;
+- R2 access utilities;
+- KIE.ai API client;
+- KIE authentication;
+- KIE task creation;
+- KIE callback handling if already good;
 - browser/screenshot utilities;
-- preview/deployment/domain utilities;
-- customer approval/revision flow;
-- logging, validation and test utilities.
+- Browser Run integration;
+- deployment utilities;
+- preview URL handling;
+- customer approval workflow;
+- domain/custom-hostname utilities;
+- logging;
+- AI Gateway/provider wrappers;
+- common validation utilities;
+- useful tests.
 
-Do not rewrite low-level infrastructure simply because the generation pipeline is new.
+Reuse is based on actual quality after inspection.
+
+Nothing is retained solely because V1 used it.
 
 ---
 
-## 3. Superseded V1 logic
+# 4. What V2 Replaces
 
-Assume replacement of:
+The following V1 intelligence should be assumed superseded unless the audit proves a reusable lower-level component exists:
 
 - legacy website-generation prompt;
-- legacy reference/design interpretation;
-- old generic layout rules;
+- legacy design-analysis prompt;
+- legacy reference interpretation logic;
+- generic section-generation rules;
 - legacy image brief/prompt logic;
 - old image-slot semantics;
-- self-review or single-agent QA loops;
-- legacy automatic repair loops;
-- hard-coded section/hero/footer rules incompatible with Blueprint-driven generation;
-- V1-only generation schemas and prompt registries.
+- old website review prompt;
+- any single-agent self-review loop;
+- old automatic design-repair loop;
+- hardcoded section structures;
+- forced hero architecture;
+- forced footer architecture;
+- old metadata assembly if incompatible with per-page metadata;
+- V1-specific generation schemas.
 
-At final cleanup, delete superseded implementations and their unused tests, dependencies, env vars and feature flags.
-
----
-
-## 4. Product modes
-
-### REFERENCE_BOUND
-
-Inputs: normalized business intake, client brand/creative requirements, full-page reference screenshot and optionally live reference URL.
-
-Goal: reproduce the reference design language as closely as practical while replacing all reference business content, branding and imagery.
-
-The screenshot is primary for static homepage composition. The live URL supplements motion, interaction, responsive behavior and computed details.
-
-### ORIGINAL_DESIGN
-
-Inputs: normalized business intake, industry/category, audience, brand palette, visual style/design language/creative direction.
-
-Goal: create a distinctive, non-generic site without requiring a reference.
-
-Both modes converge on the same `VisualBlueprint` contract and then share the entire downstream implementation, image, QA, repair and release pipeline.
+These are not compatibility requirements for the finished V2 repo.
 
 ---
 
-## 5. Core architecture
+# 5. Development vs Final Architecture
 
-```text
-CLIENT INTAKE
-  -> NORMALIZE BUSINESS TRUTH
-  -> SELECT MODE
-       REFERENCE_BOUND:
-         -> REFERENCE ACQUISITION
-         -> REFERENCE ANALYZER v2
-         -> VISUAL BLUEPRINT GENERATOR v2
-       ORIGINAL_DESIGN:
-         -> ORIGINAL-DESIGN BLUEPRINT GENERATOR v2
-  -> VISUAL BLUEPRINT
-  -> WEBSITE GENERATOR v3
-  -> DETERMINISTIC VALIDATION
-  -> IMAGE_PLAN
-  -> KIE IMAGE PROMPT GENERATOR v1
-  -> KIE IMAGE TASKS
-  -> CALLBACK/COMPLETION
-  -> PERSIST ACCEPTED MEDIA TO R2
-  -> ASSET MANIFEST
-  -> SITE ASSEMBLY
-  -> PREVIEW DEPLOY
-  -> BROWSER EVIDENCE
-  -> QA-A v2 + QA-B v2 INDEPENDENTLY
-  -> FIX COORDINATOR v2
-  -> BUILD VERSION 2
-  -> REDEPLOY/CAPTURE
-  -> QA-A CONFIRMATION v2 + QA-B CONFIRMATION v2
-  -> BOTH PASS ? HUMAN APPROVAL : OPTIONAL RELEASE BLOCKER FIX v1
-  -> RERUN FAILED CONFIRMATION DOMAIN(S)
-  -> PASS ? HUMAN APPROVAL : HUMAN_REVIEW_REQUIRED
+During development it is acceptable to have:
+
+```text id="4vpveb"
+legacy/
+builder-v2/
+```
+
+or temporary:
+
+```text id="pwalaf"
+USE_BUILDER_V2=true
+```
+
+for side-by-side testing.
+
+At V2 completion:
+
+```text id="xenxls"
+legacy/
+```
+
+must be deleted if no longer required.
+
+And:
+
+```text id="8qb8w5"
+USE_BUILDER_V2
+```
+
+must disappear if V2 is now the only builder.
+
+Final code should simply be:
+
+```text id="z9dzuh"
+builder/
+```
+
+not:
+
+```text id="dy1xwd"
+builder-v2/
+```
+
+unless the `v2` name remains useful as product terminology.
+
+Inside the dedicated V2 repository there is no need to pretend another builder exists.
+
+---
+
+# 6. Final Product Goal
+
+V2 creates high-quality four-page local-business websites using either:
+
+## Reference-Bound Mode
+
+Input:
+
+- business onboarding data;
+- optional client creative requirements;
+- client brand palette;
+- full-page reference screenshot;
+- live reference URL.
+
+Goal:
+
+Reproduce the visual system as closely as practical while replacing reference:
+
+- content;
+- branding;
+- imagery;
+- business facts.
+
+## Original-Design Mode
+
+Input:
+
+- business;
+- industry;
+- target audience;
+- palette;
+- visual style;
+- design language;
+- creative direction.
+
+Goal:
+
+Create a distinctive, non-generic visual system without requiring a reference.
+
+Both modes converge on the exact same:
+
+```text id="w7fwy2"
+Visual Blueprint
+```
+
+and then use the same downstream system.
+
+---
+
+# 7. Architectural Principle
+
+V2 separates responsibilities:
+
+```text id="fo8su3"
+EVIDENCE
+   ↓
+REFERENCE ANALYSIS
+   ↓
+DESIGN CONTRACT
+   ↓
+WEBSITE IMPLEMENTATION
+   ↓
+IMAGE ART DIRECTION
+   ↓
+IMAGE GENERATION
+   ↓
+REAL RENDERED WEBSITE
+   ↓
+INDEPENDENT QA
+   ↓
+CONTROLLED REPAIR
+   ↓
+CONFIRMATION
+```
+
+Do not collapse this into a new mega-prompt.
+
+---
+
+# 8. Complete V2 Workflow
+
+```text id="n74t4c"
+CLIENT ONBOARDING
+       │
+       ▼
+[0] NORMALIZE BUSINESS INPUT
+       │
+       ▼
+[1] SELECT BUILD MODE
+       │
+       ├──────────────────────────────┐
+       │                              │
+       ▼                              ▼
+REFERENCE_BOUND                ORIGINAL_DESIGN
+       │                              │
+       ▼                              │
+[2] REFERENCE ACQUISITION             │
+       │                              │
+       ▼                              │
+[3] REFERENCE ANALYZER v2             │
+       │                              │
+       ▼                              ▼
+[4A] VISUAL BLUEPRINT v2    [4B] ORIGINAL BLUEPRINT v2
+       │                              │
+       └─────────────┬────────────────┘
+                     ▼
+               VISUAL BLUEPRINT
+                     │
+                     ▼
+          [5] WEBSITE GENERATOR v3
+                     │
+           HTML/CSS/JS + IMAGE_PLAN
+                     │
+                     ▼
+       [6] DETERMINISTIC VALIDATION
+                     │
+                     ▼
+       [7] KIE IMAGE PROMPT GENERATOR
+                     │
+                     ▼
+               KIE.ai TASKS
+                     │
+                     ▼
+             provider callback
+                     │
+                     ▼
+                 R2 STORAGE
+                     │
+                     ▼
+               ASSET MANIFEST
+                     │
+                     ▼
+             [8] SITE ASSEMBLY
+                     │
+                     ▼
+             [9] PREVIEW DEPLOY
+                     │
+                     ▼
+          [10] BROWSER EVIDENCE
+                     │
+               ┌─────┴─────┐
+               ▼           ▼
+          [11A] QA-A   [11B] QA-B
+               │           │
+               └─────┬─────┘
+                     ▼
+          [12] FIX COORDINATOR v2
+                     │
+                     ▼
+               BUILD VERSION 2
+                     │
+                     ▼
+             REBUILD / CAPTURE
+                     │
+               ┌─────┴─────┐
+               ▼           ▼
+       [13A] QA-A CONF  [13B] QA-B CONF
+               │           │
+               └─────┬─────┘
+                     ▼
+                  BOTH PASS?
+                  /       \
+                YES        NO
+                 │          │
+                 ▼          ▼
+          HUMAN APPROVAL  RELEASE BLOCKER FIX
+                            │
+                            ▼
+                       BUILD VERSION 3
+                            │
+                            ▼
+                  rerun failed confirmation(s)
+                            │
+                         PASS?
+                       /       \
+                     YES        NO
+                      │          │
+                      ▼          ▼
+               HUMAN APPROVAL  HUMAN REVIEW
 ```
 
 ---
 
-## 6. Hard automation budget
+# 9. Hard Automation Limit
 
-Maximum autonomous mutation:
+V2 permits only:
 
-1. initial generation;
-2. one Fix Coordinator batch;
-3. at most one Release Blocker Fix batch.
+```text id="960tm9"
+Initial generation
+      ↓
+one Fix Coordinator batch
+      ↓
+optional one Release Blocker Fix
+```
 
-No infinite QA/fix loop. If the final confirmation still fails, stop automated mutation and require human review.
+No infinite autonomous design loop.
 
----
+If a release confirmation still fails after the blocker fix:
 
-## 7. Mandatory brownfield audit
-
-Before implementation, create:
-
-- `docs/architecture/v1-fork-audit.md`
-- `docs/architecture/v2-migration-manifest.md`
-
-Inspect:
-
-- Worker entrypoints/routes/bindings;
-- Workflow classes and current orchestration;
-- current AI/model calls and parsers;
-- current reference screenshot/URL/browser logic;
-- KIE.ai client, models, retries, callbacks/polling, persistence;
-- D1/R2/KV/DO usage;
-- site assembly and preview deployment;
-- customer approval/revision handling;
-- security, logging and observability.
-
-Classify each relevant V1 component:
-
-`KEEP | KEEP_AND_RENAME | EXTEND | REFACTOR | REPLACE | DELETE_BEFORE_V2_RELEASE`
-
-The migration manifest must map V1 component -> decision -> V2 owner -> whether V1 code is removed.
+```text id="wsalh8"
+HUMAN_REVIEW_REQUIRED
+```
 
 ---
 
-## 8. Target source boundaries
+# 10. Phase 0 — Mandatory Fork Audit
 
-During development `builder-v2/` or temporary `legacy/` namespaces are acceptable. Before release, rename/move V2 into the canonical architecture and delete V1-only paths.
+Before implementing V2, inspect the fork.
 
-Conceptual final structure:
+Create:
 
-```text
+```text id="b73k1a"
+docs/architecture/v1-fork-audit.md
+```
+
+The audit must answer:
+
+## Worker
+
+Where are:
+
+- entrypoints;
+- routes;
+- middleware;
+- bindings;
+- auth;
+- webhooks?
+
+## Workflow
+
+Where is current:
+
+- generation orchestration;
+- retries;
+- waits;
+- approval;
+- publishing?
+
+## AI
+
+Where are:
+
+- model calls;
+- AI Gateway;
+- prompts;
+- response parsing?
+
+## KIE
+
+Where are:
+
+- client;
+- auth;
+- image prompt generation;
+- task submission;
+- polling/callback;
+- storage;
+- retries?
+
+## Browser
+
+Where are:
+
+- screenshot utilities;
+- URL validation;
+- rendering;
+- browser sessions?
+
+## Persistence
+
+Document:
+
+- D1 schema;
+- R2 buckets;
+- KV;
+- Durable Objects where used.
+
+## Deployment
+
+Document:
+
+- preview;
+- static assembly;
+- production deployment;
+- domains.
+
+## Approval
+
+Document:
+
+- preview UI;
+- approval API;
+- revision handling.
+
+---
+
+# 11. Audit Classification
+
+Every relevant V1 module receives:
+
+```text id="ll5epu"
+KEEP
+KEEP + RENAME
+EXTEND
+REFACTOR
+REPLACE
+DELETE BEFORE V2 RELEASE
+```
+
+This final category matters.
+
+Example:
+
+```text id="uz9cpp"
+src/legacy/generator.ts
+Classification:
+DELETE BEFORE V2 RELEASE
+
+Reason:
+Entire functionality superseded by Website Generator v3.
+```
+
+---
+
+# 12. Migration Manifest
+
+Create:
+
+```text id="wwzvat"
+docs/architecture/v2-migration-manifest.md
+```
+
+Use:
+
+| V1 component | V2 decision | New owner | Final V1 code removed? |
+|---|---|---|---|
+| KIE client | KEEP | images/provider | No |
+| legacy image prompt | REPLACE | Image Prompt Generator | Yes |
+| website generator | REPLACE | Website Generator v3 | Yes |
+| R2 helper | KEEP | artifacts | No |
+| old QA prompt | REPLACE | QA-A/QA-B | Yes |
+
+This document drives final cleanup.
+
+---
+
+# 13. Temporary Development Architecture
+
+During construction:
+
+```text id="htvbrl"
 src/
-  builder/
-    orchestration/
-    intake/
-    reference/
-    blueprint/
-    generation/
-    images/
-    qa/
-    repair/
-    artifacts/
-    domain/
-    telemetry/
-  prompts/
-    shared/
-  providers/
-    ai/
-    kie/
-    browser/
-  storage/
-    d1/
-    r2/
-  deployment/
-  approval/
+  legacy/
+    ...
+
+  builder-v2/
+    ...
 ```
 
-No permanent `legacy/`, `v1/` or old-generator trees in the released V2 source.
+is acceptable.
+
+OR reuse current source locations when separation is clear.
+
+But this is temporary development scaffolding.
 
 ---
 
-## 9. Canonical normalized intake
+# 14. Required Final Cleanup
 
-Normalize onboarding exactly once. Include:
+Before V2 release:
 
-- business name/category/description/audience;
-- services;
-- location model: storefront/service-area/hybrid/appointment-only/unknown;
-- public address and service areas;
-- phone/email/opening hours;
-- primary action;
-- social URLs;
-- brand primary/secondary/accent colors;
-- visual style/design language/creative direction.
+Move/rename V2 into canonical structure if appropriate.
 
-Every prompt agent consumes normalized data instead of raw form IDs.
+Example:
 
----
+FROM:
 
-## 10. Reference acquisition
+```text id="v5jv2g"
+src/builder-v2/
+```
 
-Store the supplied screenshot unchanged. Validate reference URLs against SSRF/private-network risks and every redirect.
+TO:
 
-Recommended evidence widths: 1440, 768, 390. Use 1920/320 only where useful.
+```text id="u7xntd"
+src/builder/
+```
 
-The reference package may include screenshots, rendered HTML/accessibility evidence and interaction/responsive evidence. Do not forward unnecessary reference business copy downstream.
+Delete:
 
----
+```text id="e5ad54"
+src/legacy/
+```
 
-## 11. Reference Analyzer v2
+Delete old feature flags.
 
-Forensic observation only. It outputs structured design evidence including geometry, silhouette, grid, header, hero/first viewport, region map, typography, color, surfaces, components, photographic grammar, image inventory, motion, responsive behavior and uncertainties.
+Delete old prompt registry entries.
 
-Persist as an immutable build artifact and validate against schema.
+Delete V1 generator types.
 
----
+Delete V1-only tests.
 
-## 12. Blueprint generation
+Delete V1-only migrations that are not part of current schema history, where safely possible.
 
-Reference mode uses `ReferenceAnalysis -> Visual Blueprint Generator v2`.
-
-Original mode uses normalized intake/brand/creative direction -> `Original-Design Blueprint Generator v2`.
-
-Both output the same core `VisualBlueprint` schema.
-
-The Blueprint is the binding downstream design contract. The Website Generator must not reanalyze the reference or redesign independently.
+Update docs to describe only V2.
 
 ---
 
-## 13. Website Generator v3
+# 15. Canonical Business Input
 
-Owns:
+Normalize onboarding once.
 
-- factual client copy;
+```ts id="na354l"
+interface NormalizedBusinessIntake {
+  name: string;
+  category: string;
+
+  description?: string;
+  audience?: string;
+
+  services: Array<{
+    name: string;
+    description?: string;
+  }>;
+
+  location: {
+    type:
+      | "storefront"
+      | "service-area"
+      | "hybrid"
+      | "appointment-only"
+      | "unknown";
+
+    publicAddress?: string;
+    serviceAreas: string[];
+  };
+
+  phone?: string;
+  email?: string;
+
+  openingHours?: Array<{
+    day: string;
+    open?: string;
+    close?: string;
+  }>;
+
+  primaryAction?: string;
+
+  social: {
+    facebook?: string;
+    instagram?: string;
+    x?: string;
+    linkedin?: string;
+  };
+
+  brand: {
+    primary?: string;
+    secondary?: string;
+    accent?: string;
+    accent2?: string;
+
+    visualStyle?: string;
+    designLanguage?: string;
+    creativeDirection?: string;
+  };
+}
+```
+
+All V2 agents consume this normalized object.
+
+---
+
+# 16. Build Mode
+
+```ts id="vmmn44"
+type BuilderMode =
+  | "REFERENCE_BOUND"
+  | "ORIGINAL_DESIGN";
+```
+
+Prefer REFERENCE_BOUND when usable evidence exists.
+
+---
+
+# 17. Reference Evidence
+
+Screenshot remains static-homepage authority.
+
+Live URL supplements:
+
+- typography;
+- motion;
+- hover;
+- responsive behavior;
+- other computed details.
+
+Store original screenshot unchanged.
+
+Capture live reference approximately at:
+
+```text id="h1wmaj"
+1440
+768
+390
+```
+
+where available.
+
+---
+
+# 18. Reference Analyzer v2
+
+Use approved:
+
+```text id="pb2e0s"
+Reference Analyzer v2
+```
+
+It only observes.
+
+It produces:
+
+```text id="e6tty5"
+ReferenceAnalysis
+```
+
+including:
+
+- geometry;
+- silhouette;
+- first viewport;
+- regions;
+- typography;
+- colours;
+- surfaces;
+- components;
+- photography grammar;
+- responsive behavior;
+- motion;
+- inner-page evidence.
+
+---
+
+# 19. Visual Blueprint Generator v2
+
+Reference builds use:
+
+```text id="nm9phz"
+ReferenceAnalysis
+→ Visual Blueprint Generator
+→ VisualBlueprint
+```
+
+This creates the binding design contract.
+
+---
+
+# 20. Original-Design Blueprint Generator v2
+
+No-reference builds skip Reference Analyzer.
+
+They use:
+
+```text id="411ipd"
+Business input
++
+brand
++
+industry
++
+creative direction
+→ Original Blueprint Generator
+→ VisualBlueprint
+```
+
+Same core Blueprint contract.
+
+---
+
+# 21. Visual Blueprint Is Canonical
+
+All subsequent stages consume:
+
+```text id="b6lrmd"
+VisualBlueprint
+```
+
+Website Generator does not reinterpret the reference.
+
+QA does not invent a second design contract.
+
+Image Prompt Generator does not independently create a photography system.
+
+---
+
+# 22. Website Generator v3
+
+Use approved:
+
+```text id="wkx1iy"
+Website Generator v3
+```
+
+Responsibilities:
+
+- business truth;
+- copy;
 - semantic content mapping;
 - Blueprint implementation;
-- HTML/CSS/JS;
+- HTML;
+- CSS;
+- JS;
 - per-page metadata;
 - structured IMAGE_PLAN.
 
-It does not create final KIE prompts.
+It does not write final KIE prompts.
 
-Required output blocks:
+---
 
-```text
+# 23. Generator Output
+
+Exactly:
+
+```text id="fjino1"
 HEAD
 META:home
 META:about
@@ -283,410 +829,1425 @@ PAGE:contact
 IMAGE_PLAN
 ```
 
-Images use placeholders such as:
-
-```html
-<img src="IMG:home-hero-primary" alt="..." data-image-id="home-hero-primary">
-```
-
 ---
 
-## 14. IMAGE_PLAN
+# 24. IMAGE_PLAN
 
-Each image slot defines:
+Every meaningful generated image gets structured art direction.
 
-- page/region/semantic role/Blueprint role;
-- FIXED/OPTIONAL/REPEATABLE;
-- CRITICAL/HIGH/NORMAL priority;
+Mandatory fields include:
+
 - subject;
 - shot type;
-- orientation/aspect ratio;
-- camera angle/distance;
-- lighting source/direction/softness/contrast/time character;
-- desktop/intermediate/mobile crop;
-- human requirement/count/activity/gaze/interaction/pose;
-- background environment/complexity/sharpness/purpose;
-- color saturation/contrast/dominant character/brand relationship;
+- orientation;
+- aspect ratio;
+- camera angle;
+- camera distance;
+- lighting;
+- crop;
+- human presence;
+- background style;
+- colour;
 - temperature;
-- composition: subject position, balance, negative space, text-safe area, focal priority, foreground/midground/background, depth, visual weight;
-- depth of field;
-- realism/tone/design role;
-- mobile crop/focal/placement behavior;
-- avoid constraints.
+- composition;
+- negative space;
+- text-safe area;
+- depth;
+- realism;
+- mobile behavior.
 
 ---
 
-## 15. Deterministic validation
-
-Before KIE spend, validate with code:
-
-- all required output blocks;
-- IMAGE_PLAN valid JSON/schema;
-- four pages and meaningful H1s;
-- navigation and contact-form contract;
-- JSON-LD parses;
-- all `IMG:*` IDs unique and mapped;
-- no orphan image-plan item;
-- FIXED roles implemented;
-- minimum three meaningful images/page;
-- aspect/composition information exists.
-
-Allow at most one targeted LLM repair for contract/schema failure.
-
----
-
-## 16. KIE Image Prompt Generator v1
-
-Runs per image slot. Input:
-
-`business truth + Blueprint photography grammar + one IMAGE_PLAN item + KIE model/capabilities`
-
-Output provider-ready positive prompt, negative prompt where supported, resolved aspect ratio/provider parameters, resolved photographic brief and optional separate-mobile-variant recommendation.
-
-It must preserve slot subject/composition instead of redesigning it.
-
----
-
-## 17. Reuse KIE provider infrastructure
-
-If existing KIE low-level HTTP/auth/task code is reliable, reuse it behind a V2 domain adapter. Do not spread provider JSON throughout orchestration.
-
-The new architecture changes what is sent to KIE and when, not necessarily the proven HTTP client itself.
-
-Generation occurs after Website Generator + deterministic validation + image prompt generation, and before visual QA.
-
-Fan out tasks within configured concurrency, prioritizing CRITICAL homepage imagery.
-
----
-
-## 18. KIE callbacks and persistence
-
-Prefer callback/event completion over continuous polling where the existing integration permits a clean migration.
-
-Webhook handling must verify the configured KIE signature/HMAC contract, validate timestamp freshness, use constant-time comparison, be idempotent by provider task ID, persist normalized completion state and signal the Workflow quickly. Heavy work belongs after the webhook response.
-
-Accepted generated media must be copied promptly into project-controlled persistent R2 storage. Final sites must never depend on temporary provider URLs.
-
----
-
-## 19. Image generation records and asset manifest
-
-Persist task attempts by build/version/slot. Record provider/model/task ID/status/prompt artifact/provider result/persistent asset/error/timestamps.
-
-Create one canonical asset manifest mapping each slot to its accepted generation and persistent URL, dimensions and optional mobile variant.
-
-Site assembly resolves `IMG:id` only from this manifest.
-
-QA cannot begin until every required critical image is persisted or the build is explicitly blocked.
-
-Suggested maximum generation attempts per slot: configurable, initially 2.
-
----
-
-## 20. Site assembly and preview
-
-Inject page-specific metadata into the shared head contract, resolve image placeholders through the manifest, add `<picture>` art direction only where required, and use the existing preview/deployment infrastructure where sound.
-
-Keep immutable build versions:
-
-- v1 initial generation;
-- v2 Fix Coordinator;
-- v3 Release Blocker Fix.
-
----
-
-## 21. Browser evidence
-
-Capture the site only after real KIE/R2 assets are assembled and previewed.
-
-At minimum homepage desktop/intermediate/mobile evidence; capture inner pages as needed. Reuse identical screenshot evidence between QA agents where possible.
-
-A deterministic technical scanner should produce machine evidence for mechanical checks before QA-B.
-
----
-
-## 22. QA-A v2
-
-Independent visual/content evaluator. It checks Blueprint/reference fidelity, macro composition, first viewport, signature traits, region geometry, typography, color/surface, imagery, subject/shot/composition/negative space/crop/mobile crop/AI artifacts, mobile visual identity and factual business content.
-
-It does not edit.
-
-Pass requires visual >=90, content >=90, no P0/P1, no fabrication and no unusable critical image.
-
----
-
-## 23. QA-B v2
-
-Independent browser/technical evaluator. It checks actual pages, navigation/mobile nav, responsive mechanics, overflow, keyboard/focus/form/accessibility, runtime/network, IMAGE_PLAN-to-HTML mapping, R2 persistence, broken/temporary image URLs, image loading/layout stability/art direction, metadata/JSON-LD/crawlability and implementation-contract compliance.
-
-It does not inspect QA-A first and does not edit.
-
-Pass requires technical >=90, no P0/P1 and all critical technical gates.
-
----
-
-## 24. Fix Coordinator v2
-
-The only main QA-stage mutator. It receives both independent QA reports, validates P0/P1 findings, deduplicates root causes and repairs the narrowest correct layer.
-
-Priority: P0 -> fabrication/business facts -> macro visual P1 -> critical image P1 -> responsive/accessibility/function -> content -> systemic P2 -> local P2.
-
-Image decisions must explicitly be one of:
-
-`CSS_FIX | ASSET_ROUTING_FIX | CONTENT_REMAP | IMAGE_REGENERATION | PROMPT_REPAIR_AND_REGENERATE | BLUEPRINT_REVIEW_REQUIRED | NO_ACTION`
-
-Do not regenerate when CSS/routing can solve the problem. Regenerate only affected slots, route all new KIE prompts through the Image Prompt Generator, persist new assets and update the manifest.
-
-Create build version 2 and run only short sanity checks before confirmation QA.
-
----
-
-## 25. Confirmation QA
-
-QA-A Confirmation v2 and QA-B Confirmation v2 are narrow release checks, not fresh audits.
-
-They recheck previous release blockers, areas deliberately changed by the Fix Coordinator, regenerated/repaired image slots and new P0/P1 regressions only. They must not reopen a P2/P3 polish backlog.
-
-Both must pass for automated release readiness.
-
----
-
-## 26. Release Blocker Fix v1
-
-Invoke only if a confirmation still fails. It may change only the remaining P0/P1 blockers. No P2/P3 improvements or broad refactors.
-
-After it creates build version 3, rerun only the failed confirmation domain(s), unless the repair plausibly affects the previously passing domain.
-
-If confirmation fails again: `HUMAN_REVIEW_REQUIRED`. No third automated repair.
-
----
-
-## 27. Human approval and revision
-
-Automated PASS enters the existing approval flow. A human may approve or request revision.
-
-Classify revisions as CONTENT, VISUAL, IMAGE, BRAND or FUNCTIONAL and selectively replay only the necessary stages. Do not restart Reference Analyzer/Blueprint/KIE unnecessarily.
-
----
-
-## 28. Prompt registry and schemas
-
-Version all prompts centrally. Initial canonical versions:
-
-- Reference Analyzer 2.0.0
-- Visual Blueprint Generator 2.0.0
-- Original-Design Blueprint Generator 2.0.0
-- Website Generator 3.0.0
-- KIE Image Prompt Generator 1.0.0
-- QA-A 2.0.0
-- QA-B 2.0.0
-- Fix Coordinator 2.0.0
-- QA-A Confirmation 2.0.0
-- QA-B Confirmation 2.0.0
-- Release Blocker Fix 1.0.0
-
-Use runtime schemas for every structured agent result. If the repo has no good schema library, add Zod. Allow at most one targeted format repair for malformed AI JSON.
-
-Create one shared implementation-contract module for Generator/QA-B/Fix/Confirmation instead of maintaining divergent copies.
-
----
-
-## 29. Workflow state and resumability
-
-Persist a canonical build stage/state. Stages should represent V2 concepts only in the final repo: intake, reference acquisition/analysis, Blueprint, site generation/validation, image prompting/generation/persistence, assembly, preview, QA-A, QA-B, fix, confirmations, blocker fix, automated pass, human review/approval, publish and failed.
-
-Every expensive operation requires stable idempotency keys. Workflow restart must reuse completed artifacts: do not rerun a Blueprint, completed images or completed QA unnecessarily.
-
----
-
-## 30. Storage
-
-D1 should hold searchable operational state; large prompt/output/evidence artifacts can live in R2.
-
-Likely operational entities:
-
-- builds;
-- build_versions;
-- agent_runs;
-- image_generation_tasks;
-- qa_runs;
-- build_events;
-- approvals.
-
-Prefer V2-specific Cloudflare resources or clean V2 prefixes where operationally practical so V1 production cannot be accidentally affected.
-
----
-
-## 31. Security
-
-Reference URLs are untrusted. Block localhost, loopback, RFC1918/private/link-local/internal metadata addresses and redirect chains into private networks. Limit scheme, timeout and response size.
-
-Reference-site content must be treated as untrusted design evidence and must not become instructions to the generator.
-
-KIE webhooks must be authenticated and idempotent. Secrets remain Worker secrets. Final media URLs must not expose provider/API/internal tokens.
-
----
-
-## 32. Copyright/reference separation
-
-Reference inputs control design relationships, not reference copy, logos, people or copyrighted imagery. Generated content must use client facts. KIE imagery should reproduce the compositional function/photographic grammar, not duplicate the reference photograph.
-
----
-
-## 33. Accessibility, SEO and performance contract
-
-Require semantic HTML, one meaningful H1/page, labeled forms, visible focus, keyboard navigation, sufficient contrast, useful alt text, reduced-motion behavior and practical touch targets.
-
-Require unique page titles/descriptions, factual homepage JSON-LD and correct canonical/OG behavior only when real URLs/assets are known. Never invent ratings, reviews, coordinates, years, opening hours or price ranges.
-
-Architecture should target good Core Web Vitals. Likely LCP imagery must not be lazy-loaded; below-fold images should normally lazy/decode async; reserve image geometry to prevent CLS.
-
----
-
-## 34. Deterministic vs AI responsibility
-
-Use code for parsing/schema/link/meta/image mapping/placeholder detection/form structure/network/console/overflow measurements.
-
-Use AI for design understanding, Blueprint creation, content mapping, image art direction, visual judgment and repair reasoning.
-
-Do not spend LLM tokens on checks a parser/browser can establish deterministically.
-
----
-
-## 35. Testing
-
-Required unit coverage: intake normalization, prompt output schemas, generator parser, IMAGE_PLAN validation, KIE webhook validation/idempotency, asset manifest replacement, metadata, form contract.
-
-Integration tests should mock the complete V2 pipeline. Standard CI must not call paid KIE.
-
-Workflow-resume tests should simulate failure after Blueprint, partial images, QA-A, Fix Coordinator and publish.
-
-Browser tests at representative 1440/768/390/320 widths should cover navigation/mobile nav, form, keyboard, overflow, images, dynamic year and console.
-
-Maintain design fixtures for asymmetric/editorial, minimal, hospitality/image-heavy, bold service and genuine card-driven references. Also maintain deliberately generic fallback output so QA-A scoring can be regression-tested.
-
----
-
-## 36. Observability and cost
-
-Track per build:
-
-- stage transitions;
-- prompt/model/version;
-- latency/token/cost where available;
-- Browser Run use;
-- KIE task/attempt/cost;
-- first-pass and post-fix QA scores;
-- release-blocker invocation;
-- human revision/escalation.
-
-High Release Blocker Fix frequency is a signal to improve upstream Analyzer/Blueprint/Generator/Image Prompt logic, not to increase loop count.
-
----
-
-## 37. Implementation milestones
-
-### M0 — Audit
-Create fork audit and migration manifest. No product behavior change.
-
-### M1 — V2 domain contracts
-Normalized intake, build context/state, schemas, prompt registry/versioning, artifact paths/store, shared implementation contract.
-
-### M2 — Reference pipeline
-Secure acquisition, browser evidence, Reference Analyzer v2, artifact persistence.
-
-### M3 — Blueprint pipeline
-Reference Blueprint + Original Blueprint, shared schema and mode routing.
-
-### M4 — Website Generator v3
-New prompt/parser/IMAGE_PLAN, deterministic validator, one targeted repair.
-
-### M5 — Image prompt layer
-KIE Image Prompt Generator, model-capability mapping, prompt artifacts.
-
-### M6 — KIE V2 orchestration
-Reuse/refactor provider client, fan-out, callback/event handling, retries, R2 persistence, manifest and assembly.
-
-### M7 — Preview/browser evidence
-V2 preview deployment, screenshot/evidence helpers and deterministic technical scanner.
-
-### M8 — Dual QA
-QA-A and QA-B independently, structured reports and scoring. Initially no automated repair.
-
-### M9 — Fix Coordinator
-Bounded mutation, root-cause repairs, image regeneration routing and build v2.
-
-### M10 — Confirmations and Release Blocker
-Narrow confirmation stages, build v3, selective rerun and hard human-review stop.
-
-### M11 — Approval/revision integration
-Connect V2 automated pass to existing human approval and selective replay.
-
-### M12 — Mandatory V1 removal/cleanup
-Delete superseded V1 generation/product logic, old prompts, old QA, feature flags, dead dependencies/env vars/routes/tests. Rename/move V2 into canonical final structure.
-
-### M13 — Final architecture audit and release
-Create `docs/architecture/v2-final-architecture.md`; search all legacy/v1/deprecated/TODO migration markers; resolve every hit; run complete regression/release suite.
-
----
-
-## 38. Suggested PR sequence
-
-1. fork audit + migration manifest + schemas
-2. reference acquisition + Reference Analyzer
-3. Blueprint generators
-4. Website Generator v3
-5. image prompt + KIE V2 orchestration
-6. asset assembly + preview evidence
-7. QA-A + QA-B
-8. Fix Coordinator
-9. confirmations + Release Blocker Fix
-10. approval/revision integration
-11. remove superseded V1 pipeline and temporary compatibility scaffolding
-12. final V2 architecture/cleanup/release validation
-
-Avoid one giant rewrite PR.
-
----
-
-## 39. Clean-repo acceptance gate
-
-V2 is not complete until:
-
-- V2 is the sole generation pipeline;
-- no V1 generation path remains;
-- no superseded V1 prompts remain;
-- no old QA/fix loop remains;
-- no temporary dual-routing/legacy feature flags remain;
-- no obsolete image-generation path remains;
-- no dead compatibility code remains without explicit current purpose;
-- dependencies, Worker bindings, secrets, scripts and tests are cleaned;
-- README/developer docs describe V2 directly;
-- a new developer can understand V2 without learning V1 first.
-
-V1 remains available in its separate repository for rollback/history, so V2 does not need to preserve obsolete compatibility internally.
-
----
-
-## 40. Final coding-agent directive
-
-Do not rebuild the Cloudflare application from scratch.
-
-First understand the fork. Reuse proven platform infrastructure. Build the new intelligence as clearly separated stages. During development, temporary V1 comparison paths are permitted. Before V2 release, remove every superseded V1 product path and migration-only compatibility layer.
-
-The permanent product boundary is:
-
-```text
-BUSINESS / REFERENCE EVIDENCE
- -> DESIGN UNDERSTANDING
- -> DESIGN CONTRACT
- -> WEBSITE IMPLEMENTATION
- -> IMAGE ART DIRECTION
- -> REAL GENERATED MEDIA
- -> INDEPENDENT VISUAL + TECHNICAL REVIEW
- -> CONTROLLED ROOT-CAUSE REPAIR
- -> CONFIRMATION
- -> HUMAN APPROVAL
+# 25. Image HTML
+
+Use:
+
+```html id="qfauyx"
+<img
+  src="IMG:home-hero-primary"
+  alt="..."
+  data-image-id="home-hero-primary"
+>
 ```
 
-Do not let V2 collapse back into one mega-agent.
+Do not store large image prompts inside HTML.
+
+---
+
+# 26. Deterministic Site Validation
+
+Run BEFORE KIE.
+
+Validate:
+
+- required blocks;
+- valid IMAGE_PLAN;
+- four pages;
+- metadata;
+- H1;
+- navigation;
+- Contact form;
+- image mappings;
+- minimum image count;
+- fixed roles;
+- no orphan slots;
+- JSON-LD parse.
+
+Maximum:
+
+```text id="k4an93"
+one targeted generator repair
+```
+
+before failure.
+
+---
+
+# 27. KIE Image Prompt Generator v1
+
+Use approved prompt.
+
+For each Image Plan item:
+
+```text id="odoq3f"
+Business context
++
+Visual Blueprint photography grammar
++
+Image Plan
++
+KIE model capabilities
+```
+
+produces provider-ready:
+
+- positive prompt;
+- negative prompt;
+- aspect ratio;
+- provider parameters;
+- mobile art-direction recommendation.
+
+---
+
+# 28. Reuse Existing KIE Integration
+
+The low-level KIE client should be reused if reliable.
+
+Target architecture:
+
+```text id="7zu5gn"
+Image Prompt Generator
+        ↓
+ImageGenerationService
+        ↓
+KieProvider
+        ↓
+existing proven HTTP integration
+```
+
+Do not rewrite a working provider client because V2 is new.
+
+---
+
+# 29. KIE Call Timing
+
+Run KIE:
+
+```text id="zvh6cq"
+AFTER
+Website Generator
+
+AFTER
+validation
+
+AFTER
+IMAGE_PLAN
+
+BEFORE
+visual QA
+```
+
+This is mandatory.
+
+---
+
+# 30. Image Generation
+
+Fan out image tasks with concurrency controls.
+
+Priority:
+
+```text id="gl697l"
+CRITICAL homepage
+HIGH homepage
+inner-page lead
+supporting
+```
+
+Do not run sequentially unless required.
+
+---
+
+# 31. KIE Completion
+
+Preferred:
+
+```text id="klqj2k"
+KIE callback
+→ verify
+→ persist callback
+→ signal Workflow
+```
+
+Use existing callback/polling implementation if already sound, but final V2 should preferably use the cleaner callback flow.
+
+---
+
+# 32. KIE Security
+
+Validate provider webhook using documented signature mechanism.
+
+Ensure:
+
+- timestamp tolerance;
+- HMAC;
+- constant-time compare;
+- idempotency.
+
+Provider callbacks may be repeated.
+
+Do not process accepted task twice.
+
+---
+
+# 33. R2 Persistence
+
+Final pages must never depend on temporary provider URLs.
+
+Flow:
+
+```text id="annlzf"
+KIE result
+↓
+download
+↓
+R2
+↓
+asset manifest
+↓
+website
+```
+
+---
+
+# 34. Canonical Image Manifest
+
+Use one source of truth:
+
+```ts id="mqd8y5"
+interface ImageAssetManifest {
+  buildId: string;
+  buildVersion: number;
+
+  images: Record<
+    string,
+    {
+      slotId: string;
+      acceptedGenerationId: string;
+      assetKey: string;
+      publicUrl: string;
+
+      width?: number;
+      height?: number;
+
+      mobileVariant?: {
+        generationId: string;
+        assetKey: string;
+        publicUrl: string;
+      };
+    }
+  >;
+}
+```
+
+---
+
+# 35. Site Assembly
+
+Assembler resolves:
+
+```text id="kcyu25"
+IMG:id
+```
+
+using manifest.
+
+It must not query KIE directly.
+
+---
+
+# 36. Preview Deployment
+
+Use existing working preview infrastructure.
+
+Build versions:
+
+```text id="p8o3br"
+v1 initial generation
+v2 Fix Coordinator
+v3 Release Blocker Fix
+```
+
+---
+
+# 37. QA Capture
+
+After real images are assembled:
+
+capture actual website.
+
+Homepage:
+
+```text id="u08ct1"
+1440
+768
+390
+```
+
+Inner pages as needed.
+
+Reuse evidence between agents where appropriate.
+
+---
+
+# 38. QA-A Visual + Content v2
+
+Use approved prompt.
+
+Independent evaluator.
+
+Checks:
+
+- reference/Blueprint fidelity;
+- first viewport;
+- regions;
+- typography;
+- imagery;
+- composition;
+- image subject;
+- crop;
+- negative space;
+- AI artifacts;
+- mobile visual identity;
+- business truth;
+- content.
+
+No edits.
+
+---
+
+# 39. QA-B Browser + Technical v2
+
+Use approved prompt.
+
+Independent from QA-A.
+
+Checks:
+
+- page load;
+- nav;
+- mobile nav;
+- responsive mechanics;
+- keyboard;
+- accessibility;
+- Contact form;
+- console;
+- network;
+- IMAGE_PLAN mappings;
+- R2 assets;
+- temporary KIE leakage;
+- image loading;
+- structured data;
+- metadata;
+- performance risks.
+
+---
+
+# 40. Technical Scanner
+
+Before QA-B run deterministic checks.
+
+Examples:
+
+- unresolved IMG;
+- title duplication;
+- JSON-LD parse;
+- image count;
+- missing alt;
+- temporary KIE URL;
+- broken asset;
+- horizontal overflow;
+- console errors.
+
+LLM should consume evidence, not redo trivial parsing.
+
+---
+
+# 41. Independent QA
+
+QA-A and QA-B run separately.
+
+Neither sees the other's report before completion.
+
+Then both go to:
+
+```text id="613cej"
+Fix Coordinator v2
+```
+
+---
+
+# 42. Fix Coordinator v2
+
+Only main repair agent.
+
+Use approved prompt.
+
+Responsibilities:
+
+- validate defects;
+- deduplicate;
+- root-cause;
+- repair site;
+- repair content;
+- repair technical problems;
+- decide image repair strategy.
+
+---
+
+# 43. Image Repair Types
+
+Use:
+
+```text id="c5mc0j"
+CSS_FIX
+ASSET_ROUTING_FIX
+CONTENT_REMAP
+IMAGE_REGENERATION
+PROMPT_REPAIR_AND_REGENERATE
+BLUEPRINT_REVIEW_REQUIRED
+```
+
+KIE regeneration is not the default.
+
+---
+
+# 44. KIE Regeneration
+
+When required:
+
+```text id="445hb1"
+QA defect
+↓
+specific feedback
+↓
+KIE Image Prompt Generator
+↓
+KIE
+↓
+R2
+↓
+manifest
+↓
+reassemble
+```
+
+Never let Fix Coordinator bypass the Image Prompt Generator and improvise raw KIE prompts.
+
+---
+
+# 45. Confirmation
+
+After Fix Coordinator:
+
+```text id="brl7ox"
+QA-A Confirmation v2
+QA-B Confirmation v2
+```
+
+Both must pass.
+
+---
+
+# 46. Release Blocker Fix
+
+If either confirmation fails:
+
+run:
+
+```text id="s0sp0w"
+Release Blocker Fix v1
+```
+
+Only remaining P0/P1 defects.
+
+Then rerun only necessary confirmation domain(s).
+
+---
+
+# 47. Hard Stop
+
+If confirmation fails again:
+
+```text id="96b8rm"
+HUMAN_REVIEW_REQUIRED
+```
+
+No more automated repair cycles.
+
+---
+
+# 48. Human Approval
+
+Automated PASS leads to existing human/customer approval.
+
+Human can:
+
+```text id="xjndqz"
+APPROVE
+REQUEST REVISION
+```
+
+Production publishing follows approval.
+
+---
+
+# 49. Revision Routing
+
+Use selective reprocessing.
+
+## Content
+
+Reuse:
+
+- reference analysis;
+- Blueprint;
+- unaffected imagery.
+
+## Image
+
+Reuse:
+
+- site;
+- Blueprint;
+- Image Plan where appropriate.
+
+Run KIE prompt/image flow only for changed slots.
+
+## Brand
+
+Update brand-adapted Blueprint/token values.
+
+## Structural design
+
+Update/rebuild Blueprint if necessary.
+
+Do not blindly restart complete pipeline.
+
+---
+
+# 50. Workflow State
+
+Final V2 states should contain no V1 terminology.
+
+Example:
+
+```ts id="tvkbol"
+type BuilderStage =
+  | "RECEIVED"
+  | "NORMALIZING"
+  | "REFERENCE_ACQUISITION"
+  | "REFERENCE_ANALYSIS"
+  | "BLUEPRINT_GENERATION"
+  | "SITE_GENERATION"
+  | "GENERATION_VALIDATION"
+  | "IMAGE_PROMPTING"
+  | "IMAGE_GENERATION"
+  | "IMAGE_PERSISTENCE"
+  | "SITE_ASSEMBLY"
+  | "PREVIEW_DEPLOYMENT"
+  | "QA_CAPTURE"
+  | "QA_A"
+  | "QA_B"
+  | "FIX_COORDINATOR"
+  | "CONFIRMATION_CAPTURE"
+  | "QA_A_CONFIRMATION"
+  | "QA_B_CONFIRMATION"
+  | "RELEASE_BLOCKER_FIX"
+  | "AUTOMATED_PASS"
+  | "HUMAN_REVIEW_REQUIRED"
+  | "AWAITING_APPROVAL"
+  | "REVISION_REQUESTED"
+  | "PUBLISHING"
+  | "PUBLISHED"
+  | "FAILED";
+```
+
+---
+
+# 51. Prompt Registry
+
+Final V2 registry contains only V2 prompts:
+
+```text id="uz21n3"
+reference-analyzer-v2
+visual-blueprint-v2
+original-blueprint-v2
+website-generator-v3
+kie-image-prompt-v1
+qa-a-v2
+qa-b-v2
+fix-coordinator-v2
+qa-a-confirmation-v2
+qa-b-confirmation-v2
+release-blocker-fix-v1
+```
+
+Delete all superseded V1 prompt definitions before V2 release.
+
+---
+
+# 52. Prompt Versioning
+
+```ts id="v02n0i"
+const PROMPT_VERSIONS = {
+  referenceAnalyzer: "2.0.0",
+  visualBlueprint: "2.0.0",
+  originalBlueprint: "2.0.0",
+  websiteGenerator: "3.0.0",
+  kieImagePrompt: "1.0.0",
+  qaA: "2.0.0",
+  qaB: "2.0.0",
+  fixCoordinator: "2.0.0",
+  qaAConfirmation: "2.0.0",
+  qaBConfirmation: "2.0.0",
+  releaseBlockerFix: "1.0.0"
+};
+```
+
+These are product prompt versions, not indications that V1 code remains.
+
+---
+
+# 53. Shared Implementation Contract
+
+Create one canonical:
+
+```text id="bkx8z5"
+prompts/shared/implementation-contract
+```
+
+or similar.
+
+Use it for:
+
+- Generator;
+- QA-B;
+- Fix Coordinator;
+- confirmations.
+
+Avoid duplicating technical requirements across prompt files.
+
+---
+
+# 54. Final Source Architecture
+
+After V1 removal, target something similar to:
+
+```text id="j2edyv"
+src/
+  builder/
+    orchestration/
+    intake/
+    reference/
+    blueprint/
+    generation/
+    images/
+    qa/
+    repair/
+    artifacts/
+    domain/
+    telemetry/
+
+  prompts/
+    reference-analyzer.ts
+    visual-blueprint.ts
+    original-blueprint.ts
+    website-generator.ts
+    image-prompt.ts
+    qa-a.ts
+    qa-b.ts
+    fix-coordinator.ts
+    qa-a-confirmation.ts
+    qa-b-confirmation.ts
+    release-blocker-fix.ts
+    shared/
+
+  providers/
+    ai/
+    kie/
+    browser/
+
+  storage/
+    d1/
+    r2/
+
+  deployment/
+
+  approval/
+```
+
+Adapt to actual repo conventions.
+
+The important point:
+
+No:
+
+```text id="p6tufm"
+legacy/
+v1/
+old-generator/
+```
+
+in final V2 source.
+
+---
+
+# 55. Database Strategy
+
+Because this is a fork, V2 does not need runtime compatibility with a V1 database unless deployment infrastructure explicitly shares the same production DB.
+
+The coding agent must determine this during audit.
+
+If V2 gets its own D1:
+
+prefer a clean V2 schema.
+
+If it must share an existing D1 during migration:
+
+create migrations carefully, then consider fresh V2 DB before production cutover.
+
+Preferred final production architecture:
+
+```text id="zqqyuo"
+V1 repo → V1 resources
+
+V2 repo → V2 resources
+```
+
+where operationally practical.
+
+Avoid unnecessary coupling.
+
+---
+
+# 56. V2 D1 Schema
+
+Final V2 should represent current concepts clearly.
+
+Likely entities:
+
+```text id="tzm2a0"
+builds
+build_versions
+agent_runs
+image_generation_tasks
+qa_runs
+build_events
+approvals
+```
+
+Do not retain obsolete V1 columns simply for historical compatibility if V2 uses its own DB.
+
+---
+
+# 57. R2
+
+Likewise, decide whether:
+
+- reuse existing bucket;
+- create V2 prefix;
+- create dedicated V2 bucket.
+
+Dedicated V2 prefix/bucket is cleaner.
+
+Example:
+
+```text id="w032gk"
+v2/builds/{buildId}/...
+```
+
+During final production cutover, choose permanent clean convention.
+
+---
+
+# 58. Artifact Storage
+
+Recommended:
+
+```text id="4skt75"
+builds/{buildId}/
+
+  intake/
+  reference/
+  blueprint/
+
+  versions/
+    1/
+      generation/
+      image-prompts/
+      images/
+      asset-manifest.json
+      qa/
+
+    2/
+      ...
+
+    3/
+      ...
+
+  final/
+```
+
+---
+
+# 59. Idempotency
+
+Use stable identities:
+
+Agent:
+
+```text id="xvsrcq"
+buildId + stage + promptVersion + inputHash
+```
+
+Image:
+
+```text id="6w4fg3"
+buildId + version + slotId + attempt
+```
+
+Callback:
+
+```text id="56fw1h"
+providerTaskId
+```
+
+Deployment:
+
+```text id="k6i64h"
+buildId + version
+```
+
+---
+
+# 60. Resume Safety
+
+Workflow restart must not recreate completed expensive work.
+
+Examples:
+
+8/12 images completed:
+
+reuse 8.
+
+Blueprint completed:
+
+reuse Blueprint.
+
+QA-A completed:
+
+do not rerun because QA-B failed.
+
+---
+
+# 61. Cost Controls
+
+Track:
+
+- agent cost;
+- KIE cost;
+- browser cost.
+
+Operational limits:
+
+```text id="kf0cn5"
+MAX_IMAGES_PER_BUILD
+MAX_KIE_ATTEMPTS_PER_SLOT
+MAX_KIE_ATTEMPTS_PER_BUILD
+```
+
+Do not let cost constraints silently alter Blueprint.
+
+---
+
+# 62. Testing
+
+## Unit
+
+Test:
+
+- intake normalization;
+- schemas;
+- generator parser;
+- IMAGE_PLAN;
+- KIE callback security;
+- image manifest;
+- metadata;
+- Contact form.
+
+## Integration
+
+Mock complete V2 workflow.
+
+Do not call paid KIE from standard CI.
+
+## Browser
+
+Test:
+
+```text id="5mma3f"
+1440
+768
+390
+320
+```
+
+with:
+
+- navigation;
+- mobile menu;
+- form;
+- images;
+- overflow;
+- console.
+
+---
+
+# 63. Visual Fixtures
+
+Maintain reference fixtures for:
+
+- editorial/asymmetric;
+- minimal;
+- hospitality/image-rich;
+- bold service;
+- genuine card-heavy design.
+
+V2 should not interpret "anti-generic" as "cards forbidden."
+
+---
+
+# 64. Image Fixtures
+
+Test:
+
+- text-safe negative space;
+- right-third subject;
+- portrait media;
+- environmental wide shot;
+- no-human scene;
+- separate mobile variant.
+
+---
+
+# 65. QA Fixtures
+
+Ensure QA-A catches:
+
+- generic fallback;
+- wrong hero mass;
+- centered image where right-weighted required;
+- poor negative space;
+- inconsistent photography;
+- AI artifacts.
+
+Ensure QA-B catches:
+
+- temporary KIE URL;
+- missing R2 asset;
+- unresolved IMG;
+- broken nav;
+- lazy hero;
+- mobile variant not used.
+
+---
+
+# 66. Development Branch Strategy
+
+Suggested:
+
+```text id="kpzw2a"
+main
+```
+
+always represents currently viable V2 fork state.
+
+Feature branches:
+
+```text id="jr9k7x"
+v2/reference-pipeline
+v2/blueprint
+v2/generator
+v2/images
+v2/qa
+v2/repair
+v2/cleanup
+```
+
+Exact branch policy may follow existing team workflow.
+
+---
+
+# 67. Recommended PR Sequence
+
+## PR 1 — V1 Fork Audit
+
+No substantial behavior change.
+
+Deliver:
+
+- architecture audit;
+- migration manifest;
+- V1 deletion candidates.
+
+## PR 2 — V2 Contracts
+
+- schemas;
+- build state;
+- normalized intake;
+- prompt registry;
+- artifact store.
+
+## PR 3 — Reference Pipeline
+
+- acquisition;
+- Analyzer.
+
+## PR 4 — Blueprint
+
+- Reference Blueprint;
+- Original Blueprint.
+
+## PR 5 — Website Generator v3
+
+- new output;
+- IMAGE_PLAN;
+- validator.
+
+## PR 6 — KIE Image Pipeline
+
+- prompt generator;
+- provider adapter reuse;
+- task flow;
+- R2;
+- manifest.
+
+## PR 7 — Preview + Browser Evidence
+
+## PR 8 — QA-A / QA-B
+
+## PR 9 — Fix Coordinator
+
+## PR 10 — Confirmation + Release Blocker
+
+## PR 11 — Approval/revision integration
+
+## PR 12 — V1 Removal / Repository Cleanup
+
+This final PR is mandatory.
+
+---
+
+# 68. V1 Removal PR
+
+Create an explicit final cleanup PR.
+
+Title concept:
+
+```text id="x0obtu"
+Remove superseded V1 pipeline and finalize V2 architecture
+```
+
+It should delete:
+
+- old generator;
+- old prompts;
+- old QA;
+- old image prompt path;
+- unused sections/helpers;
+- temporary compatibility flags;
+- duplicate routes;
+- obsolete test fixtures;
+- dead env variables;
+- unused dependencies.
+
+---
+
+# 69. Dependency Cleanup
+
+After V1 deletion run:
+
+```text id="5jc7rn"
+package dependency audit
+```
+
+Remove packages only used by V1.
+
+Also remove:
+
+- unused Worker bindings;
+- secrets;
+- Wrangler vars;
+- scripts;
+- npm commands.
+
+---
+
+# 70. Environment Cleanup
+
+Final V2 environment should not contain flags such as:
+
+```text id="dtpojz"
+USE_V1_GENERATOR
+BUILDER_V2_ENABLED
+LEGACY_IMAGE_MODE
+OLD_QA_ENABLED
+```
+
+Those are migration scaffolding.
+
+Delete them.
+
+---
+
+# 71. Route Cleanup
+
+No permanent:
+
+```text id="rrioyl"
+/api/v1/generate
+/api/v2/generate
+```
+
+if this product only exposes V2 after release and versioned API routing is not an intentional public API strategy.
+
+Prefer canonical V2 route names.
+
+Only keep versioned API paths when external backwards compatibility genuinely requires them.
+
+---
+
+# 72. Schema Cleanup
+
+Before final V2 production database creation/migration:
+
+review all fields.
+
+Delete concepts such as:
+
+```text id="eka6et"
+legacy_generation_output
+old_image_prompt
+v1_review_status
+```
+
+if no current role exists.
+
+---
+
+# 73. Test Cleanup
+
+Delete tests validating intentionally removed V1 behavior.
+
+Do not retain:
+
+```text id="oj03rp"
+legacy generator should still...
+```
+
+in V2 repo.
+
+Replace with V2 contract tests.
+
+---
+
+# 74. Documentation Cleanup
+
+Final V2 README must describe V2 only.
+
+Move historical migration docs to:
+
+```text id="15gq9y"
+docs/migration/
+```
+
+or delete them once no longer useful.
+
+Main developer documentation should not force new engineers to understand V1.
+
+---
+
+# 75. Final Architecture Audit
+
+Before release create:
+
+```text id="0dddk3"
+docs/architecture/v2-final-architecture.md
+```
+
+Document only the finished V2 system.
+
+Then perform search for:
+
+```text id="u9dfh4"
+legacy
+v1
+oldGenerator
+oldReview
+deprecated
+TODO remove after migration
+```
+
+Every hit must be reviewed.
+
+---
+
+# 76. Clean-Repo Acceptance Gate
+
+V2 may not be declared complete until:
+
+```text id="qvel3p"
+No V1 generation path remains.
+No V1 prompts remain.
+No temporary dual-routing remains.
+No legacy feature flags remain.
+No obsolete image-generation path remains.
+No old QA loop remains.
+No dead compatibility code remains without documented reason.
+```
+
+---
+
+# 77. Operational Separation
+
+Ideally V1 and V2 deployments should be independently deployable.
+
+For example:
+
+```text id="jbz2pe"
+V1 repo
+→ V1 Worker/resources
+
+V2 repo
+→ V2 Worker/resources
+```
+
+during validation.
+
+Do not make V2 development capable of accidentally breaking V1 production.
+
+---
+
+# 78. Cutover
+
+Once V2 is production-ready:
+
+1. freeze V2 release candidate;
+2. run end-to-end regression set;
+3. run multiple real-business builds;
+4. verify KIE costs;
+5. verify QA scoring;
+6. verify approval flow;
+7. verify domains/deployment;
+8. make V2 production system;
+9. retain V1 repo for rollback/reference;
+10. do not retain V1 code inside V2.
+
+---
+
+# 79. Rollback
+
+Because V1 remains a separate repository, rollback does not require V2 source to retain legacy code.
+
+Operational rollback can redeploy V1 from its own repository if necessary.
+
+This is a major advantage of the fork strategy.
+
+It allows V2 to remain clean.
+
+---
+
+# 80. Definition of Done — Codebase
+
+V2 is done when:
+
+- V2 pipeline is sole generation pipeline;
+- all V1 superseded code removed;
+- no dual mode for V1/V2 remains;
+- schemas describe V2 concepts;
+- tests cover V2;
+- README covers V2;
+- dependencies are cleaned;
+- deployment works standalone.
+
+---
+
+# 81. Definition of Done — Design
+
+Reference mode:
+
+- reference analyzed once;
+- Blueprint generated;
+- Generator implements Blueprint;
+- QA-A visual score >=90.
+
+Original mode:
+
+- Blueprint is distinctive;
+- no generic fallback;
+- QA-A >=90 against generated Blueprint.
+
+---
+
+# 82. Definition of Done — Images
+
+- Website Generator creates IMAGE_PLAN;
+- KIE Prompt Generator creates final prompts;
+- KIE runs after validation;
+- prompts contain subject, shot, orientation, lighting, crop, human presence, background, colour, temperature, composition;
+- accepted media persisted;
+- final site uses no temporary KIE media;
+- image QA exists.
+
+---
+
+# 83. Definition of Done — Technical
+
+QA-B >=90.
+
+No:
+
+- P0;
+- P1;
+- broken core page;
+- broken nav;
+- broken mobile nav;
+- critical image failure;
+- unresolved IMG placeholder;
+- temporary KIE release dependency;
+- major accessibility blocker.
+
+---
+
+# 84. Definition of Done — Repair
+
+Maximum automated mutation:
+
+```text id="kvozwe"
+Fix Coordinator
++
+optional Release Blocker Fix
+```
+
+Then human escalation.
+
+---
+
+# 85. Definition of Done — Repository Cleanliness
+
+Final V2 repo must be understandable without knowing V1.
+
+A new developer should see:
+
+```text id="4xs0ju"
+one builder
+one orchestration system
+one image pipeline
+one QA architecture
+one release flow
+```
+
+not:
+
+```text id="wbog6k"
+old path
+new path
+compatibility path
+temporary path
+```
+
+---
+
+# 86. Final Coding-Agent Directive
+
+You are implementing Website Builder V2 inside a fork of the existing V1 repository.
+
+The V1 repository will remain separately available.
+
+Therefore:
+
+## During implementation
+
+Reuse working V1 infrastructure aggressively.
+
+It is acceptable to temporarily keep V1 code for:
+
+- comparison;
+- staged migration;
+- keeping the fork operational.
+
+## At completion
+
+Remove all V1 functionality superseded by V2.
+
+Do not preserve obsolete code for backwards compatibility.
+
+The final repository must represent the V2 architecture directly and cleanly.
+
+Use this conceptual migration:
+
+```text id="e7f32v"
+V1 FORK
+│
+├── proven infrastructure ───────────────┐
+│                                        │
+├── old generation intelligence ──X      │
+├── old image prompts ─────────────X      │
+├── old QA ────────────────────────X      │
+│                                        │
+└────────────────────────────────────────┤
+                                         ▼
+                               CLEAN V2 ARCHITECTURE
+                                         │
+                                         ├── Reference Analyzer
+                                         ├── Blueprint
+                                         ├── Website Generator
+                                         ├── IMAGE_PLAN
+                                         ├── KIE Prompt Generator
+                                         ├── KIE/R2 Assets
+                                         ├── QA-A
+                                         ├── QA-B
+                                         ├── Fix Coordinator
+                                         ├── Confirmations
+                                         ├── Release Blocker Fix
+                                         └── Approval / Publish
+```
+
+The final guiding rule is:
+
+> **Keep the proven platform code. Delete the superseded product logic.**
+
+V1 remains safe in its own repository.
+
+V2 should therefore be allowed to become genuinely clean.
