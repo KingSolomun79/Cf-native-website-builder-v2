@@ -4,19 +4,27 @@ This file defines the canonical domain vocabulary for Website Builder V2.
 
 It is intentionally implementation-free. Architecture, storage, provider and runtime decisions belong in the PRD and ADRs, not here.
 
+## Onboarding Submission
+
+An **Onboarding Submission** is the complete input package submitted through the website-generation onboarding form and is the authoritative starting point for a new Site generation.
+
+Each Site generation starts from a new Onboarding Submission; V2 has no Client Account or Client User concept.
+
+_Avoid_: Client Account, Customer Account, User Profile.
+
 ## Business
 
-A **Business** is the real local business whose website is being created. Its supplied facts are authoritative for identity, services, audience, location, contact details and other factual content.
+A **Business** is the real business described by an Onboarding Submission and represented by the generated Site. Its submitted facts are authoritative for identity, services, audience, location, contact details and other factual content.
 
-Do not use **Client** as a synonym for Business when referring to the organization represented by the generated website. A Client may later be the person or organization purchasing/managing the service; Business is the entity the website describes.
+_Avoid_: Client, Account, Customer when referring to the business represented by the Site.
 
 ## Site
 
-A **Site** is the customer-facing four-page website for one Business.
+A **Site** is the customer-facing four-page website created from one Onboarding Submission for one Business.
 
-A Site has one current published version at most, but may have multiple candidate Build Versions before or after publication.
+A Site has one current Published Version at most and may have multiple Builds during generation and revision.
 
-Do not use **Site** as a synonym for Build or Build Version.
+_Avoid_: Build, Build Version.
 
 ## Build
 
@@ -89,7 +97,7 @@ For REFERENCE_BOUND Builds, it translates the Reference Analysis into a design c
 
 For ORIGINAL_DESIGN Builds, it is created directly from Business and creative inputs.
 
-Do not use **Blueprint** to mean implementation plan or generated source.
+_Avoid_: Implementation Plan, generated source.
 
 ## Implementation Contract
 
@@ -117,7 +125,7 @@ A Release Candidate is not yet approved for publication.
 
 ## Release Blocker
 
-A **Release Blocker** is a P0 or P1 defect that prevents a Release Candidate from being considered release-ready.
+A **Release Blocker** is a P0 or P1 defect that prevents a Release Candidate from being considered Release Ready.
 
 Minor imperfections and optional polish are not Release Blockers.
 
