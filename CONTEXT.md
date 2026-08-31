@@ -12,6 +12,14 @@ Each Site generation starts from a new Onboarding Submission; V2 has no Client A
 
 _Avoid_: Client Account, Customer Account, User Profile.
 
+## Revision Request
+
+A **Revision Request** is a human-requested change to an existing Site after its initial Build has entered review. It contains only the requested delta and starts a new Build derived from the previous Build's approved inputs.
+
+A Revision Request does not require a new Onboarding Submission unless the request is for a completely new Site generation.
+
+_Avoid_: treating a Revision Request as an automated Build Version.
+
 ## Business
 
 A **Business** is the real business described by an Onboarding Submission and represented by the generated Site. Its factual identity is limited to what the Onboarding Submission supports.
