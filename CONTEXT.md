@@ -64,6 +64,14 @@ A Site has one current Published Version at most. The Onboarding Submission belo
 
 _Avoid_: Site Generation, Build, Build Version, Deployment, treating one Onboarding Submission as the permanent identity of the Site.
 
+## Site Configuration
+
+**Site Configuration** is mutable operational state that belongs to the Site but is not part of an immutable Build Version. It contains runtime settings that may change independently of website generation, such as the current Form Destination.
+
+Changing Site Configuration does not create a Build, Revision Request or Site Generation and does not require rebuilding or republishing the Site unless the configuration change itself affects generated content or design.
+
+_Avoid_: embedding mutable operational routing as authoritative state inside a Build Version.
+
 ## Build
 
 A **Build** is one end-to-end attempt to create or revise a Site from one fixed approved set of business, content and design inputs. A new human-requested content or creative change starts a new Build, even when derived from a previous Build.
@@ -116,7 +124,7 @@ _Avoid_: regenerated fallback, arbitrary historical Build Version, permanent arc
 
 A **Rollback** is the operational restoration of the Rollback Version as the Site's active Published Version. It reactivates that exact previously approved Build Version without creating a new Build, Build Version or Approval and without regenerating source.
 
-Rollback changes current publication state but never rewrites history: the replaced version remains recorded as a Build Version that was previously approved and published. Any later corrected replacement must still follow the normal Release Ready → Approval → Published flow.
+Rollback changes current publication state but never rewrites history: the replaced version remains recorded as a Build Version that was previously approved and published. Mutable Site Configuration does not roll back with the Build Version unless explicitly requested.
 
 _Avoid_: new Build, new Approval, regeneration, erasing prior publication history.
 
@@ -313,6 +321,8 @@ A Form Submission is not successful merely because the browser accepted the clic
 
 ## Form Destination
 
-A **Form Destination** is the Business-approved recipient for contact messages from a Site.
+A **Form Destination** is the currently approved recipient for contact messages from a Site and is part of mutable Site Configuration rather than an immutable Build Version.
 
-The visitor cannot choose or override the Form Destination.
+Changing the Form Destination does not create a Build, Revision Request or Site Generation and does not require rebuilding or republishing the Site. The visitor can never choose or override the Form Destination, and Rollback does not change it unless explicitly requested.
+
+_Avoid_: browser-controlled recipient, Build-embedded authoritative destination, automatic rollback of recipient configuration.
