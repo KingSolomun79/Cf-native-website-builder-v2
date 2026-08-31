@@ -247,9 +247,19 @@ _Avoid_: Release Blocker category, generic failure status, another retry instruc
 
 ## Degraded
 
-A **Degraded** Build is one that completed enough processing to produce a usable preview or partial result, but did not satisfy the normal completion/release contract.
+A **Degraded** Build is one that produced a genuinely usable Preview or partial result, but one or more non-optional parts of the normal Build/release contract were not satisfied.
 
-Degradation must always be explicit; it is never a silent success state.
+A Degraded Build is never Release Ready and must never publish automatically. It may be surfaced to a human for inspection, diagnosis or salvage only when the remaining result is still useful.
+
+_Avoid_: silent success, Release Ready, unusable failure.
+
+## Failed
+
+A **Failed** Build is one that could not produce a usable candidate or meaningful partial result for its intended contract.
+
+If the remaining output is not genuinely useful for human inspection, diagnosis or salvage, the Build is Failed rather than Degraded.
+
+_Avoid_: Degraded when no useful result remains.
 
 ## Benchmark Site
 
