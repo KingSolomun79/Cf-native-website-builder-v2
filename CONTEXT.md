@@ -177,15 +177,27 @@ _Avoid_: alternate design direction, Blueprint rewrite, silent simplification.
 
 ## Image Slot
 
-An **Image Slot** is one planned visual role within a Site.
+An **Image Slot** is a stable visual requirement within a Build, defined by its semantic purpose and compositional role before image generation begins.
 
-Each Image Slot has a semantic purpose and compositional role. A generated image is successful only if it fulfills that role, not merely because it is visually attractive.
+Cropping, object-position changes, remapping or generating another candidate do not create a new Image Slot. If the semantic or compositional role itself changes, that change belongs in a new Build/Blueprint path rather than silently repurposing the existing slot.
+
+_Avoid_: generated image candidate, arbitrary asset placeholder.
+
+## Image Attempt
+
+An **Image Attempt** is one generated candidate created to satisfy a specific Image Slot.
+
+Multiple Image Attempts may exist for the same Image Slot; creating another attempt does not change the Image Slot's identity or requirements.
+
+_Avoid_: Image Slot, Accepted Image.
 
 ## Accepted Image
 
-An **Accepted Image** is the image currently selected to fulfill an Image Slot for a specific Build Version.
+An **Accepted Image** is the Image Attempt selected to fulfill an Image Slot for a specific Build Version because it satisfies that slot's semantic and compositional requirements.
 
-A later repair may produce a new image attempt without changing the identity or purpose of the Image Slot.
+A later repair may select or generate another Image Attempt without changing the underlying Image Slot.
+
+_Avoid_: any generated image regardless of fit.
 
 ## Release Candidate
 
