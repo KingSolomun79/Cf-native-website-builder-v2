@@ -207,9 +207,11 @@ _Avoid_: any generated image regardless of fit.
 
 ## Release Candidate
 
-A **Release Candidate** is a Build Version that has completed generation and required preflight checks and is undergoing or has completed release QA.
+A **Release Candidate** is one exact Build Version that has completed generation and required preflight checks and is undergoing automated release QA.
 
-A Release Candidate is not yet approved for publication.
+A Release Candidate may still contain defects and may enter the bounded repair process. Any repair that changes the candidate produces a new immutable Build Version, which becomes a new Release Candidate and must be evaluated on its own.
+
+_Avoid_: treating a repaired candidate as the same Build Version.
 
 ## Release Blocker
 
@@ -219,9 +221,11 @@ Minor imperfections and optional polish are not Release Blockers.
 
 ## Release Ready
 
-A Build Version is **Release Ready** when all automated release gates have passed and no Release Blocker remains.
+A Build Version is **Release Ready** only when that exact Build Version has passed all automated release gates and no Release Blocker remains.
 
-Release Ready does not mean Published; human Approval is still required.
+Release Ready is an automated quality state, not human Approval or publication. A Blueprint-level defect cannot be converted into Release Ready through implementation-only repair; it requires the explicit Blueprint-review path or a new Build/Site Generation.
+
+_Avoid_: Approved, Published, or “good enough after repair” without re-evaluating the new Build Version.
 
 ## Approval
 
