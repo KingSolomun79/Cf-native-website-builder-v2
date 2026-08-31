@@ -141,15 +141,19 @@ QA evaluates the resulting Site against the Reference plus this declared contrac
 
 ## Reference Evidence
 
-**Reference Evidence** is the observed visual and behavioral evidence collected from a Reference before interpretation.
+**Reference Evidence** is the descriptive record of observable or measurable facts, captures and behaviors collected from a Reference before interpretation. It records what is present without deciding why it matters or what the generated Site should do.
 
-It may contain measurements, captures and observations, but it does not decide what the generated Site should do.
+Reference Evidence is never rewritten to match a later interpretation.
+
+_Avoid_: inferred importance, design intent, signature-trait judgments.
 
 ## Reference Analysis
 
-A **Reference Analysis** is the structured interpretation of Reference Evidence that explains what makes the Reference visually and behaviorally distinctive.
+A **Reference Analysis** is the structured interpretation of Reference Evidence that identifies hierarchy, relationships, signature traits, likely design intent and which observed characteristics carry the Reference's visual identity.
 
-It describes the Reference; it does not yet specify the new Site.
+It may rank or contextualize Evidence, but it must not overwrite, contradict or fabricate Reference Evidence.
+
+_Avoid_: raw measurements or invented observations presented as evidence.
 
 ## Visual Blueprint
 
