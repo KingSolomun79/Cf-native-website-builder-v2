@@ -6,11 +6,11 @@ It is intentionally implementation-free. Architecture, storage, provider and run
 
 ## Onboarding Submission
 
-An **Onboarding Submission** is the immutable input package submitted through the website-generation onboarding form and is the authoritative starting point for one Site Generation.
+An **Onboarding Submission** is the immutable input package and fact snapshot submitted through the website-generation onboarding form for one Site Generation. It records what is known or declared about the Business for that generation and is never rewritten when later facts change.
 
-A Site may have multiple Onboarding Submissions over time when replacement Site Generations are started. V2 has no Client Account or Client User concept.
+A Site may have multiple Onboarding Submissions over time when replacement Site Generations are started. Later submissions may supersede earlier facts for future generations without changing the historical inputs that governed earlier Builds. V2 has no Client Account or Client User concept.
 
-_Avoid_: Client Account, Customer Account, User Profile.
+_Avoid_: Client Account, Customer Account, User Profile, mutable Business profile.
 
 ## Site Generation
 
@@ -30,13 +30,15 @@ _Avoid_: treating a Revision Request as an automated Build Version or using it t
 
 ## Business
 
-A **Business** is the real business represented by a Site and described by the Onboarding Submission bound to each Site Generation. Its factual identity for a given generation is limited to what that generation's Onboarding Submission supports.
+A **Business** is the stable real-world entity represented by a Site across Site Generations. Its facts may change over time; V2 evaluates each Site Generation against the immutable Onboarding Submission that governed that generation rather than treating one submission as a timeless Business profile.
 
-_Avoid_: Client, Account, Customer when referring to the business represented by the Site.
+_Avoid_: Client, Account, Customer when referring to the business represented by the Site; treating one submission as the permanent Business record.
 
 ## Business Fact
 
-A **Business Fact** is a concrete claim about the Business that is directly supported by the Onboarding Submission governing the relevant Site Generation. Missing facts must remain unknown rather than being invented.
+A **Business Fact** is a concrete claim about the Business that is directly supported by the Onboarding Submission governing the relevant Site Generation. Its validity is scoped to that submission unless another authoritative source is explicitly introduced.
+
+Later Onboarding Submissions may supersede earlier facts for new Site Generations without rewriting historical Builds or Build Records. Missing facts must remain unknown rather than being invented.
 
 Examples include prices, locations, certifications, awards, years of experience, service coverage and quantitative claims.
 
