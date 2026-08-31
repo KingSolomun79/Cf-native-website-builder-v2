@@ -76,15 +76,23 @@ _Avoid_: Deployment, Build Version.
 
 ## Deployment
 
-A **Deployment** is a runnable preview or published instance of a Build Version. Failed or superseded Deployments are disposable and should not be treated as permanent Build history.
+A **Deployment** is a runnable instance of one exact Build Version. A Deployment may be a Preview or the Published Version; failed or superseded Deployments are disposable and should not be treated as permanent Build history.
 
 _Avoid_: Build Record, Site.
+
+## Preview
+
+A **Preview** is the inspectable pre-publication Deployment of one exact Build Version used for automated QA and human review.
+
+A Preview may be replaced or deleted when superseded; Approval promotes that same Build Version toward publication rather than regenerating it.
+
+_Avoid_: Published Version, a regenerated copy of an approved Build Version.
 
 ## Published Version
 
 A **Published Version** is the specific approved Build Version currently serving as the live Site.
 
-Publishing a newer Build Version does not change the identity of the Site.
+Publishing a newer Build Version does not change the identity of the Site and must not regenerate the approved Build Version.
 
 ## Build Mode
 
