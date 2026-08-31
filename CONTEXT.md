@@ -104,6 +104,14 @@ A Rollback Version is not active publication and is retained only for the define
 
 _Avoid_: regenerated fallback, arbitrary historical Build Version, permanent archive of every published Deployment.
 
+## Rollback
+
+A **Rollback** is the operational restoration of the Rollback Version as the Site's active Published Version. It reactivates that exact previously approved Build Version without creating a new Build, Build Version or Approval and without regenerating source.
+
+Rollback changes current publication state but never rewrites history: the replaced version remains recorded as a Build Version that was previously approved and published. Any later corrected replacement must still follow the normal Release Ready → Approval → Published flow.
+
+_Avoid_: new Build, new Approval, regeneration, erasing prior publication history.
+
 ## Build Mode
 
 A **Build Mode** is the design-origin strategy used for a Site Generation.
