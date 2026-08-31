@@ -167,9 +167,13 @@ _Avoid_: Implementation Plan, generated source, mutable repair target.
 
 ## Implementation Contract
 
-An **Implementation Contract** is the agreed mapping from a Visual Blueprint and Business content into a coherent Site implementation plan.
+An **Implementation Contract** is the binding realization plan for expressing a Visual Blueprint and the Business content across the four pages of the Site.
 
-It determines how the committed design and content are expressed across the four pages without changing the Visual Blueprint itself.
+It may choose page structure, content allocation, component boundaries, responsive realization, image-slot mapping and other implementation-facing details, but it must not change the Visual Blueprint's topology, signature traits, first-viewport composition, image roles or visual thesis.
+
+If the Visual Blueprint cannot be realized within V2 capability, the Implementation Contract must surface an explicit blocker rather than silently simplify or reinterpret the design.
+
+_Avoid_: alternate design direction, Blueprint rewrite, silent simplification.
 
 ## Image Slot
 
