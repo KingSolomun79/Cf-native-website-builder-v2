@@ -66,7 +66,7 @@ _Avoid_: Site Generation, Build, Build Version, Deployment, treating one Onboard
 
 ## Site Configuration
 
-**Site Configuration** is mutable operational state that belongs to the Site but is not part of an immutable Build Version. It contains runtime settings that may change independently of website generation, such as the current Form Destination.
+**Site Configuration** is mutable operational state that belongs to the Site but is not part of an immutable Build Version. It contains runtime settings that may change independently of website generation, such as the current Form Destination and Sender Identity.
 
 Changing Site Configuration does not create a Build, Revision Request or Site Generation and does not require rebuilding or republishing the Site unless the configuration change itself affects generated content or design.
 
@@ -344,3 +344,19 @@ A **Form Destination** is the currently approved recipient for contact messages 
 Changing the Form Destination does not create a Build, Revision Request or Site Generation and does not require rebuilding or republishing the Site. The visitor can never choose or override the Form Destination, and Rollback does not change it unless explicitly requested.
 
 _Avoid_: browser-controlled recipient, Build-embedded authoritative destination, automatic rollback of recipient configuration.
+
+## Sender Identity
+
+A **Sender Identity** is the authenticated email address or domain the platform is authorized to use as the outbound From identity for Email Delivery.
+
+V2 defaults to a verified WAZIBIZ platform Sender Identity. A Business-owned sender domain may be supported later as optional Site Configuration only after that domain is verified. Changing Sender Identity is an operational configuration change, not a Build or Revision Request.
+
+_Avoid_: visitor-controlled From address, unverified Business domain, treating Form Destination as sender identity.
+
+## Reply-To
+
+**Reply-To** is the visitor-provided email address attached to an outbound Email Delivery so the Business can reply directly to the visitor without using that visitor address as the authenticated Sender Identity.
+
+The visitor email may populate Reply-To after validation, but must never become the transactional From identity.
+
+_Avoid_: visitor email as From, conflating Reply-To with Sender Identity.
