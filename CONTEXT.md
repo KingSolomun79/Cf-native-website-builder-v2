@@ -175,7 +175,15 @@ Minor imperfections and optional polish are not Release Blockers.
 
 A Build Version is **Release Ready** when all automated release gates have passed and no Release Blocker remains.
 
-Release Ready does not mean Published; human approval is still required.
+Release Ready does not mean Published; human Approval is still required.
+
+## Approval
+
+**Approval** is the explicit human acceptance of one exact Release Ready Build Version for publication. Approval belongs only to that Build Version and never carries forward to another Build or superseded candidate.
+
+A Revision Request after Approval creates a new Build that requires its own Approval before it can replace the Published Version.
+
+_Avoid_: approving a Site generally or reusing Approval across Build Versions.
 
 ## Human Review Required
 
