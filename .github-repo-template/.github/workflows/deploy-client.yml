@@ -1,0 +1,77 @@
+name: Deploy Client Sites
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'clients/**'
+
+jobs:
+  detect:
+    runs-on: ubuntu-latest
+    outputs:
+      clients_json: ${{ steps.detect.outputs.clients_json }}
+      has_clients: ${{ steps.detect.outputs.has_clients }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+      - id: detect
+        run: |
+          CHANGED=$(git diff --name-only HEAD~1 HEAD 2>/dev/null | grep '^clients/' | cut -d'/' -f2 | sort -u || true)
+          if [ -z "$CHANGED" ]; then
+            echo "has_clients=false" >> "$GITHUB_OUTPUT"
+            echo "clients_json=[]" >> "$GITHUB_OUTPUT"
+          else
+            JSON=$(printf '%s\n' $CHANGED | jq -R . | jq -sc .)
+            echo "has_clients=true" >> "$GITHUB_OUTPUT"
+            echo "clients_json=$JSON" >> "$GITHUB_OUTPUT"
+          fi
+
+  deploy:
+    needs: detect
+    if: needs.detect.outputs.has_clients == 'true'
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        client: ${{ fromJson(needs.detect.outputs.clients_json) }}
+      fail-fast: false
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install Wrangler
+        run: npm install -g wrangler
+
+      - name: Extract client email
+        id: extract
+        working-directory: clients/${{ matrix.client }}
+        run: |
+          EMAIL=$(jq -r '.site.clientEmail // .clientEmail // empty' site-spec.json 2>/dev/null || true)
+          echo "email=$EMAIL" >> "$GITHUB_OUTPUT"
+
+      - name: Deploy worker
+        working-directory: clients/${{ matrix.client }}
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CF_DEPLOY_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+        run: npx wrangler deploy --config wrangler.toml
+
+      - name: Set CLIENT_EMAIL secret
+        if: steps.extract.outputs.email != ''
+        working-directory: clients/${{ matrix.client }}
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CF_DEPLOY_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+        run: printf '%s' "${{ steps.extract.outputs.email }}" | npx wrangler secret put CLIENT_EMAIL --config wrangler.toml
+
+      - name: Set SMTP2GO API key secret
+        working-directory: clients/${{ matrix.client }}
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CF_DEPLOY_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+        run: printf '%s' "${{ secrets.SMTP2GO_API_KEY }}" | npx wrangler secret put SMTP2GO_API_KEY --config wrangler.toml

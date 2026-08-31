@@ -1,0 +1,104 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "cf-website-factory",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-08-04",
+  "compatibility_flags": ["nodejs_compat"],
+  "account_id": "c1c0f6b100d55a09ce6a7a3121a19224",
+
+  "rules": [
+    {
+      "type": "Text",
+      "globs": ["**/*.md"],
+      "fallthrough": true
+    }
+  ],
+
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "website_factory_v1",
+      "database_id": "370051b4-9d25-41d4-979c-cfe63b6eb011"
+    }
+  ],
+
+  "r2_buckets": [
+    {
+      "binding": "SITE_BUCKET",
+      "bucket_name": "website-factory-assets"
+    }
+  ],
+
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "WEBSITE_AGENT",
+        "class_name": "WebsiteAgent"
+      }
+    ]
+  },
+
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": ["WebsiteAgent"]
+    }
+  ],
+
+  "workflows": [
+    {
+      "name": "site-build-workflow",
+      "binding": "SITE_BUILD_WORKFLOW",
+      "class_name": "SiteBuildWorkflow"
+    }
+  ],
+
+  "browser": {
+    "binding": "BROWSER"
+  },
+
+  "images": {
+    "binding": "IMAGES"
+  },
+
+  "observability": {
+    "logs": {
+      "enabled": true,
+      "invocation_logs": true
+    },
+    "traces": {
+      "enabled": false
+    }
+  },
+
+  "vars": {
+    "CF_ACCOUNT_ID": "c1c0f6b100d55a09ce6a7a3121a19224",
+    "CF_AI_GATEWAY_ID": "website-factory",
+    "PUBLIC_APP_URL": "https://cf-website-factory.wazibizwebsites.workers.dev",
+    "KIE_API_URL": "https://api.kie.ai",
+    "KIE_MODEL": "z-image",
+    "APPROVAL_TIMEOUT_DAYS": "7",
+    "MAX_REVISIONS": "3",
+    "VISUAL_QA_MIN_SCORE": "80",
+    "INTERNAL_NOTIFICATION_EMAIL": "wazibizwebsites@gmail.com",
+    "ZHIPU_API_URL": "https://api.z.ai/api/coding/paas/v4",
+    "ZHIPU_GATEWAY_PROVIDER": "custom-zhipu",
+    "ZHIPU_MODEL": "glm-5-turbo",
+    "PRIMARY_PROVIDER": "openrouter",
+    "VISION_MODEL": "xiaomi/mimo-v2.5",
+    "VISION_PRIMARY_PROVIDER": "openrouter",
+    "VISION_PRIMARY_MODEL": "xiaomi/mimo-v2.5",
+    "VISION_FALLBACK_PROVIDER": "ai-gateway",
+    "VISION_FALLBACK_MODEL": "openai/gpt-4o",
+    "VISION_REQUEST_TIMEOUT_MS": "45000",
+    "VISION_MAX_ATTEMPTS_PER_PROVIDER": "2",
+    "VISION_RETRY_DELAY_MS": "500",
+    "VISION_INPUT_MAX_BYTES": "4194304",
+    "VISION_INPUT_MAX_WIDTH": "1920",
+    "VISION_INPUT_MAX_HEIGHT": "12000",
+    "FALLBACK_MODEL": "xiaomi/mimo-v2.5",
+    "GITHUB_REPO_OWNER": "Wazibiz-Webdesign-Kenya",
+    "GITHUB_REPO_NAME": "wazibiz-client-sites",
+    "GITHUB_BRANCH": "main"
+  }
+}

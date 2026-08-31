@@ -1,0 +1,52 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "cf-website-factory-test",
+  "main": "./tests/worker-entry.ts",
+  "compatibility_date": "2026-08-04",
+  "compatibility_flags": ["nodejs_compat"],
+  "rules": [
+    {
+      "type": "Text",
+      "globs": ["**/*.md"],
+      "fallthrough": true
+    }
+  ],
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "website_factory_test",
+      "database_id": "00000000-0000-0000-0000-000000000000",
+      "migrations_dir": "./migrations"
+    }
+  ],
+  "r2_buckets": [
+    {
+      "binding": "SITE_BUCKET",
+      "bucket_name": "website-factory-assets-test"
+    }
+  ],
+  "images": {
+    "binding": "IMAGES"
+  },
+  "vars": {
+    "PUBLIC_APP_URL": "https://test.example.com",
+    "WEBHOOK_SECRET": "test-webhook-secret",
+    "APPROVAL_SECRET": "test-approval-secret",
+    "APPROVAL_TIMEOUT_DAYS": "7",
+    "MAX_REVISIONS": "3",
+    "INTERNAL_NOTIFICATION_EMAIL": "test@example.com",
+    "KIE_API_URL": "https://kie.example.com",
+    "KIE_API_KEY": "test-kie-key",
+    "KIE_MODEL": "z-image",
+    "SMTP2GO_API_KEY": "test-smtp",
+    "GITHUB_TOKEN": "test-gh-token",
+    "GITHUB_WEBHOOK_SECRET": "test-gh-wh",
+    "GITHUB_REPO_OWNER": "test-owner",
+    "GITHUB_REPO_NAME": "test-repo",
+    "GITHUB_BRANCH": "main",
+    "CF_ACCOUNT_ID": "test-account",
+    "CF_DEPLOY_API_TOKEN": "test-deploy-token",
+    "OPENROUTER_API_KEY": "test-or-key",
+    "CF_AIG_TOKEN": "test-aig"
+  }
+}

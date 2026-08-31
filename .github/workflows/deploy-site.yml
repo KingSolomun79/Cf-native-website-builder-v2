@@ -1,0 +1,59 @@
+name: Deploy Client Site
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "clients/**"
+
+permissions:
+  contents: read
+  deployments: write
+
+concurrency:
+  group: deploy-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  detect:
+    runs-on: ubuntu-latest
+    outputs:
+      client_slugs: ${{ steps.detect.outputs.slugs }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - id: detect
+        run: |
+          SLUGS=$(git diff --name-only ${{ github.event.before }} ${{ github.event.after }} \
+            | grep '^clients/' \
+            | cut -d'/' -f2 \
+            | sort -u \
+            | jq -R . | jq -sc .)
+          echo "slugs=$SLUGS" >> "$GITHUB_OUTPUT"
+          echo "Detected client slugs: $SLUGS"
+
+  deploy:
+    needs: detect
+    if: needs.detect.outputs.client_slugs != '[]'
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        slug: ${{ fromJson(needs.detect.outputs.client_slugs) }}
+      fail-fast: false
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CF_DEPLOY_API_TOKEN }}
+          accountId: ${{ secrets.CF_ACCOUNT_ID }}
+          workingDirectory: "clients/${{ matrix.slug }}"
+          command: deploy
+
+      - name: Notify factory
+        if: always()
+        run: |
+          curl -X POST "${{ secrets.FACTORY_WEBHOOK_URL }}/api/webhooks/github" \
+            -H "Content-Type: application/json" \
+            -H "X-Hub-Signature-256: sha256=$(echo '${{ toJson(github.event) }}' | openssl dgst -sha256 -hmac '${{ secrets.GITHUB_WEBHOOK_SECRET }}' | awk '{print $2}')" \
+            -d '${{ toJson(github.event) }}' || true
