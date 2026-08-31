@@ -6,129 +6,136 @@ This folder is the canonical implementation package for Website Builder V2.
 
 The coding agent must read these documents in this order:
 
-1. `IMPLEMENTATION-PRD.md` — **normative implementation specification**. This wins if any older file or prompt conflicts with it.
-2. `CAPABILITY-ENVELOPE.md` — human-readable product support boundary.
-3. `capability-envelope.json` — machine-readable support boundary.
-4. `FINAL-DECISION-RECORD.md` — locked decisions from the final grilling session and their rationale.
-5. `prompts/*` — stage prompts. These remain important, but must be reconciled with the final PRD before runtime use.
+1. `../CONTEXT.md` — **canonical domain vocabulary and semantics**. If another document uses a domain term inconsistently, `CONTEXT.md` wins for the meaning of that term.
+2. `IMPLEMENTATION-PRD.md` — **normative implementation specification**. It defines architecture, workflow, persistence, runtime contracts and acceptance requirements using the vocabulary from `CONTEXT.md`.
+3. `CAPABILITY-ENVELOPE.md` and `capability-envelope.json` — human- and machine-readable product support boundaries.
+4. `FINAL-DECISION-RECORD.md` — locked decisions and rationale.
+5. `prompts/PROMPT-MANIFEST.md` — canonical runtime prompt IDs/versions and stage-specific reconciliation.
+6. `prompts/00-domain-contract-v1.md` + the retained full stage-prompt body named in the manifest — composed executable stage prompt.
+7. Older root documentation and V1 implementation — historical/infrastructure context only where explicitly retained by the V1 fork audit.
 
-Older root documentation and V1 implementation are historical/infrastructure context only unless explicitly retained by the V1 fork audit.
+No implementation may create a competing meaning for a term defined in `CONTEXT.md`.
+
+## No client-account domain
+
+V2 has no Client Account, Client User or persistent mutable Client Profile domain concept. A completely new Site Generation begins from a fresh immutable Onboarding Submission. A Site is the stable website identity for one Business and may have multiple Site Generations over time.
+
+Normal later Business/content changes that preserve Reference and Build Mode use a Revision Request and a new Build. Business Fact changes are represented as Fact Updates rather than mutations of historical Onboarding Submissions.
+
+## Build and release lifecycle
+
+Canonical distinctions:
+
+```text
+Site
+  -> Site Generation
+      -> Build
+          -> Build Version
+              -> Release Candidate
+                  -> Release Ready
+                      -> Approval
+                          -> Publication
+                              -> Published Version
+```
+
+- Human new intent creates a new Build.
+- Bounded Automated Repair creates a new Build Version inside the same Build.
+- Approval and Publication are separate.
+- Publication never regenerates an approved Build Version.
+- The immediately previous Published Version may be retained temporarily as Rollback Version.
+- Rollback restores that exact version without a new Build or Approval.
+- Mutable Site Configuration does not roll back unless explicitly requested.
 
 ## Repository strategy
 
-This repository is a fork of the original V1 builder. V1 remains preserved in its own repository. During V2 implementation, proven infrastructure may be reused from the fork, but all superseded V1 product logic must be removed before V2 release.
+This repository is a fork of the original V1 builder. V1 remains preserved separately. Proven infrastructure may be reused after audit, but superseded V1 product logic must be removed before V2 release.
 
 Final rule:
 
-> Keep the proven platform code. Delete the superseded product logic.
+> Keep proven platform infrastructure. Delete superseded product logic.
 
 ## Locked implementation sequence
-
-V2 is developed in this order:
 
 ```text
 REFERENCE_BOUND
   -> fixed five-site benchmark
-  -> minimum 3/5 fully automated PASS
+  -> minimum 3/5 Benchmark Pass
   -> then ORIGINAL_DESIGN
 ```
 
-A benchmark PASS allows no manual source-code edits and must stay inside the hard KIE generation budget of USD 3.00/site.
+Benchmark Pass means the exact candidate reaches Release Ready automatically with zero manual source-code edits and within the hard KIE image-generation budget of USD 3.00/site. Human Approval and Publication are not benchmark requirements.
 
 ## Canonical REFERENCE_BOUND workflow
 
 ```text
-Client Intake
-  -> Normalize Business Truth
+Onboarding Submission
+  -> normalize Business Facts
   -> Reference Suitability Gate
   -> Reference acquisition
-  -> deterministic ReferenceEvidence extraction
-  -> Reference Analyzer
-  -> Visual Blueprint Generator
-  -> Implementation Planner
+  -> deterministic Reference Evidence extraction
+  -> Reference Analysis
+  -> Visual Blueprint
+  -> Implementation Contract
   -> incremental shared-contract site generation
-  -> runtime schema validation + deterministic validation
-  -> IMAGE_PLAN
-  -> KIE image generation Wave 1
-  -> KIE image generation Wave 2
-  -> persist accepted assets to project-controlled storage
-  -> site assembly
+  -> runtime schema + deterministic validation
+  -> Image Wave 1
+  -> Image Wave 2
+  -> persist Accepted Images
+  -> assembly
   -> Technical Preflight
-  -> preview deployment
-  -> standardized QA evidence capture
+  -> Preview
+  -> standardized QA evidence
   -> Visual Geometry Comparator
-  -> QA-A + QA-B independently
-  -> Fix Coordinator (one batch maximum)
-  -> QA-A/QA-B Confirmation
-  -> optional single Release Blocker Fix
-  -> failed confirmation domain(s) once more
-  -> READY_FOR_APPROVAL or HUMAN_REVIEW_REQUIRED
-  -> explicit human approval
-  -> immutable build publication
+  -> QA-A + QA-B
+  -> Release Ready OR bounded Automated Repair
+  -> confirmation
+  -> optional one Release Blocker Fix
+  -> Release Ready OR HUMAN_REVIEW_REQUIRED
+  -> explicit Approval
+  -> Publication of exact approved Build Version
 ```
 
-## Important final changes versus earlier prompt drafts
+A Blueprint-level defect emits `BLUEPRINT_REVIEW_REQUIRED` and cannot be silently repaired by implementation mutation.
 
-The final grilling introduced several requirements that older prompt files do not all contain yet:
+## Form and email architecture
 
-- Reference Suitability Gate.
-- Versioned deterministic `ReferenceEvidence` contract.
-- Implementation Planner between Blueprint and Website Generator.
-- Incremental file generation under one shared Implementation Contract.
-- Runtime validation at every AI boundary.
-- Hard visual composition gates in addition to QA-A score >=90.
-- Two-wave KIE generation with hard USD 3.00/site ceiling.
-- Immutable stage/build artifacts and provenance.
-- Visual Geometry Comparator.
-- Fixed five-site benchmark with 3/5 automatic PASS threshold.
-- Design archetypes are non-authoritative.
-- Generated customer sites remain framework-light/static.
-- Central multi-tenant WAZIBIZ Form Service using Cloudflare-native outbound email.
-- Turnstile, origin validation and rate limiting for public Contact forms.
-- V1 cleanup as a V2 acceptance gate.
-
-### Form prompt conflict
-
-Any older prompt clause saying the Contact form has no backend, must not submit, or must not contain real submission behavior is **obsolete**.
-
-The final architecture is:
+Generated sites use one central WAZIBIZ Form Service.
 
 ```text
 static Contact form
-  -> central WAZIBIZ Form Service
-  -> validation + Turnstile + rate limit
-  -> SiteFormConfig recipient lookup
-  -> Cloudflare-native outbound email
+  -> WAZIBIZ Form Service
+  -> origin/schema/Turnstile/rate validation
+  -> Accepted Submission
+  -> current Site Configuration
+  -> Form Destination + Sender Identity
+  -> Cloudflare-native Email Delivery
 ```
 
-Generated browser code must never choose the email recipient or sender.
+The browser never chooses the recipient, From sender, sender domain, template or credentials. V2 defaults to a verified WAZIBIZ platform Sender Identity. Visitor email may be used as validated Reply-To, never transactional From.
 
-## Existing stage prompts
+Form Destination and Sender Identity are mutable Site Configuration and can change without rebuilding/reapproving the website. An operational Rollback does not roll them back unless explicitly requested.
 
-- `prompts/01-reference-analyzer-v2.md`
-- `prompts/02-visual-blueprint-generator-v2.md`
-- `prompts/03-original-design-blueprint-generator-v2.md`
-- `prompts/04-website-generator-v3.md`
-- `prompts/05-kie-image-prompt-generator-v1.md`
-- `prompts/06-qa-a-visual-content-v2.md`
-- `prompts/07-qa-b-browser-technical-v2.md`
-- `prompts/08-fix-coordinator-v2.md`
-- `prompts/09-qa-a-confirmation-v2.md`
-- `prompts/10-qa-b-confirmation-v2.md`
-- `prompts/11-release-blocker-fix-v1.md`
+## Canonical prompts
 
-Before these prompts are wired into V2 runtime, reconcile them with `IMPLEMENTATION-PRD.md`. The PRD contains the mandatory reconciliation list.
+Runtime must use `prompts/PROMPT-MANIFEST.md`. Each prompt is composed from:
+
+```text
+prompts/00-domain-contract-v1.md
++
+retained full detailed stage prompt body
+```
+
+The domain contract supersedes contradictory clauses in older detailed bodies while preserving their full useful detail. The manifest version, not the filename suffix of the retained body, is the runtime prompt version.
 
 ## Hard automation limit
 
-The mutation budget remains deliberately bounded:
-
 1. Initial generation.
-2. One Fix Coordinator batch.
-3. At most one Release Blocker Fix batch.
+2. One Fix Coordinator Automated Repair batch.
+3. At most one narrow Release Blocker Fix.
+4. If a valid Release Blocker remains, stop and emit `HUMAN_REVIEW_REQUIRED`.
 
-If confirmation still fails, automated mutation stops and the build becomes `HUMAN_REVIEW_REQUIRED`.
+No unbounded mutation loop is permitted.
 
-## First coding milestone
+## V1 release gate
 
-Start with the brownfield audit and migration manifest. Do not begin by rewriting working Cloudflare/KIE/browser infrastructure. Identify what is reusable, then build the V2 contracts and pipeline cleanly around it.
+V2 is not complete until superseded V1 generator paths, flags, prompt registry entries, schemas/types/tests/routes and obsolete root documentation are removed or clearly quarantined as historical context. No production route may invoke V1 after V2 acceptance.
