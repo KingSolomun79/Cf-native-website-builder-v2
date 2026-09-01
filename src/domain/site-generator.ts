@@ -21,11 +21,9 @@ import { runSchemaValidatedAiStage, type RawAiGenerate } from "./ai-boundary";
 import { appendBuildWorkflowEvent } from "./lifecycle";
 import { getEffectiveBusinessFacts } from "./revision";
 import { storeBuildStageArtifact, type StoredStageArtifact } from "./stage-artifacts";
-import { buildVersionSourceKey } from "./artifact-keys";
 import type { VisualBlueprint } from "./visual-blueprint";
 import type { ImplementationContract } from "./implementation-planner";
 import type { BusinessFacts } from "./lifecycle-schema";
-import { putImmutableObject } from "../lib/assets";
 
 export const IMAGE_PLAN_SCHEMA_VERSION = "image-plan/1";
 
@@ -442,22 +440,9 @@ export async function generateCompleteSite(
   });
   artifacts.push({ kind: "image_plan", subkey: "", r2Key: imagePlanStored.artifactR2Key });
 
-  // Raw assembled HTML is additionally frozen under the canonical source
-  // scheme for the later assembly/preflight stages (issue #12).
-  for (const pageId of PAGE_IDS) {
-    await putImmutableObject(
-      env,
-      buildVersionSourceKey(input.buildId, input.buildVersionNumber, input.contract.files.pageFiles[pageId]),
-      source.pages[pageId],
-      { httpMetadata: { contentType: "text/html; charset=utf-8" } }
-    );
-  }
-  await putImmutableObject(env, buildVersionSourceKey(input.buildId, input.buildVersionNumber, "site.css"), source.sharedCss, {
-    httpMetadata: { contentType: "text/css" },
-  });
-  await putImmutableObject(env, buildVersionSourceKey(input.buildId, input.buildVersionNumber, "site.js"), source.sharedJs, {
-    httpMetadata: { contentType: "text/javascript" },
-  });
+  // NOTE: the canonical builds/{id}/v{n}/source/* freeze happens in the
+  // assembly stage with image placeholders RESOLVED; generation itself only
+  // persists the immutable stage artifacts above.
 
   await appendBuildWorkflowEvent(env, {
     buildId: input.buildId, buildVersionId: input.buildVersionId,

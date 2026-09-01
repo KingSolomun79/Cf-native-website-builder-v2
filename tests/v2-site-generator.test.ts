@@ -328,9 +328,11 @@ describe("incremental four-page generation", () => {
     expect(site.artifacts.filter((artifact) => artifact.kind === "generated_page")).toHaveLength(4);
     expect(site.artifacts.find((artifact) => artifact.kind === "image_plan")).toBeTruthy();
 
-    // Raw HTML frozen under the canonical source scheme.
-    const stored = await env.SITE_BUCKET.get(`builds/${context.buildId}/v1/source/index.html`);
-    expect(stored).not.toBeNull();
+    // The canonical builds/{id}/v{n}/source/* freeze happens at assembly
+    // with image placeholders resolved (issue #12); generation persists the
+    // immutable stage artifacts above only.
+    const pageArtifact = site.artifacts.find((artifact) => artifact.kind === "generated_page" && artifact.subkey === "home");
+    expect(pageArtifact).toBeTruthy();
 
     // Build advanced through generation + deterministic validation.
     const events = await env.DB.prepare("SELECT to_state FROM build_workflow_events WHERE build_id = ? ORDER BY created_at")

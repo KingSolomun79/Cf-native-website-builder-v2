@@ -131,8 +131,9 @@ export function runTechnicalPreflight(
   checks.push(check("FATAL_JS_ERROR", balance("{", "}") && balance("(", ")") && balance("[", "]"), "site.js has unbalanced braces/parens/brackets"));
 
   // Material page-level horizontal overflow: fixed widths wider than the
-  // largest supported viewport.
-  const oversized = [...candidate.sharedCss.matchAll(/width:\s*(\d{4,})px/gi)].map((match) => `${match[1]}px`);
+  // largest supported viewport (min-/max-width are the responsive pattern and
+  // are not flagged).
+  const oversized = [...candidate.sharedCss.matchAll(/(?<![\w-])width:\s*(\d{4,})px/gi)].map((match) => `${match[1]}px`);
   checks.push(check("PAGE_HORIZONTAL_OVERFLOW", oversized.length === 0, `site.css fixes widths beyond viewports: ${oversized.slice(0, 3).join(", ")}`));
 
   checks.push(check("ASSEMBLY_FAILURE", candidate.sharedCss.length > 0 && js.length >= 0, "shared source missing"));
