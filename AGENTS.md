@@ -34,14 +34,31 @@ For the first implementation tranche, work **strictly sequentially** through the
 
 This sequential order is an explicit project instruction and **overrides any opportunity to parallelize these tickets**.
 
+## Hard per-issue commit gate
+
+Every issue in `#3` through `#13` **must have its own completed commit before the next issue may begin**.
+
+- Finish the current issue completely.
+- Run and pass its required tests and typecheck.
+- Commit the complete issue work with a commit message that references the GitHub issue number.
+- Record that commit SHA in the issue or associated PR/verification note.
+- Only after that commit exists may the agent fetch, read, plan, scaffold, or implement the next issue.
+- Do not carry uncommitted changes from one issue into the next.
+- Do not combine two or more issue implementations into one commit.
+- Do not make a "checkpoint" commit for incomplete acceptance criteria merely to unlock the next issue.
+- If additional fixes are required for the same issue after its first commit, finish them and commit them as part of that same issue before advancing. The repository must be clean at the handoff to the next issue.
+
+**No commit = issue not complete = next issue forbidden.**
+
 ## Sequential-work guardrails
 
 - Work on **one issue only at a time**.
-- Do not start, partially implement, scaffold, pre-factor specifically for, or otherwise advance a later issue before the current issue is complete.
+- Do not start, partially implement, scaffold, pre-factor specifically for, or otherwise advance a later issue before the current issue is complete and committed.
+- Do not even begin implementation planning for the next issue while the current issue has uncommitted or unverified work.
 - Do not skip an issue because a later issue appears independently implementable.
-- Do not run `#5` and `#6` in parallel; execute `#5` completely before beginning `#6`.
-- Do not run `#10` and `#11` in parallel; execute `#10` completely before beginning `#11`.
-- Do not begin `#14` or any later implementation ticket as part of this tranche. Stop after `#13` is complete and report the state of the repository.
+- Do not run `#5` and `#6` in parallel; execute and commit `#5` completely before beginning `#6`.
+- Do not run `#10` and `#11` in parallel; execute and commit `#10` completely before beginning `#11`.
+- Do not begin `#14` or any later implementation ticket as part of this tranche. Stop after `#13` is complete and committed, then report repository status.
 - If the current issue is blocked, ambiguous, or reveals a conflict with the authoritative V2 specification, resolve or report that problem **within the current issue**. Do not jump to another ticket to stay busy.
 - Treat each issue body as the immediate scope. Parent `#2` and the authoritative repo documents provide constraints and context, but they do not authorize unrelated work from later tickets.
 - Necessary supporting refactors are allowed only when they directly enable the current ticket and keep the repository green. Do not use a supporting refactor as a reason to implement future-ticket behavior early.
@@ -58,9 +75,10 @@ The agent may move from issue `N` to issue `N+1` only when **all** of the follow
 5. No known P0/P1 regression introduced by the ticket remains unresolved.
 6. The implementation matches `CONTEXT.md`, parent `#2`, the implementation PRD, capability envelope and relevant prompt contracts.
 7. No temporary compatibility path, TODO, commented-out alternative, hidden fallback or skipped test silently defers a required acceptance criterion to a later ticket unless the current issue explicitly says so.
-8. The current ticket's changes are committed/merged according to the repository's normal development workflow before work starts on the next ticket.
-9. The current issue is updated with concise verification evidence: tests run, important behavior verified, and any intentionally retained brownfield item.
-10. Only then may the next issue in the mandated sequence be started.
+8. **All work for the current issue is committed in Git before the next issue is opened for implementation.** The commit message must reference the issue number.
+9. The working tree is clean; no uncommitted current-issue changes are allowed to leak into the next ticket.
+10. The current issue is updated with concise verification evidence including tests run, important behavior verified, intentionally retained brownfield items, and the final commit SHA.
+11. Only then may the next issue in the mandated sequence be fetched for implementation and started.
 
 A ticket being "mostly done" is not sufficient to advance.
 
@@ -75,10 +93,11 @@ For each of `#3` through `#13`:
 5. Implement the narrowest complete vertical slice that satisfies the issue.
 6. Run focused tests while developing, then run the full `npm test` and `npm run typecheck` gates.
 7. Re-check every acceptance criterion against the actual implementation, not merely the diff.
-8. Record concise implementation/verification evidence on the issue or associated PR.
-9. Finish/merge the issue before fetching and beginning the next issue.
+8. Commit the issue work with an issue-referencing commit message.
+9. Verify the working tree is clean and record the commit SHA with the issue/PR verification evidence.
+10. Only then fetch and begin the next issue.
 
-Do not batch several issue implementations into one large speculative change.
+Do not batch several issue implementations into one large speculative change or one combined commit.
 
 ## Scope and change-control guardrails
 
