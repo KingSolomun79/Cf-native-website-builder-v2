@@ -30,6 +30,18 @@ writeFileSync(
     .join("\n")}\n];\n`
 );
 
+// Transport the machine-readable capability envelope so runtime tests can
+// assert that human- and machine-readable envelopes agree with behavior.
+{
+  const envelope = readFileSync(resolve(process.cwd(), "v2-docs", "capability-envelope.json"), "utf8");
+  writeFileSync(
+    resolve(process.cwd(), "src", "domain", "generated", "capability-envelope.ts"),
+    `// AUTO-GENERATED from v2-docs/capability-envelope.json — do not edit.
+export const CAPABILITY_ENVELOPE = ${envelope.trim()} as const;
+`
+  );
+}
+
 // Regenerate the canonical prompt body transport from v2-docs/prompts so the
 // composed runtime prompts under test always match the markdown sources
 // (same output as scripts/generate-prompt-bodies.mjs).
@@ -87,6 +99,7 @@ export default defineWorkersConfig({
       "tests/v2-benchmark-site-5.test.ts",
       "tests/v2-proof-gate.test.ts",
       "tests/v2-original-design.test.ts",
+      "tests/v2-final-verification.test.ts",
       // Retained platform infrastructure tests.
       "tests/browser-lifecycle.test.ts",
       "tests/browser-adapter-spy.test.ts",

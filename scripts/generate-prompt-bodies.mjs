@@ -29,6 +29,16 @@ ${entries}
 };
 `;
 
+// Also transport the machine-readable capability envelope (mirrors the
+// generation vitest.config.ts performs for tests).
+const envelope = readFileSync(resolve(process.cwd(), "v2-docs", "capability-envelope.json"), "utf8");
+writeFileSync(
+  resolve(process.cwd(), "src", "domain", "generated", "capability-envelope.ts"),
+  `// AUTO-GENERATED from v2-docs/capability-envelope.json — do not edit.
+export const CAPABILITY_ENVELOPE = ${envelope.trim()} as const;
+`
+);
+
 mkdirSync(resolve(process.cwd(), "src", "domain", "generated"), { recursive: true });
 writeFileSync(outPath, body);
 console.log(`Wrote ${outPath} from ${files.length} prompt bodies.`);

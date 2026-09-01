@@ -1,0 +1,138 @@
+// AUTO-GENERATED from v2-docs/capability-envelope.json — do not edit.
+export const CAPABILITY_ENVELOPE = {
+  "version": "2.0.0",
+  "status": "FINAL",
+  "product": "WAZIBIZ Website Builder V2",
+  "domain_model": {
+    "context_file": "../CONTEXT.md",
+    "client_accounts": false,
+    "client_users": false,
+    "new_site_generation_requires_fresh_onboarding_submission": true,
+    "revision_request_preserves_reference_and_build_mode": true,
+    "fact_updates_do_not_mutate_historical_onboarding_submission": true
+  },
+  "modes": {
+    "implementation_order": ["REFERENCE_BOUND", "ORIGINAL_DESIGN"],
+    "reference_proof_required_before_original_design": true
+  },
+  "site_output": {
+    "pages": ["home", "about", "services", "contact"],
+    "arbitrary_page_count": false,
+    "cms": false,
+    "blog": false,
+    "architecture": "STATIC_FRAMEWORK_LIGHT",
+    "default_shared_files": ["site.css", "site.js"],
+    "large_frameworks_default_allowed": false
+  },
+  "reference": {
+    "static_composition_authority": "REFERENCE_SCREENSHOT",
+    "live_url_role": ["COMPUTED_STYLE", "RESPONSIVE_BEHAVIOR", "MOTION", "INTERACTION"],
+    "suitability_outcomes": ["SUPPORTED", "SUPPORTED_WITH_LIMITATIONS", "UNSUPPORTED"],
+    "adaptation_contract_required_for_limitations": true,
+    "measurement_allowed": true,
+    "wholesale_source_copying_allowed": false,
+    "target": "STRUCTURAL_VISUAL_REPRODUCTION"
+  },
+  "unsupported_primary_experiences": [
+    "WEBGL_THREEJS_PRIMARY",
+    "CANVAS_PRIMARY",
+    "PHYSICS_HEAVY_INTERACTION",
+    "COMPLEX_SCROLL_CHOREOGRAPHY",
+    "APPLICATION_GRADE_AUTHENTICATED_UI",
+    "RICH_PRODUCT_CONFIGURATOR",
+    "HUGE_ECOMMERCE_CATALOG",
+    "CMS_DEPENDENT_SITE"
+  ],
+  "motion": {
+    "supported": [
+      "HOVER_TRANSITIONS",
+      "FOCUS_STATES",
+      "SCROLL_REVEALS",
+      "STICKY_FIXED_BEHAVIOR",
+      "SIMPLE_PARALLAX",
+      "MODEST_SCROLL_LINKED_EFFECTS",
+      "LIGHTWEIGHT_CAROUSEL_SLIDER",
+      "MENU_TRANSITIONS"
+    ]
+  },
+  "images": {
+    "normal_accepted_target": 12,
+    "generation_waves": 2,
+    "hard_kie_budget_usd": 3.0,
+    "repair_reserve_percent_range": [20, 25],
+    "temporary_provider_urls_allowed_in_release": false,
+    "mobile_variant_policy": "ONLY_WHEN_SINGLE_MASTER_CANNOT_SATISFY_REQUIRED_COMPOSITION"
+  },
+  "qa": {
+    "qa_a_min_visual": 90,
+    "qa_a_min_content": 90,
+    "qa_b_min_technical": 90,
+    "p0_allowed": 0,
+    "p1_allowed": 0,
+    "hard_composition_gates_required": true,
+    "blueprint_mutation_by_automated_repair_allowed": false,
+    "blueprint_review_signal": "BLUEPRINT_REVIEW_REQUIRED"
+  },
+  "automation": {
+    "main_fix_batches": 1,
+    "release_blocker_fix_batches": 1,
+    "material_repair_creates_new_build_version": true,
+    "unbounded_retry_allowed": false,
+    "human_review_after_exhaustion": true
+  },
+  "benchmark": {
+    "fixed_site_count": 5,
+    "minimum_automatic_passes_to_unlock_original_design": 3,
+    "pass_requires_release_ready": true,
+    "human_approval_required_for_pass": false,
+    "publication_required_for_pass": false,
+    "manual_source_edits_allowed_for_pass": false,
+    "failed_references_may_be_replaced": false,
+    "freeze_reference_evidence": true,
+    "use_replacement_business_briefs": true
+  },
+  "design": {
+    "industry_archetypes_are_authoritative": false,
+    "business_brand_overrides_reference_brand_identity": true,
+    "reference_logo_reuse_allowed": false,
+    "reference_photography_reuse_allowed": false,
+    "proprietary_font_copying_allowed": false,
+    "accessibility_may_override_reference_defects": true
+  },
+  "forms": {
+    "backend_required": true,
+    "architecture": "CENTRAL_MULTI_TENANT_WAZIBIZ_FORM_SERVICE",
+    "cloudflare_native_outbound_email": true,
+    "turnstile": true,
+    "rate_limiting": true,
+    "browser_controls_recipient": false,
+    "browser_controls_sender": false,
+    "accepted_submission_before_delivery": true,
+    "transient_delivery_retry": "BOUNDED_SERVER_SIDE",
+    "visitor_email_role": "REPLY_TO",
+    "default_sender_identity": "VERIFIED_WAZIBIZ_PLATFORM_SENDER",
+    "business_sender_domain_policy": "OPTIONAL_AFTER_VERIFICATION",
+    "autoresponder_default": false,
+    "site_configuration_separate_from_immutable_build": true
+  },
+  "publishing": {
+    "immutable_build_version_required": true,
+    "human_approval_required": true,
+    "approval_separate_from_publication": true,
+    "publication_regenerates_build": false,
+    "publication_retry_preserves_approval_if_build_unchanged": true,
+    "rollback_version": "IMMEDIATELY_PREVIOUS_PUBLISHED_VERSION",
+    "rollback_creates_new_build": false,
+    "rollback_reverts_site_configuration_by_default": false
+  },
+  "prompts": {
+    "manifest": "prompts/PROMPT-MANIFEST.md",
+    "domain_contract": "prompts/00-domain-contract-v1.md",
+    "composed_runtime_prompts_required": true
+  },
+  "repository_release": {
+    "v1_cleanup_required": true,
+    "permanent_v1_v2_feature_switch_allowed": false,
+    "production_v1_generation_route_allowed": false
+  }
+} as const;

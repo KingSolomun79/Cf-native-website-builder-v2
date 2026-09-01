@@ -50,4 +50,16 @@ after the CSO remediation at 428/428.
 | #22 Benchmark Site 5 (responsive/motion) | `66ea5f9` | 469 pass | pass | OK FOR CURRENT SCOPE (`docs/security/2026-09-01-v2-issue-22-cso.md`) |
 | #23 REFERENCE_BOUND proof gate | `39d4018` | 474 pass | pass | OK WITH WATCH ITEMS (`docs/security/2026-09-01-v2-issue-23-cso.md`) |
 | #24 ORIGINAL_DESIGN site generation | `d7d98b8` | 478 pass | pass | OK WITH WATCH ITEMS (`docs/security/2026-09-01-v2-issue-24-cso.md`) |
-| #25 Contract away V1 architecture | (this commit) | 149 pass (V1 suites removed with their modules) | pass | OK WITH WATCH ITEMS (`docs/security/2026-09-01-v2-issue-25-cso.md`; W14 = operational secret deletion) |
+| #25 Contract away V1 architecture | `75cd12d` | 149 pass (V1 suites removed with their modules) | pass | OK WITH WATCH ITEMS (`docs/security/2026-09-01-v2-issue-25-cso.md`; W14 = operational secret deletion) |
+| #26 Final integration + release verification | (this commit) | 153 pass | pass | OK FOR CURRENT SCOPE (`docs/security/2026-09-01-v2-issue-26-cso.md`; W17 fixed in-diff) |
+
+## Sequence complete (#3-#26)
+
+All issues #3-#26 landed sequentially, each with a dedicated commit
+referencing the issue, a passing per-issue `/morabeza-cso` sign-off with no
+unresolved blocking findings, and full `npm test` + `npm run typecheck`
+green before and (where fixes were applied) after the CSO pass. Final
+state: 26 test files / 153 tests, typecheck clean, `wrangler deploy
+--dry-run` passes, working tree clean. Requirement-to-evidence map:
+`docs/v2-verification-evidence.md`. Release follow-ups: W14 secret
+deletions, H2 transport wiring, W4 gating before operator routes.
