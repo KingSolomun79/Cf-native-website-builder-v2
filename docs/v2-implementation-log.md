@@ -53,6 +53,7 @@ after the CSO remediation at 428/428.
 | #25 Contract away V1 architecture | `75cd12d` | 149 pass (V1 suites removed with their modules) | pass | OK WITH WATCH ITEMS (`docs/security/2026-09-01-v2-issue-25-cso.md`; W14 = operational secret deletion) |
 | #26 Final integration + release verification | `9812017` | 153 pass | pass | OK FOR CURRENT SCOPE (`docs/security/2026-09-01-v2-issue-26-cso.md`; W17 fixed in-diff) |
 | #29 Capability-token gating of Approval/Rollback operator routes (W4) | `66f5019` | 182 pass | pass | OK WITH WATCH ITEMS (`docs/security/2026-09-01-v2-issue-29-cso.md`; F1-F4 fixed in-diff; W-29a = set `OPERATOR_CAPABILITY_SECRET` in production) |
+| #28 WAZIBIZ Form Service email transport (H2) | (this commit) | 195 pass | pass | OK WITH WATCH ITEMS (`docs/security/2026-09-01-v2-issue-28-cso.md`; F1 caught live + fixed in-diff; W-28d = production token + `SMTP2GO_API_KEY` set at the #27 deploy; W-28f = real verified Sender Identity) |
 
 | QA sweep (#5-#16, #24, #25) | `7ff3433` | 166 pass | pass | 4 findings (1 Medium criterion gap, 2 Medium, 1 Low) — `docs/qa/2026-09-01-v2-qa-sweep.md` |
 | QA remediation (F1-F3) | (this commit) | 166 pass | pass | OK FOR CURRENT SCOPE (`docs/security/2026-09-01-v2-qa-remediation-cso.md`); F4 deferred |
@@ -73,3 +74,19 @@ gated Approval and Rollback operator routes on the same gates: 28 test
 files / 182 tests, typecheck clean, `wrangler deploy --dry-run` passes.
 W4 is closed; remaining release follow-ups: W14 secret deletions, H2
 transport wiring, W-29a production secret set.
+
+Issue #28 (post-verification follow-up H2) implemented the transport
+endpoint itself — the `wazibiz-email-router` Worker (bearer-authenticated
+platform contract, SMTP2Go provider leg, fail-closed until its secrets are
+complete), deployed live — plus the `EMAIL_ROUTER` service-binding channel
+(Workers cannot fetch each other's `*.workers.dev` URLs within one
+account; live-verified), the `*/10` cron retry sweep (PRD 37 bounded
+server-side retry now has a production trigger), and a staging-equivalent
+environment (`cf-website-factory-staging` + `website_factory_staging` D1)
+whose controlled smoke produced live ledger evidence for acceptance →
+Email Delivery through the configured router, both fail-closed states, and
+the cron-driven retry. Production secret wiring stays deploy-coupled to the
+#27 runbook (Cloudflare blocks secret changes until a V2 version deploys);
+the final `delivered` status additionally needs the operator to set
+`SMTP2GO_API_KEY` on the router. Final state: 29 test files / 195 tests,
+typecheck clean, `wrangler deploy --dry-run` passes.

@@ -358,6 +358,43 @@ describe("platform email transport wiring (CSO H2)", () => {
     expect(permanent).toMatchObject({ ok: false, classification: "permanent" });
   });
 
+  it("routes same-account delivery through the EMAIL_ROUTER service binding with identical semantics", async () => {
+    const bindingCalls: Array<{ url: string; authorization: string | null; body: EmailSendInput }> = [];
+    let call = 0;
+    const routerBinding = {
+      fetch: async (url: string | URL | Request, init?: RequestInit): Promise<Response> => {
+        call += 1;
+        bindingCalls.push({
+          url: typeof url === "string" ? url : url instanceof URL ? url.toString() : url.url,
+          authorization: (init?.headers as Record<string, string> | undefined)?.Authorization ?? null,
+          body: JSON.parse(String(init?.body)) as EmailSendInput,
+        });
+        const status = call === 1 ? 200 : call === 2 ? 503 : 401;
+        return new Response("", { status });
+      },
+    };
+    const bindingEnv = {
+      WAZIBIZ_EMAIL_TRANSPORT_URL: "https://wazibiz-email-router.wazibizwebsites.workers.dev/send",
+      WAZIBIZ_EMAIL_TRANSPORT_TOKEN: "router-token",
+      EMAIL_ROUTER: routerBinding,
+    } as unknown as Env;
+
+    // Workers cannot fetch same-account *.workers.dev URLs, so the binding
+    // channel must carry the identical request (URL, bearer, body) instead.
+    const ok = await createDefaultEmailTransport(bindingEnv)(sendInput());
+    expect(ok).toEqual({ ok: true });
+    expect(bindingCalls[0].url).toBe("https://wazibiz-email-router.wazibizwebsites.workers.dev/send");
+    expect(bindingCalls[0].authorization).toBe("Bearer router-token");
+    expect(bindingCalls[0].body.replyTo).toBe("jane@visitor.example");
+    expect(bindingCalls[0].body.from).toBe(DEFAULT_PLATFORM_SENDER_IDENTITY);
+
+    const transient = await createDefaultEmailTransport(bindingEnv)(sendInput());
+    expect(transient).toMatchObject({ ok: false, classification: "transient", error: "transport responded 503" });
+
+    const bindingPermanent = await createDefaultEmailTransport(bindingEnv)(sendInput());
+    expect(bindingPermanent).toMatchObject({ ok: false, classification: "permanent", error: "transport responded 401" });
+  });
+
   it("wires the env-configured transport into acceptance end to end", async () => {
     vi.stubGlobal(
       "fetch",
@@ -384,5 +421,59 @@ describe("platform email transport wiring (CSO H2)", () => {
     expect(delivery!.status).toBe("delivered");
     expect(delivery!.sender_identity).toBe(DEFAULT_PLATFORM_SENDER_IDENTITY);
     expect(delivery!.reply_to).toBe("jane@visitor.example");
+  });
+
+  it("fires bounded server-side retries through the scheduled sweep (issue #28)", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response("", { status: 503 }))
+    );
+    const wiredEnv = {
+      ...env,
+      WAZIBIZ_EMAIL_TRANSPORT_URL: "https://mail-router.example/send",
+      WAZIBIZ_EMAIL_TRANSPORT_TOKEN: "router-token",
+    } as Env;
+
+    const siteId = await newSiteWithConfiguration();
+    const accepted = await acceptFormSubmission(wiredEnv, {
+      origin: "https://riftvalleyroasters.example",
+      remoteAddress: "203.0.113.201",
+      payload: browserPayload(siteId),
+    });
+    const firstAttempt = await env.DB.prepare(
+      "SELECT id, status FROM email_deliveries WHERE form_submission_id = ?"
+    )
+      .bind(accepted.submissionId)
+      .first<{ id: string; status: string }>();
+    expect(firstAttempt!.status).toBe("transient_failure");
+
+    // Make the backoff window due, then let the cron sweep retry through
+    // the configured transport.
+    await env.DB.prepare("UPDATE email_deliveries SET scheduled_retry_at = ? WHERE form_submission_id = ?")
+      .bind(new Date(Date.now() - 60_000).toISOString(), accepted.submissionId)
+      .run();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response("", { status: 200 }))
+    );
+    const { scheduled } = await import("../src/index");
+    await scheduled({ cron: "*/10 * * * *" } as unknown as ScheduledController, wiredEnv);
+
+    const attempts = await env.DB.prepare(
+      "SELECT attempt_number, status FROM email_deliveries WHERE form_submission_id = ? ORDER BY attempt_number"
+    )
+      .bind(accepted.submissionId)
+      .all<{ attempt_number: number; status: string }>();
+    expect(attempts.results.map((row) => row.status)).toEqual(["transient_failure", "delivered"]);
+  });
+
+  it("registers both handlers on the default export object (cron sweep is reachable)", async () => {
+    // Regression: a bare `export default app` leaves the cron trigger
+    // handlerless ("Handler does not export a scheduled() function" —
+    // caught live on the staging deployment), because the runtime ignores
+    // named exports beside a default export.
+    const worker = (await import("../src/index")).default as Record<string, unknown>;
+    expect(typeof worker.fetch).toBe("function");
+    expect(typeof worker.scheduled).toBe("function");
   });
 });

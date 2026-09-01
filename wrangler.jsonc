@@ -38,6 +38,23 @@
     }
   ],
 
+  // Same-account channel to the outbound email router (issue #28): Workers
+  // cannot fetch each other's *.workers.dev URLs within one account, so the
+  // Form Service transports delivery calls through this binding. The router
+  // still enforces its public contract (bearer token, /send path).
+  "services": [
+    {
+      "binding": "EMAIL_ROUTER",
+      "service": "wazibiz-email-router"
+    }
+  ],
+
+  // Fires the bounded Email Delivery retry sweep (issue #28): transient
+  // delivery failures retry server-side without visitor resubmission.
+  "triggers": {
+    "crons": ["*/10 * * * *"]
+  },
+
   "browser": {
     "binding": "BROWSER"
   },
@@ -78,10 +95,47 @@
     "VISION_INPUT_MAX_WIDTH": "1920",
     "VISION_INPUT_MAX_HEIGHT": "12000",
     "FALLBACK_MODEL": "xiaomi/mimo-v2.5",
-    // Central WAZIBIZ Form Service email transport. Empty until the
-    // Cloudflare-native outbound email router endpoint is wired; delivery
-    // then classifies transient with bounded retry (fail-closed). The bearer
-    // token is a Worker secret (WAZIBIZ_EMAIL_TRANSPORT_TOKEN), not a var.
-    "WAZIBIZ_EMAIL_TRANSPORT_URL": ""
+    // Central WAZIBIZ Form Service email transport (issue #28): the
+    // Cloudflare-native outbound email router, deployed from
+    // wrangler.email-router.jsonc as worker `wazibiz-email-router`. The
+    // shared bearer token is a Worker secret (WAZIBIZ_EMAIL_TRANSPORT_TOKEN)
+    // on both Workers, never a var. The router fails closed (503 -> bounded
+    // transient retry) until its own secrets are complete.
+    "WAZIBIZ_EMAIL_TRANSPORT_URL": "https://wazibiz-email-router.wazibizwebsites.workers.dev/send"
+  },
+
+  // Staging-equivalent deployment for controlled verification (issue #28).
+  // Separate Worker name + separate D1 so production (still V1-live until
+  // the #27 release runbook executes) and prod D1 are never touched. Note
+  // wrangler environments do NOT inherit top-level bindings/vars — this
+  // environment deliberately binds only what the Form Service smoke path
+  // needs (D1, transport URL, email-router service binding):
+  //   npx wrangler d1 migrations apply website_factory_staging --remote --env staging
+  //   npx wrangler deploy --env staging
+  //   npx wrangler secret put WAZIBIZ_EMAIL_TRANSPORT_TOKEN --env staging
+  "env": {
+    "staging": {
+      "name": "cf-website-factory-staging",
+      "d1_databases": [
+        {
+          "binding": "DB",
+          "database_name": "website_factory_staging",
+          "database_id": "c347bcf9-b349-40db-b5a4-f507d8710795"
+        }
+      ],
+      "services": [
+        {
+          "binding": "EMAIL_ROUTER",
+          "service": "wazibiz-email-router"
+        }
+      ],
+      "triggers": {
+        "crons": ["*/10 * * * *"]
+      },
+      "vars": {
+        "PUBLIC_APP_URL": "https://cf-website-factory-staging.wazibizwebsites.workers.dev",
+        "WAZIBIZ_EMAIL_TRANSPORT_URL": "https://wazibiz-email-router.wazibizwebsites.workers.dev/send"
+      }
+    }
   }
 }

@@ -1,9 +1,23 @@
-CF_ACCOUNT_ID=
+# Local development secrets for `wrangler dev` (V2). Copy to .dev.vars.
+# Never commit real values.
+
+# AI providers
+ZHIPU_API_KEY=
+OPENROUTER_API_KEY=
+KIE_API_KEY=
+CF_AIG_TOKEN=
+
+# Deployment (preview/publication deploy API)
 CF_DEPLOY_API_TOKEN=
 
-SMTP2GO_API_KEY=
-ZHIPU_API_KEY=
-KIE_API_KEY=
-
+# Inbound route HMAC (onboarding/revision/build-create webhooks)
 WEBHOOK_SECRET=
-APPROVAL_SECRET=
+
+# Central WAZIBIZ Form Service (issue #28). The transport URL is a var in
+# wrangler.jsonc; the shared bearer token is a secret on BOTH the main
+# Worker and the wazibiz-email-router Worker.
+WAZIBIZ_EMAIL_TRANSPORT_TOKEN=
+TURNSTILE_SECRET_KEY=
+
+# Operator capability tokens for Approval/Rollback routes (issue #29)
+OPERATOR_CAPABILITY_SECRET=

@@ -44,6 +44,13 @@ export interface Env {
   // as Worker secrets (`wrangler secret put`).
   WAZIBIZ_EMAIL_TRANSPORT_URL?: string;
   WAZIBIZ_EMAIL_TRANSPORT_TOKEN?: string;
+  // Same-account service binding to the wazibiz-email-router Worker
+  // (issue #28). Workers cannot fetch each other via *.workers.dev URLs
+  // within one account (the edge unrouts the same-zone request), so the
+  // platform transports delivery calls through this binding when present.
+  // The URL var still names the endpoint (and its /send path) and stays the
+  // fallback channel when no binding exists.
+  EMAIL_ROUTER?: Fetcher;
   TURNSTILE_SECRET_KEY?: string;
   // Days a superseded Published Version stays available as Rollback Version.
   ROLLBACK_WINDOW_DAYS?: string;

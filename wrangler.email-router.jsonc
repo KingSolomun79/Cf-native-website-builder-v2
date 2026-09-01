@@ -1,0 +1,24 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "wazibiz-email-router",
+  "main": "src/email-router/index.ts",
+  "compatibility_date": "2026-08-04",
+  "account_id": "c1c0f6b100d55a09ce6a7a3121a19224",
+
+  // No bindings: this Worker is stateless. Its only configuration is the
+  // pair of Worker secrets WAZIBIZ_EMAIL_TRANSPORT_TOKEN (shared with the
+  // Form Service) and SMTP2GO_API_KEY (provider leg). Deploy with:
+  //   npx wrangler deploy --config wrangler.email-router.jsonc
+  // It is the endpoint declared as WAZIBIZ_EMAIL_TRANSPORT_URL in
+  // wrangler.jsonc (issue #28).
+
+  "observability": {
+    "logs": {
+      "enabled": true,
+      "invocation_logs": true
+    },
+    "traces": {
+      "enabled": false
+    }
+  }
+}

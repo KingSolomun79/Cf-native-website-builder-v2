@@ -225,7 +225,11 @@ export type EmailTransport = (input: EmailSendInput) => Promise<EmailSendResult>
 
 // Default platform transport: the Cloudflare-native outbound email router
 // declared as WAZIBIZ_EMAIL_TRANSPORT_URL (env var) with an optional bearer
-// token secret (WAZIBIZ_EMAIL_TRANSPORT_TOKEN). When the endpoint is not
+// token secret (WAZIBIZ_EMAIL_TRANSPORT_TOKEN). Same-account delivery goes
+// through the EMAIL_ROUTER service binding because Workers cannot fetch
+// each other's *.workers.dev URLs from within one account (the edge
+// unrouts the same-zone subrequest); the public URL channel remains the
+// fallback for bindings-less environments. When the endpoint is not
 // configured the delivery classifies transient and retry stays bounded —
 // acceptance never depends on delivery (PRD section 37).
 export function createDefaultEmailTransport(env: Env): EmailTransport {
@@ -238,11 +242,16 @@ export function createDefaultEmailTransport(env: Env): EmailTransport {
     if (env.WAZIBIZ_EMAIL_TRANSPORT_TOKEN) {
       headers.Authorization = `Bearer ${env.WAZIBIZ_EMAIL_TRANSPORT_TOKEN}`;
     }
-    const response = await fetch(endpoint, {
+    const request = {
       method: "POST",
       headers,
       body: JSON.stringify(input),
-    });
+    };
+    // The service-binding channel preserves the endpoint's URL and path so
+    // the router observes the identical request either way.
+    const response = env.EMAIL_ROUTER
+      ? await env.EMAIL_ROUTER.fetch(endpoint, request)
+      : await fetch(endpoint, request);
     if (response.ok) return { ok: true };
     return {
       ok: false,

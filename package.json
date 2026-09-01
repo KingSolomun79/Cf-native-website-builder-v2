@@ -11,7 +11,10 @@
     "db:migrate:test": "wrangler d1 migrations apply DB --local --config wrangler.test.jsonc",
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
-    "lint": "tsc --noEmit"
+    "lint": "tsc --noEmit",
+    "deploy:email-router": "wrangler deploy --config wrangler.email-router.jsonc",
+    "deploy:staging": "wrangler deploy --env staging",
+    "smoke:form": "node scripts/form-service-smoke.mjs"
   },
   "dependencies": {
     "hono": "^4.13.0"

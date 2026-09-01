@@ -1,5 +1,6 @@
 import { Hono } from "hono";
 import type { Env } from "./env.d";
+import { processDueEmailDeliveries } from "./domain/form-service";
 import { handleKieCallback } from "./routes/internal.kie-callback";
 import { submitOnboardingSubmission } from "./routes/v2.onboarding-submit";
 import { getSiteGeneration } from "./routes/v2.site-generation-get";
@@ -35,5 +36,24 @@ app.onError((err, c) => {
   return c.json({ error: "Internal server error" }, 500);
 });
 
-export default app;
+// Bounded server-side retry sweep for transient Email Delivery failures
+// (PRD 37): due retries fire on the cron trigger declared in wrangler.jsonc
+// so visitors never resubmit. Idempotent per delivery ledger state; the
+// per-submission attempt ceiling lives in processDueEmailDeliveries.
+export async function scheduled(event: ScheduledController, env: Env): Promise<void> {
+  const processed = await processDueEmailDeliveries(env);
+  if (processed > 0) {
+    console.log(`email delivery retry sweep: ${processed} due submissions processed (cron ${event.cron})`);
+  }
+}
+
+// The handler object must be the default export: beside a default export
+// the runtime ignores named exports, so `scheduled` is registered here
+// (a bare `export default app` would leave the cron trigger handlerless —
+// caught live on the staging deployment).
+export default {
+  fetch: (request: Request, env: Env, ctx: ExecutionContext): Response | Promise<Response> =>
+    app.fetch(request, env, ctx),
+  scheduled,
+};
 export { WebsiteBuildWorkflow } from "./workflows/website-build-workflow";
