@@ -51,7 +51,7 @@ after the CSO remediation at 428/428.
 | #23 REFERENCE_BOUND proof gate | `39d4018` | 474 pass | pass | OK WITH WATCH ITEMS (`docs/security/2026-09-01-v2-issue-23-cso.md`) |
 | #24 ORIGINAL_DESIGN site generation | `d7d98b8` | 478 pass | pass | OK WITH WATCH ITEMS (`docs/security/2026-09-01-v2-issue-24-cso.md`) |
 | #25 Contract away V1 architecture | `75cd12d` | 149 pass (V1 suites removed with their modules) | pass | OK WITH WATCH ITEMS (`docs/security/2026-09-01-v2-issue-25-cso.md`; W14 = operational secret deletion) |
-| #26 Final integration + release verification | (this commit) | 153 pass | pass | OK FOR CURRENT SCOPE (`docs/security/2026-09-01-v2-issue-26-cso.md`; W17 fixed in-diff) |
+| #26 Final integration + release verification | `9812017` | 153 pass | pass | OK FOR CURRENT SCOPE (`docs/security/2026-09-01-v2-issue-26-cso.md`; W17 fixed in-diff) |
 
 ## Sequence complete (#3-#26)
 
