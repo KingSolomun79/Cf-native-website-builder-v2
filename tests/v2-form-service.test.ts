@@ -10,8 +10,8 @@ import {
   createDefaultEmailTransport,
   getSiteConfiguration,
   processDueEmailDeliveries,
+  resolvePlatformSenderIdentity,
   upsertSiteConfiguration,
-  DEFAULT_PLATFORM_SENDER_IDENTITY,
   FormServiceError,
   type EmailSendInput,
 } from "../src/domain/form-service";
@@ -19,6 +19,12 @@ import {
 // Primary-seam tests for the central WAZIBIZ Form Service (issue #11).
 
 const env = providedEnv as unknown as Env;
+
+// Platform Sender Identity as configured for the test environment
+// (wrangler.test.jsonc vars, issue #32) — an explicit safe example address,
+// never a production mailbox.
+const PLATFORM_SENDER = "noreply@staging.wazibiz.example";
+const ALTERNATE_PLATFORM_SENDER = "hello@forms-staging.wazibiz.example";
 
 function app(): Hono<{ Bindings: Env }> {
   const application = new Hono<{ Bindings: Env }>();
@@ -99,7 +105,7 @@ describe("WAZIBIZ Form Service", () => {
       .bind(body.submissionId)
       .first<{ destination: string; sender_identity: string; reply_to: string; status: string }>();
     expect(delivery!.destination).toBe("owner@riftvalleyroasters.example");
-    expect(delivery!.sender_identity).toBe(DEFAULT_PLATFORM_SENDER_IDENTITY);
+    expect(delivery!.sender_identity).toBe(PLATFORM_SENDER);
     expect(delivery!.reply_to).toBe("jane@visitor.example");
   });
 
@@ -228,7 +234,7 @@ describe("WAZIBIZ Form Service", () => {
       {
         submissionId: accepted.submissionId,
         destination: "owner@riftvalleyroasters.example",
-        senderIdentity: DEFAULT_PLATFORM_SENDER_IDENTITY,
+        senderIdentity: PLATFORM_SENDER,
         replyTo: "jane@visitor.example",
         visitorName: "Jane Visitor",
         message: "Hello",
@@ -273,7 +279,7 @@ describe("WAZIBIZ Form Service", () => {
         {
           submissionId: acceptedBounded.submissionId,
           destination: "owner@example.com",
-          senderIdentity: DEFAULT_PLATFORM_SENDER_IDENTITY,
+          senderIdentity: PLATFORM_SENDER,
           replyTo: "jane@visitor.example",
           visitorName: "Jane",
           message: "m",
@@ -303,7 +309,7 @@ describe("platform email transport wiring (native Cloudflare Email Service bindi
   function sendInput(): EmailSendInput {
     return {
       to: "owner@riftvalleyroasters.example",
-      from: DEFAULT_PLATFORM_SENDER_IDENTITY,
+      from: PLATFORM_SENDER,
       replyTo: "jane@visitor.example",
       subject: "New contact message",
       text: "Hello",
@@ -351,7 +357,7 @@ describe("platform email transport wiring (native Cloudflare Email Service bindi
     // validated visitor address strictly as Reply-To.
     expect(sent[0]).toEqual({
       to: "owner@riftvalleyroasters.example",
-      from: DEFAULT_PLATFORM_SENDER_IDENTITY,
+      from: PLATFORM_SENDER,
       replyTo: "jane@visitor.example",
       subject: "New contact message",
       text: "Hello",
@@ -414,10 +420,10 @@ describe("platform email transport wiring (native Cloudflare Email Service bindi
       .bind(accepted.submissionId)
       .first<{ status: string; sender_identity: string; reply_to: string }>();
     expect(delivery!.status).toBe("delivered");
-    expect(delivery!.sender_identity).toBe(DEFAULT_PLATFORM_SENDER_IDENTITY);
+    expect(delivery!.sender_identity).toBe(PLATFORM_SENDER);
     expect(delivery!.reply_to).toBe("jane@visitor.example");
     expect(sent[0].to).toBe("owner@riftvalleyroasters.example");
-    expect(sent[0].from).toBe(DEFAULT_PLATFORM_SENDER_IDENTITY);
+    expect(sent[0].from).toBe(PLATFORM_SENDER);
     expect(sent[0].replyTo).toBe("jane@visitor.example");
   });
 
@@ -502,5 +508,185 @@ describe("platform email transport wiring (native Cloudflare Email Service bindi
     const worker = (await import("../src/index")).default as Record<string, unknown>;
     expect(typeof worker.fetch).toBe("function");
     expect(typeof worker.scheduled).toBe("function");
+  });
+});
+
+// ── configurable platform Sender Identity (issue #32) ──────────────────────
+
+describe("configurable platform Sender Identity (issue #32)", () => {
+  it("uses the configured WAZIBIZ_SENDER_EMAIL as the outbound From", async () => {
+    const siteId = await newSiteWithConfiguration();
+    const accepted = await acceptFormSubmission(env, {
+      origin: "https://riftvalleyroasters.example",
+      remoteAddress: "203.0.113.61",
+      payload: browserPayload(siteId),
+    });
+    const delivery = await env.DB.prepare(
+      "SELECT sender_identity, reply_to, destination FROM email_deliveries WHERE form_submission_id = ?"
+    )
+      .bind(accepted.submissionId)
+      .first<{ sender_identity: string; reply_to: string; destination: string }>();
+    expect(delivery!.sender_identity).toBe(PLATFORM_SENDER);
+    expect(delivery!.reply_to).toBe("jane@visitor.example");
+    expect(delivery!.destination).toBe("owner@riftvalleyroasters.example");
+  });
+
+  it("changes From when the environment value changes, with no source or Site Configuration change", async () => {
+    // Same site, no re-configuration — only the environment differs.
+    const siteId = await newSiteWithConfiguration();
+    const alternateEnv = { ...env, WAZIBIZ_SENDER_EMAIL: ALTERNATE_PLATFORM_SENDER } as Env;
+    expect(resolvePlatformSenderIdentity(alternateEnv)).toBe(ALTERNATE_PLATFORM_SENDER);
+
+    const accepted = await acceptFormSubmission(alternateEnv, {
+      origin: "https://riftvalleyroasters.example",
+      remoteAddress: "203.0.113.62",
+      payload: browserPayload(siteId),
+    });
+    const delivery = await env.DB.prepare("SELECT sender_identity FROM email_deliveries WHERE form_submission_id = ?")
+      .bind(accepted.submissionId)
+      .first<{ sender_identity: string }>();
+    expect(delivery!.sender_identity).toBe(ALTERNATE_PLATFORM_SENDER);
+
+    // The Site Configuration row still carries no hard-coded address.
+    const configuration = await getSiteConfiguration(env, siteId);
+    expect(configuration!.senderIdentity).toBe("");
+  });
+
+  it("fails closed when the sender environment value is missing or malformed", async () => {
+    const siteId = await newSiteWithConfiguration();
+
+    const cases: Array<[string, string | undefined]> = [
+      ["missing", undefined],
+      ["empty", ""],
+      ["malformed", "not-an-email"],
+      ["injection attempt", "attacker@evil.example Bcc: other@evil.example"],
+    ];
+    for (const [label, value] of cases) {
+      const brokenEnv = { ...env, WAZIBIZ_SENDER_EMAIL: value } as Env;
+      expect(resolvePlatformSenderIdentity(brokenEnv), label).toBeNull();
+
+      const accepted = await acceptFormSubmission(brokenEnv, {
+        origin: "https://riftvalleyroasters.example",
+        remoteAddress: "203.0.113.63",
+        payload: browserPayload(siteId),
+      });
+      // Acceptance is unaffected: the visitor's message is durably held.
+      expect(accepted.acceptedAt).toBeTruthy();
+
+      const delivery = await env.DB.prepare(
+        "SELECT status, sender_identity, error_detail FROM email_deliveries WHERE form_submission_id = ?"
+      )
+        .bind(accepted.submissionId)
+        .first<{ status: string; sender_identity: string; error_detail: string }>();
+      expect(delivery!.status, label).toBe("transient_failure");
+      expect(delivery!.sender_identity, label).toBe("");
+      expect(delivery!.error_detail, label).toContain("WAZIBIZ_SENDER_EMAIL");
+    }
+  });
+
+  it("keeps the visitor strictly as Reply-To and the recipient under Site Configuration control", async () => {
+    const siteId = await newSiteWithConfiguration({ destination: "owner@riftvalleyroasters.example" });
+    const response = await postForm(
+      app(),
+      browserPayload(siteId, { from: "spoof@visitor.example", sender: "spoof@visitor.example" })
+    );
+    expect(response.status).toBe(400);
+    expect(((await response.json()) as { error: { code: string } }).error.code).toBe("BROWSER_PAYLOAD_CONTRACT");
+
+    // The submit response never discloses sender configuration.
+    const ok = await postForm(app(), browserPayload(siteId));
+    const bodyText = await ok.text();
+    expect(bodyText).not.toContain(PLATFORM_SENDER);
+    expect(bodyText).not.toContain("sender");
+  });
+
+  it("keeps the recorded sender authoritative on retry, and heals an unresolvable one from the fixed environment", async () => {
+    // Recorded non-empty sender: retry uses the recorded value even if the
+    // environment changed since (sender captured at the previous attempt —
+    // the existing Email Delivery contract).
+    const siteId = await newSiteWithConfiguration();
+    const accepted = await acceptFormSubmission(env, {
+      origin: "https://riftvalleyroasters.example",
+      remoteAddress: "203.0.113.64",
+      payload: browserPayload(siteId),
+    });
+    await env.DB.prepare(
+      "UPDATE email_deliveries SET status = 'transient_failure', scheduled_retry_at = ? WHERE form_submission_id = ?"
+    )
+      .bind(new Date(Date.now() - 60_000).toISOString(), accepted.submissionId)
+      .run();
+    const sent: EmailSendInput[] = [];
+    await processDueEmailDeliveries({ ...env, WAZIBIZ_SENDER_EMAIL: ALTERNATE_PLATFORM_SENDER } as Env, {
+      transport: async (input) => {
+        sent.push(input);
+        return { ok: true };
+      },
+      now: () => new Date(),
+      submissionIds: [accepted.submissionId],
+    });
+    expect(sent).toHaveLength(1);
+    expect(sent[0].from).toBe(PLATFORM_SENDER); // recorded, not the changed env
+
+    // Unresolvable at acceptance (empty recorded sentinel): after the
+    // environment is fixed, the bounded retry delivers with the healed
+    // sender and no visitor resubmission.
+    const brokenEnv = { ...env, WAZIBIZ_SENDER_EMAIL: undefined } as Env;
+    const stuck = await acceptFormSubmission(brokenEnv, {
+      origin: "https://riftvalleyroasters.example",
+      remoteAddress: "203.0.113.65",
+      payload: browserPayload(siteId),
+    });
+    const healed: EmailSendInput[] = [];
+    await processDueEmailDeliveries(env, {
+      transport: async (input) => {
+        healed.push(input);
+        return { ok: true };
+      },
+      now: () => new Date(Date.now() + 60 * 60_000),
+      submissionIds: [stuck.submissionId],
+    });
+    expect(healed).toHaveLength(1);
+    expect(healed[0].from).toBe(PLATFORM_SENDER);
+    expect(healed[0].replyTo).toBe("jane@visitor.example");
+    const statuses = await env.DB.prepare(
+      "SELECT status FROM email_deliveries WHERE form_submission_id = ? ORDER BY attempt_number"
+    )
+      .bind(stuck.submissionId)
+      .all<{ status: string }>();
+    expect((statuses.results ?? []).map((row) => row.status)).toEqual(["transient_failure", "delivered"]);
+  });
+
+  it("hands the validated environment sender to the Cloudflare Email Service adapter", async () => {
+    const sent: CloudflareEmailMessage[] = [];
+    const binding: CloudflareEmailSender = {
+      send: async (message) => {
+        sent.push(message);
+        return { messageId: "env-sender-1" };
+      },
+    };
+    const siteId = await newSiteWithConfiguration();
+    const accepted = await acceptFormSubmission({ ...env, EMAIL: binding } as Env, {
+      origin: "https://riftvalleyroasters.example",
+      remoteAddress: "203.0.113.66",
+      payload: browserPayload(siteId),
+    });
+    expect(sent).toHaveLength(1);
+    expect(sent[0].from).toBe(PLATFORM_SENDER);
+    expect(sent[0].replyTo).toBe("jane@visitor.example");
+    const delivery = await env.DB.prepare("SELECT status FROM email_deliveries WHERE form_submission_id = ?")
+      .bind(accepted.submissionId)
+      .first<{ status: string }>();
+    expect(delivery!.status).toBe("delivered");
+  });
+
+  it("rejects invalid explicit Site Configuration senders at the config boundary", async () => {
+    const siteId = await newSiteWithConfiguration();
+    await expect(
+      upsertSiteConfiguration(env, {
+        siteId,
+        formDestination: "owner@riftvalleyroasters.example",
+        senderIdentity: "not-an-email",
+      })
+    ).rejects.toMatchObject({ code: "SENDER_IDENTITY_INVALID" });
   });
 });

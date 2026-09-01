@@ -18,8 +18,34 @@ import { generateId, nowIso } from "../lib/crypto";
 export const MAX_DELIVERY_ATTEMPTS = 5;
 export const RATE_LIMIT_WINDOW_MINUTES = 10;
 export const RATE_LIMIT_MAX_PER_WINDOW = 5;
-/** Verified WAZIBIZ platform sender is the default Sender Identity (PRD 38). */
-export const DEFAULT_PLATFORM_SENDER_IDENTITY = "noreply@mail.wazibiz.example";
+
+// Platform Sender Identity (issue #32). The default outbound From is
+// environment configuration — WAZIBIZ_SENDER_EMAIL, a Worker var, never a
+// secret and never a hard-coded mailbox — resolved and validated at the
+// delivery boundary. A Site Configuration sender_identity value, when set,
+// is an explicit verified override (the future Business-owned sender path,
+// PRD 38) and wins over the platform default. Missing or malformed
+// configuration fails closed: no fallback address, no visitor From, no
+// hard-coded production mailbox.
+export const PLATFORM_SENDER_ENV_VAR = "WAZIBIZ_SENDER_EMAIL";
+
+const EMAIL_ADDRESS_PATTERN = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
+
+export function isValidEmailAddress(value: string): boolean {
+  return value.length <= 320 && EMAIL_ADDRESS_PATTERN.test(value);
+}
+
+/**
+ * Resolves the platform Sender Identity from `env.WAZIBIZ_SENDER_EMAIL`,
+ * returning the validated address or null when missing/malformed. Callers
+ * fail closed on null — the value is swappable per environment (local /
+ * staging / production) without source changes.
+ */
+export function resolvePlatformSenderIdentity(env: Env): string | null {
+  const raw = env.WAZIBIZ_SENDER_EMAIL?.trim();
+  if (!raw || !isValidEmailAddress(raw)) return null;
+  return raw;
+}
 
 export type FormServiceErrorCode =
   | "SITE_NOT_FOUND"
@@ -29,7 +55,8 @@ export type FormServiceErrorCode =
   | "FIELDS_INVALID"
   | "TURNSTILE_FAILED"
   | "RATE_LIMITED"
-  | "HEADER_INJECTION";
+  | "HEADER_INJECTION"
+  | "SENDER_IDENTITY_INVALID";
 
 export class FormServiceError extends Error {
   readonly code: FormServiceErrorCode;
@@ -64,14 +91,27 @@ export async function upsertSiteConfiguration(
   input: {
     siteId: string;
     formDestination: string;
+    /** Explicit verified Sender Identity override (future Business-owned
+     *  sender). When omitted, the Site uses the platform default resolved
+     *  from env.WAZIBIZ_SENDER_EMAIL at delivery time (stored as ''). */
     senderIdentity?: string;
     allowedOrigins?: string[];
     formEnabled?: boolean;
     turnstileRequired?: boolean;
   }
 ): Promise<SiteFormConfiguration> {
+  if (input.formDestination !== undefined && !isValidEmailAddress(input.formDestination.trim())) {
+    throw new FormServiceError("FIELDS_INVALID", "formDestination must be a valid recipient address");
+  }
+  const explicitSender = input.senderIdentity?.trim();
+  if (explicitSender !== undefined && explicitSender !== "" && !isValidEmailAddress(explicitSender)) {
+    throw new FormServiceError("SENDER_IDENTITY_INVALID", "senderIdentity must be a valid address when provided");
+  }
   const updatedAt = nowIso();
-  const senderIdentity = input.senderIdentity ?? DEFAULT_PLATFORM_SENDER_IDENTITY;
+  // '' = platform default: the effective From resolves from
+  // WAZIBIZ_SENDER_EMAIL at delivery time, so changing the environment value
+  // changes From without touching Site Configuration or source.
+  const senderIdentity = explicitSender ?? "";
   await env.DB.prepare(
     `INSERT INTO site_configurations (site_id, form_enabled, form_allowed_origins_json, form_destination, sender_identity, turnstile_required, updated_at)
      VALUES (?, ?, ?, ?, ?, ?, ?)
@@ -87,7 +127,7 @@ export async function upsertSiteConfiguration(
       input.siteId,
       input.formEnabled === false ? 0 : 1,
       JSON.stringify(input.allowedOrigins ?? []),
-      input.formDestination,
+      input.formDestination.trim(),
       senderIdentity,
       input.turnstileRequired ? 1 : 0,
       updatedAt
@@ -97,7 +137,7 @@ export async function upsertSiteConfiguration(
     siteId: input.siteId,
     formEnabled: input.formEnabled !== false,
     allowedOrigins: input.allowedOrigins ?? [],
-    formDestination: input.formDestination,
+    formDestination: input.formDestination.trim(),
     senderIdentity,
     turnstileRequired: input.turnstileRequired === true,
     updatedAt,
@@ -402,11 +442,16 @@ export async function acceptFormSubmission(
     )
     .run();
 
-  // First Email Delivery attempt under the CURRENT Site Configuration.
+  // First Email Delivery attempt under the CURRENT Site Configuration. The
+  // effective From is the Site's explicit verified override when set, else
+  // the platform Sender Identity resolved from WAZIBIZ_SENDER_EMAIL at this
+  // moment (issue #32); unresolvable configuration fails closed inside the
+  // attempt without ever falling back to another address.
+  const senderIdentity = configuration.senderIdentity || resolvePlatformSenderIdentity(env) || "";
   await attemptEmailDelivery(env, {
     submissionId,
     destination: configuration.formDestination,
-    senderIdentity: configuration.senderIdentity,
+    senderIdentity,
     replyTo: parsed.fields.email,
     visitorName: parsed.fields.name,
     message: parsed.fields.message,
@@ -468,9 +513,37 @@ export async function attemptEmailDelivery(
     return { deliveryId, status: "permanent_failure" };
   }
 
+  // Fail-closed sender gate (issue #32): without a valid trusted From — an
+  // explicit override or a resolvable WAZIBIZ_SENDER_EMAIL — nothing is sent.
+  // There is no fallback address, no hard-coded mailbox and never a visitor
+  // From. The failure is deterministic and classified transient: fixing the
+  // environment lets the bounded server-side retry deliver the same Accepted
+  // Submission without visitor resubmission.
+  if (!isValidEmailAddress(input.senderIdentity.trim())) {
+    const deliveryId = generateId();
+    await env.DB.prepare(
+      `INSERT INTO email_deliveries (id, form_submission_id, attempt_number, status, destination, sender_identity, reply_to, error_class, error_detail, scheduled_retry_at, created_at, updated_at)
+       VALUES (?, ?, ?, 'transient_failure', ?, ?, ?, 'transient', ?, ?, ?, ?)`
+    )
+      .bind(
+        deliveryId,
+        input.submissionId,
+        attemptNumber,
+        input.destination,
+        input.senderIdentity,
+        input.replyTo,
+        `platform sender identity unresolvable (${PLATFORM_SENDER_ENV_VAR} missing or malformed); no fallback From exists`,
+        new Date(now.getTime() + Math.min(2 ** attemptNumber, 60) * 60_000).toISOString(),
+        createdAt,
+        createdAt
+      )
+      .run();
+    return { deliveryId, status: "transient_failure" };
+  }
+
   const result = await transport({
     to: input.destination,
-    from: input.senderIdentity,
+    from: input.senderIdentity.trim(),
     replyTo: input.replyTo,
     subject: input.subject,
     text: input.message,
@@ -544,7 +617,12 @@ export async function processDueEmailDeliveries(
       {
         submissionId: row.form_submission_id,
         destination: row.destination,
-        senderIdentity: row.sender_identity,
+        // Recorded sender stays authoritative (the value captured at the
+        // previous attempt). Only an empty recorded value — the
+        // sender-unresolvable sentinel — re-resolves the platform default
+        // from the CURRENT environment, so fixing WAZIBIZ_SENDER_EMAIL lets
+        // the bounded retry heal without visitor resubmission.
+        senderIdentity: row.sender_identity || resolvePlatformSenderIdentity(env) || "",
         replyTo: row.reply_to,
         visitorName: submission.visitor_name,
         message: submission.visitor_message,

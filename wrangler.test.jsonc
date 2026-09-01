@@ -32,6 +32,7 @@
     "PUBLIC_APP_URL": "https://test.example.com",
     "WEBHOOK_SECRET": "test-webhook-secret",
     "OPERATOR_CAPABILITY_SECRET": "test-operator-capability-secret",
+    "WAZIBIZ_SENDER_EMAIL": "noreply@staging.wazibiz.example",
     "APPROVAL_SECRET": "test-approval-secret",
     "APPROVAL_TIMEOUT_DAYS": "7",
     "MAX_REVISIONS": "3",

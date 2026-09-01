@@ -57,7 +57,7 @@ V2-runtime mapping of those names (per `src/env.d.ts` + corrected #28):
 - Retired V1 integrations, **must not exist on the V2 Worker**: `SMTP2GO_API_KEY`, `GITHUB_TOKEN`, `GITHUB_WEBHOOK_SECRET`, `APPROVAL_SECRET`, `CANDIDATE_VALIDATION_SECRET` (not present anywhere).
 - Required by V2 but **values are operator-held** (cannot be read back from V1): `ZHIPU_API_KEY`, `OPENROUTER_API_KEY`, `KIE_API_KEY`, `CF_AIG_TOKEN`, `CF_DEPLOY_API_TOKEN`, `TURNSTILE_SECRET_KEY` (optional while `turnstile_required = 0`).
 - Required by V2 and **generatable fresh**: `WEBHOOK_SECRET` (inbound route HMAC), `OPERATOR_CAPABILITY_SECRET` (issue #29, W-29a).
-- Email: **no secret at all** — native Cloudflare Email Service `send_email` binding (issue #28 follow-up).
+- Email: **no secret at all** — native Cloudflare Email Service `send_email` binding (issue #28 follow-up); the platform Sender Identity is the `WAZIBIZ_SENDER_EMAIL` Worker **var** (issue #32, configuration not a secret) — unset in production until the operator approves the mailbox; delivery fails closed without it.
 
 ### Other
 
@@ -77,6 +77,7 @@ V2-runtime mapping of those names (per `src/env.d.ts` + corrected #28):
 | Browser rendering | — | `BROWSER` | no | binding on deploy | #27 | binding present |
 | Images | — | `IMAGES` | no | binding on deploy | #27 | binding present |
 | Cloudflare Email Service | `send_email: [{name: EMAIL}]` | `EMAIL` | binding: no / domain: no | binding deploys with the Worker; **dashboard**: Compute > Email Service > Email Sending > Onboard Domain (recommend `wazibiz.com`; DMARC `p=none` initially) | #27/#30 | controlled send returns `messageId`; ledger `delivered` |
+| Platform Sender Identity | `WAZIBIZ_SENDER_EMAIL` (var, **not** a secret) | — | no | operator selects the mailbox on the onboarded domain (e.g. `noreply@wazibiz.com`); set as a production var at deploy; **deliberately unset until then — delivery fails closed** (issue #32) | #33/#27 | `wrangler versions view` shows the var; Form Service ledger `sender_identity` equals it |
 | Cron | `*/10 * * * *` | `scheduled` | no | deploys with the Worker | #27 | schedule listed; sweep log line in #30 |
 | Secrets | `OPERATOR_CAPABILITY_SECRET`, `WEBHOOK_SECRET` | — | no | generate fresh, `wrangler secret put` (V2 Worker only) | #27 | `secret list` shows exactly the required set |
 | Secrets (operator values) | `ZHIPU_API_KEY`, `OPENROUTER_API_KEY`, `KIE_API_KEY`, `CF_AIG_TOKEN`, `CF_DEPLOY_API_TOKEN`, (optional `TURNSTILE_SECRET_KEY`) | — | no | **operator supplies values** (unreadable from V1) | #27 | same |

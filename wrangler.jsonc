@@ -127,7 +127,13 @@
         "crons": ["*/10 * * * *"]
       },
       "vars": {
-        "PUBLIC_APP_URL": "https://cf-website-factory-staging.wazibizwebsites.workers.dev"
+        "PUBLIC_APP_URL": "https://cf-website-factory-staging.wazibizwebsites.workers.dev",
+        // Platform Sender Identity (issue #32): explicit staging example on
+        // the candidate platform domain — replace with the operator-approved
+        // mailbox when the sender domain is onboarded (#33/#27). The
+        // production environment intentionally does NOT define this var
+        // until then: outbound delivery fails closed without it.
+        "WAZIBIZ_SENDER_EMAIL": "noreply@staging.wazibiz.example"
       }
     }
   }

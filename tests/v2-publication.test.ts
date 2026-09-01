@@ -272,7 +272,7 @@ describe("Rollback", () => {
     // rollback, then verify the configuration is untouched.
     await env.DB.prepare(
       `INSERT INTO site_configurations (site_id, form_enabled, form_allowed_origins_json, form_destination, sender_identity, turnstile_required, updated_at)
-       VALUES (?, 1, '[]', 'owner@example.com', 'noreply@mail.wazibiz.example', 0, '2026-09-01T00:00:00Z')`
+       VALUES (?, 1, '[]', 'owner@example.com', 'hello@mail.riftvalleyroasters.example', 0, '2026-09-01T00:00:00Z')`
     )
       .bind(context.siteId)
       .run();

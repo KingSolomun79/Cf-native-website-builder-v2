@@ -14,7 +14,7 @@ import { getBuildStageArtifact, storeBuildStageArtifact } from "../src/domain/st
 import { buildVersionSourceKey } from "../src/domain/artifact-keys";
 import { assignReleaseReady } from "../src/domain/release";
 import { cleanupDisposableDeployments } from "../src/domain/retention";
-import { acceptFormSubmission, upsertSiteConfiguration, DEFAULT_PLATFORM_SENDER_IDENTITY } from "../src/domain/form-service";
+import { acceptFormSubmission, upsertSiteConfiguration } from "../src/domain/form-service";
 import { QA_A_HARD_GATE_IDS, QA_B_MANDATORY_GATE_IDS, type QaAReport, type QaBReport } from "../src/domain/qa-stages";
 import { putObject } from "../src/lib/assets";
 
@@ -24,6 +24,9 @@ import { putObject } from "../src/lib/assets";
 // contracted tree.
 
 const env = providedEnv as unknown as Env;
+
+// Platform Sender Identity configured for the test environment (issue #32).
+const PLATFORM_SENDER = "noreply@staging.wazibiz.example";
 
 const PASS_A: QaAReport = {
   version: "1", visualScore: 94, contentScore: 93, fabrication: false,
@@ -109,7 +112,7 @@ describe("canonical lifecycle end-to-end (fresh Onboarding Submission through Ro
       .bind(accepted.submissionId)
       .first<{ status: string; destination: string; sender_identity: string; reply_to: string }>();
     expect(delivery!.status).toBe("delivered");
-    expect(delivery!.sender_identity).toBe(DEFAULT_PLATFORM_SENDER_IDENTITY);
+    expect(delivery!.sender_identity).toBe(PLATFORM_SENDER);
     expect(delivery!.reply_to).toBe("final@visitor.example");
 
     // A second version is published, retaining the first as Rollback Version…

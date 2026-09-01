@@ -66,6 +66,12 @@ export interface Env {
   // independently of the ambient workers-types version.
   EMAIL?: CloudflareEmailSender;
   TURNSTILE_SECRET_KEY?: string;
+  // Platform Sender Identity for outbound Form Service email (issue #32).
+  // Worker VAR, not a secret: the default outbound From, swappable per
+  // environment (local/staging/production) without source changes. Resolved
+  // and validated at the delivery boundary; missing or malformed fails
+  // closed — no fallback address and never a visitor From.
+  WAZIBIZ_SENDER_EMAIL?: string;
   // Days a superseded Published Version stays available as Rollback Version.
   ROLLBACK_WINDOW_DAYS?: string;
   // HMAC secret for operator capability tokens on the Approval/Rollback
