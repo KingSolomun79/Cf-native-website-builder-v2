@@ -145,3 +145,29 @@ mailbox (#33/#27); staging and the test environment carry explicitly
 labelled example addresses. Final state: 28 test files / 201 tests,
 typecheck clean, `wrangler deploy --dry-run` passes for production
 (without the var) and staging (with it).
+
+Issue #33 automatable preparation (commit `d0002c0`) completed the
+production-readiness work that needs no operator credentials: the V2
+secret inventory re-audited against live source references (required:
+ZHIPU_API_KEY, OPENROUTER_API_KEY, KIE_API_KEY, CF_AIG_TOKEN,
+CF_DEPLOY_API_TOKEN, OPERATOR_CAPABILITY_SECRET, WEBHOOK_SECRET; optional:
+TURNSTILE_SECRET_KEY while turnstile_required = 0; retired names all
+unreferenced), retired dummy vars purged from wrangler.test.jsonc, a
+name-only hygiene gate added (scripts/verify-v2-secrets.mjs — validated
+read-only against the preserved V1 Worker, which correctly fails V2
+hygiene while remaining untouched), provider ownership and
+fresh-over-reuse guidance added to the #27 runbook, and the staging smoke
+Site reset to the platform-default sender sentinel. Live staging
+verification (deployed from clean tree `d0002c0`; Worker
+cf-website-factory-staging version `a2902da6-e6ae-4dca-ba4c-63eaddf991e0`;
+WAZIBIZ_SENDER_EMAIL var live): a controlled submit was Accepted
+(submission `fde3ede4-fe64-47a3-9f63-e235fa2159d7`) and the real
+Cloudflare Email Service path recorded
+sender_identity = noreply@staging.wazibiz.example (exactly the env value —
+issue #32 wiring), destination from Site Configuration, visitor email as
+Reply-To, and E_SENDER_DOMAIN_NOT_AVAILABLE as bounded transient_failure
+with a scheduled retry — deterministic fail-closed pending the operator's
+dashboard domain onboarding. Remaining #33 items are operator-gated:
+sender-domain onboarding, production WAZIBIZ_SENDER_EMAIL approval, and
+provider secret provisioning at #27. Final state: 28 test files / 201
+tests, typecheck clean, dry-runs pass, tree clean.
