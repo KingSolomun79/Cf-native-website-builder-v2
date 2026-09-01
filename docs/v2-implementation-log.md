@@ -56,6 +56,7 @@ after the CSO remediation at 428/428.
 | #28 WAZIBIZ Form Service email transport (H2) | `bde4be5` | 195 pass | pass | OK WITH WATCH ITEMS (`docs/security/2026-09-01-v2-issue-28-cso.md`; F1 caught live + fixed in-diff; W-28d = production token + `SMTP2GO_API_KEY` set at the #27 deploy; W-28f = real verified Sender Identity) |
 | #28 follow-up: native Cloudflare Email Service transport | `f8e6afb` | 186 pass | pass | OK FOR CURRENT SCOPE (`docs/security/2026-09-01-v2-issue-28-email-service-cso.md`; interim SMTP2Go/router architecture fully removed; W-28h = dashboard domain onboarding before production delivery; W-28g = tighten binding sender allowlist after onboarding) |
 | #31 Capability-gated Publication operator route | `fc1a75c` | 194 pass | pass | OK FOR CURRENT SCOPE (`docs/security/2026-09-01-v2-issue-31-cso.md`; W-29b closed; publish-side TOCTOU enforced at the mutation boundary) |
+| #32 Configurable platform Sender Identity (`WAZIBIZ_SENDER_EMAIL`) | `3636880` | 201 pass | pass | OK FOR CURRENT SCOPE (`docs/security/2026-09-01-v2-issue-32-cso.md`; hard-coded mailbox removed; fail-closed sender gate; W-32a = set production var at #33/#27) |
 
 | QA sweep (#5-#16, #24, #25) | `7ff3433` | 166 pass | pass | 4 findings (1 Medium criterion gap, 2 Medium, 1 Low) — `docs/qa/2026-09-01-v2-qa-sweep.md` |
 | QA remediation (F1-F3) | (this commit) | 166 pass | pass | OK FOR CURRENT SCOPE (`docs/security/2026-09-01-v2-qa-remediation-cso.md`); F4 deferred |
@@ -127,3 +128,20 @@ version, exact manifest hash, no regeneration, idempotent retry only for
 the same permitted version. Final state: 28 test files / 194 tests,
 typecheck clean, `wrangler deploy --dry-run` passes for production and
 staging.
+
+Issue #32 then removed the hard-coded platform sender mailbox from
+product behavior: the default outbound From is the WAZIBIZ_SENDER_EMAIL
+Worker var (configuration, not a secret), validated at the delivery
+boundary, swappable per environment without source changes. Site
+Configuration sender_identity remains an explicit verified override (the
+future Business-owned sender path) and is now validated at the config
+boundary; missing or malformed configuration fails closed with a ledger
+row naming the cause, zero transport calls, no fallback address and
+never a visitor From, while the Accepted Submission stays accepted and
+the bounded retry heals after the environment is fixed. The recorded
+sender stays authoritative on retry (existing Email Delivery contract).
+Production deliberately defines no value until the operator approves the
+mailbox (#33/#27); staging and the test environment carry explicitly
+labelled example addresses. Final state: 28 test files / 201 tests,
+typecheck clean, `wrangler deploy --dry-run` passes for production
+(without the var) and staging (with it).
