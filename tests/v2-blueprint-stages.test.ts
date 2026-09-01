@@ -24,6 +24,7 @@ import { getBuildStageArtifact } from "../src/domain/stage-artifacts";
 import { putObject } from "../src/lib/assets";
 import type { RawAiGenerate } from "../src/domain/ai-boundary";
 import type { BusinessFacts } from "../src/domain/lifecycle-schema";
+import { buildPng } from "./helpers/png";
 
 // Primary-seam tests for Reference Analysis -> Visual Blueprint ->
 // Implementation Contract (issue #8): separation, immutability, identity
@@ -132,7 +133,7 @@ async function newPipeline(options: { referenceUrl?: string | null } = {}): Prom
 }> {
   const referenceUrl = options.referenceUrl === undefined ? "https://reference.example.com/" : options.referenceUrl;
   const screenshotKey = `references/uploads/ra-${Math.random().toString(36).slice(2)}.png`;
-  await putObject(env, screenshotKey, new TextEncoder().encode("PNG-submitted"));
+  await putObject(env, screenshotKey, buildPng());
   const started = await startSiteGeneration(env, {
     payload: {
       buildMode: "REFERENCE_BOUND",

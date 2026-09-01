@@ -22,8 +22,18 @@ import { getObject, putObject } from "../src/lib/assets";
 
 const env = providedEnv as unknown as Env;
 
+import { buildPng } from "./helpers/png";
+
+// QA-F2: submitted screenshots must pass structural validation, so fixtures
+// are real (distinct, valid) PNGs; the idat seed keeps them byte-distinct.
 function screenshotBytes(seed: string): Uint8Array {
-  return new TextEncoder().encode(`PNGDATA-${seed}`);
+  return new Uint8Array(buildPng({ width: 1200, height: 3000, idatBytes: 40 + seed.length }));
+}
+
+async function expectStoredBytes(body: ReadableStream, fixture: Uint8Array): Promise<void> {
+  const stored = new Uint8Array(await new Response(body).arrayBuffer());
+  expect(stored.byteLength).toBe(fixture.byteLength);
+  for (let i = 0; i < fixture.length; i++) expect(stored[i]).toBe(fixture[i]);
 }
 
 function baseCapture(overrides: Partial<ReferenceCaptureOutput> = {}): ReferenceCaptureOutput {
@@ -166,7 +176,7 @@ describe("Reference intake and evidence freeze", () => {
     // The canonical screenshot is the submitted screenshot, frozen immutably.
     const stored = await env.SITE_BUCKET.get(frozen.canonicalScreenshotR2Key);
     expect(stored).not.toBeNull();
-    expect(await new Response(stored!.body).text()).toBe("PNGDATA-submitted");
+    await expectStoredBytes(stored!.body, screenshotBytes("submitted"));
 
     const read = await getFrozenReferenceEvidence(env, context.siteGenerationId);
     expect(read!.evidence.version).toBe("1");
@@ -180,7 +190,7 @@ describe("Reference intake and evidence freeze", () => {
 
     expect(frozen.inputMode).toBe("URL_ONLY");
     const stored = await env.SITE_BUCKET.get(frozen.canonicalScreenshotR2Key);
-    expect(await new Response(stored!.body).text()).toBe("PNGDATA-canonical-live");
+    await expectStoredBytes(stored!.body, screenshotBytes("canonical-live"));
 
     const read = await getFrozenReferenceEvidence(env, context.siteGenerationId);
     expect(read!.evidence.referenceUrl).toBe("https://reference.example.com/");
@@ -204,7 +214,7 @@ describe("Reference intake and evidence freeze", () => {
     expect(frozen.inputMode).toBe("SCREENSHOT_AND_URL");
     // Canonical = submitted screenshot, NOT the live capture.
     const stored = await env.SITE_BUCKET.get(frozen.canonicalScreenshotR2Key);
-    expect(await new Response(stored!.body).text()).toBe("PNGDATA-submitted");
+    await expectStoredBytes(stored!.body, screenshotBytes("submitted"));
 
     const read = await getFrozenReferenceEvidence(env, context.siteGenerationId);
     const recorded = read!.evidence.discrepancies as Array<Record<string, unknown>>;
@@ -327,12 +337,14 @@ describe("Reference intake and evidence freeze", () => {
         facts: { businessName: "No Reference Co", contactEmail: "hi@nr.example" },
       },
     });
-    const created = await createInitialBuild(env, { siteGenerationId: started.siteGenerationId });
+    // Intake rejects on mode before touching Build ids, so no Build is
+    // created here — ORIGINAL_DESIGN builds are proof-gate bound (#24) and
+    // this test must not depend on the gate's state.
     await expect(
       runReferenceIntake(env, {
         siteGenerationId: started.siteGenerationId,
-        buildId: created.buildId,
-        buildVersionId: created.buildVersionId,
+        buildId: "b-od-mode-probe",
+        buildVersionId: "bv-od-mode-probe",
         buildVersionNumber: 1,
       })
     ).rejects.toMatchObject({ code: "NOT_REFERENCE_BOUND" });

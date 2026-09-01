@@ -23,7 +23,8 @@ export type RevisionErrorCode =
   | "GENERATION_NOT_FOUND"
   | "REVISION_INVALID"
   | "DESIGN_ORIGIN_IMMUTABLE"
-  | "FACT_UPDATE_INVALID";
+  | "FACT_UPDATE_INVALID"
+  | "ORIGINAL_DESIGN_LOCKED";
 
 export class RevisionError extends Error {
   readonly code: RevisionErrorCode;
@@ -275,6 +276,25 @@ export async function createRevisionBuild(
     .first<BuildRow>();
   if (!parent) {
     throw new RevisionError("BUILD_NOT_FOUND", `Build ${input.parentBuildId} does not exist`);
+  }
+
+  // The ORIGINAL_DESIGN proof gate binds every way a Build can START, not
+  // only the initial path: while the gate is shut, no new ORIGINAL_DESIGN
+  // Build may begin — including via Revision Request (QA-F1).
+  if (parent.site_generation_id) {
+    const generationMode = await env.DB.prepare(
+      "SELECT build_mode FROM site_generations WHERE id = ?"
+    )
+      .bind(parent.site_generation_id)
+      .first<{ build_mode: "REFERENCE_BOUND" | "ORIGINAL_DESIGN" }>();
+    if (generationMode?.build_mode === "ORIGINAL_DESIGN") {
+      const { assertOriginalDesignUnlocked } = await import("./proof-gate");
+      try {
+        await assertOriginalDesignUnlocked(env);
+      } catch (error) {
+        throw new RevisionError("ORIGINAL_DESIGN_LOCKED", (error as Error).message);
+      }
+    }
   }
 
   if (typeof input.payload !== "object" || input.payload === null) {

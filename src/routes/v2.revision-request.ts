@@ -15,6 +15,7 @@ const ERROR_STATUS: Record<RevisionError["code"], number> = {
   REVISION_INVALID: 400,
   DESIGN_ORIGIN_IMMUTABLE: 422,
   FACT_UPDATE_INVALID: 400,
+  ORIGINAL_DESIGN_LOCKED: 423,
 };
 
 export function revisionErrorResponse(error: RevisionError): Response {

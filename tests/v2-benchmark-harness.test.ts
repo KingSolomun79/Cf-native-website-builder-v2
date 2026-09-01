@@ -52,7 +52,7 @@ describe("frozen benchmark identity", () => {
     // Identity verification rejects mutated evidence or screenshot bytes.
     const mutatedEvidence = {
       ...caseDefinition.evidence,
-      screenshotBytes: "PNG-easier-substitute-reference",
+      screenshotBytes: new TextEncoder().encode("PNG-easier-substitute-reference"),
       regions: caseDefinition.evidence.regions.slice(0, 2),
     };
     await expect(verifyBenchmarkIdentity(env, { caseId: caseDefinition.id, evidence: mutatedEvidence })).rejects.toMatchObject({

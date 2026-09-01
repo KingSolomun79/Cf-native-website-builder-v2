@@ -16,6 +16,7 @@ import {
 import { putObject } from "../src/lib/assets";
 import type { RawAiGenerate } from "../src/domain/ai-boundary";
 import type { BusinessFacts } from "../src/domain/lifecycle-schema";
+import { buildPng } from "./helpers/png";
 
 // Primary-seam tests for incremental four-page REFERENCE_BOUND generation
 // (issue #9).
@@ -222,7 +223,7 @@ async function preparedContext(): Promise<{
   contractR2Key: string;
 }> {
   const screenshotKey = `references/uploads/sg-${Math.random().toString(36).slice(2)}.png`;
-  await putObject(env, screenshotKey, new TextEncoder().encode("PNG"));
+  await putObject(env, screenshotKey, buildPng());
   const started = await startSiteGeneration(env, {
     payload: { buildMode: "REFERENCE_BOUND", facts: FACTS, reference: { url: "https://reference.example.com/", screenshotR2Key: screenshotKey } },
   });

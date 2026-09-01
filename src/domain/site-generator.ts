@@ -131,6 +131,11 @@ const UNSUPPORTED_FACT_PATTERNS: Array<{ id: string; pattern: RegExp }> = [
   { id: "FABRICATED_SOCIAL_PROOF", pattern: /\b\d+\s?\+?\s?(clients|customers|projects|reviews|testimonials|jobs)\b/i },
   { id: "FABRICATED_EXPERIENCE", pattern: /\b\d+\s?years?\s(of\s)?(experience|in business|serving)\b/i },
   { id: "FABRICATED_YEAR", pattern: /\bsince\s+(19|20)\d{2}\b/i },
+  // Founding-year phrasing ("Established 1998", "Founded in 2004", "Est.
+  // 1999") is an unsupported founding-date claim unless supplied as a fact.
+  // Contextual verbs keep arbitrary years in addresses, phone numbers or
+  // copyright lines from matching (QA-F3).
+  { id: "FABRICATED_FOUNDING_YEAR", pattern: /\b(established|founded|est\.?)\s*(in\s+)?(19|20)\d{2}\b/i },
   { id: "FABRICATED_RATING", pattern: /\b(5\.0|four|five)\s?[- ]?star\b|\brated\s+\d(\.\d)?\/5\b/i },
 ];
 

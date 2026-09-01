@@ -53,6 +53,9 @@ after the CSO remediation at 428/428.
 | #25 Contract away V1 architecture | `75cd12d` | 149 pass (V1 suites removed with their modules) | pass | OK WITH WATCH ITEMS (`docs/security/2026-09-01-v2-issue-25-cso.md`; W14 = operational secret deletion) |
 | #26 Final integration + release verification | `9812017` | 153 pass | pass | OK FOR CURRENT SCOPE (`docs/security/2026-09-01-v2-issue-26-cso.md`; W17 fixed in-diff) |
 
+| QA sweep (#5-#16, #24, #25) | `7ff3433` | 166 pass | pass | 4 findings (1 Medium criterion gap, 2 Medium, 1 Low) — `docs/qa/2026-09-01-v2-qa-sweep.md` |
+| QA remediation (F1-F3) | (this commit) | 166 pass | pass | OK FOR CURRENT SCOPE (`docs/security/2026-09-01-v2-qa-remediation-cso.md`); F4 deferred |
+
 ## Sequence complete (#3-#26)
 
 All issues #3-#26 landed sequentially, each with a dedicated commit

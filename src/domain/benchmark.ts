@@ -18,6 +18,7 @@
 import type { Env } from "../env.d";
 import { generateId, nowIso } from "../lib/crypto";
 import { putObject } from "../lib/assets";
+import { buildValidPng } from "../lib/png";
 import { PROMPT_MANIFEST } from "./prompt-contract";
 import { KIE_SPEND_LIMIT_USD } from "./image-pipeline";
 import type { BusinessFacts } from "./lifecycle-schema";
@@ -32,7 +33,8 @@ export interface BenchmarkEvidenceFixture {
   measuredElements: Array<{ selectorHint: string; role: string; computed: Record<string, string>; confidence: "HIGH" | "MEDIUM" | "LOW"; source: "DOM" | "COMPUTED_STYLE" | "SCREENSHOT" | "BROWSER_INTERACTION" }>;
   motionObservations: Array<{ kind: string; detail?: string }>;
   responsiveObservations: unknown[];
-  screenshotBytes: string;
+  /** Structurally valid PNG bytes (QA-F2: submitted screenshots are validated). */
+  screenshotBytes: Uint8Array;
 }
 
 export interface BenchmarkCaseDefinition {
@@ -68,7 +70,7 @@ export const BENCHMARK_CASES: readonly BenchmarkCaseDefinition[] = [
       ],
       motionObservations: [],
       responsiveObservations: [{ kind: "viewport_matrix", viewports: ["desktop", "mobile"] }],
-      screenshotBytes: "PNG-bench-1-asymmetric-editorial",
+      screenshotBytes: buildValidPng(1440, 3600),
     },
     brief: {
       businessName: "Rift Valley Roasters",
@@ -98,7 +100,7 @@ export const BENCHMARK_CASES: readonly BenchmarkCaseDefinition[] = [
       ],
       motionObservations: [],
       responsiveObservations: [{ kind: "viewport_matrix", viewports: ["desktop", "mobile"] }],
-      screenshotBytes: "PNG-bench-2-hospitality-travel",
+      screenshotBytes: buildValidPng(1440, 4200),
     },
     brief: {
       businessName: "Acacia Safari Lodge",
@@ -128,7 +130,7 @@ export const BENCHMARK_CASES: readonly BenchmarkCaseDefinition[] = [
       ],
       motionObservations: [],
       responsiveObservations: [{ kind: "viewport_matrix", viewports: ["desktop", "mobile"] }],
-      screenshotBytes: "PNG-bench-3-corporate-professional",
+      screenshotBytes: buildValidPng(1440, 2400),
     },
     brief: {
       businessName: "Ledger & Vale Partners",
@@ -159,7 +161,7 @@ export const BENCHMARK_CASES: readonly BenchmarkCaseDefinition[] = [
       ],
       motionObservations: [],
       responsiveObservations: [{ kind: "viewport_matrix", viewports: ["desktop", "mobile"] }],
-      screenshotBytes: "PNG-bench-4-trades-local-service",
+      screenshotBytes: buildValidPng(1440, 3300),
     },
     brief: {
       businessName: "Ironline Roofing",
@@ -192,7 +194,7 @@ export const BENCHMARK_CASES: readonly BenchmarkCaseDefinition[] = [
         { kind: "complex_slider", detail: "draggable before/after comparison slider" },
       ],
       responsiveObservations: [{ kind: "viewport_matrix", viewports: ["desktop", "mobile"] }],
-      screenshotBytes: "PNG-bench-5-responsive-motion",
+      screenshotBytes: buildValidPng(1440, 2800),
     },
     brief: {
       businessName: "Pulse Studio Fitness",
@@ -231,6 +233,13 @@ export function frozenPromptModelSchema(): Record<string, { promptId: string; pr
   };
 }
 
+async function sha256HexBytes(data: Uint8Array): Promise<string> {
+  const digest = await crypto.subtle.digest("SHA-256", data);
+  return Array.from(new Uint8Array(digest))
+    .map((byte) => byte.toString(16).padStart(2, "0"))
+    .join("");
+}
+
 async function sha256Hex(data: string): Promise<string> {
   const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(data));
   return Array.from(new Uint8Array(digest))
@@ -254,7 +263,7 @@ export async function evidenceChecksumOf(evidence: BenchmarkEvidenceFixture): Pr
 }
 
 export async function screenshotChecksumOf(evidence: BenchmarkEvidenceFixture): Promise<string> {
-  return sha256Hex(evidence.screenshotBytes);
+  return sha256HexBytes(evidence.screenshotBytes);
 }
 
 // ── Freeze + identity verification ──────────────────────────────────────────
@@ -347,7 +356,7 @@ export async function verifyBenchmarkIdentity(
 // the screenshot is the authority, supplemented by the reference URL.
 export function frozenCaptureFor(caseDefinition: BenchmarkCaseDefinition): ReferenceCaptureFn {
   return async () => {
-    const bytes = new TextEncoder().encode(caseDefinition.evidence.screenshotBytes);
+    const bytes = caseDefinition.evidence.screenshotBytes;
     const capture: ReferenceCaptureOutput = {
       canonicalScreenshot: { content: bytes, mimeType: "image/png", pixelWidth: 1440, pixelHeight: 4800, likelyCssViewportWidth: 1440 },
       captures: [{ viewportWidth: 1440, viewportHeight: 900, content: bytes, mimeType: "image/png" }],
@@ -472,7 +481,7 @@ export async function getBenchmarkSuiteStatus(env: Env): Promise<BenchmarkSuiteS
 // runs consume the same frozen bytes.
 export async function persistFrozenScreenshot(env: Env, caseDefinition: BenchmarkCaseDefinition): Promise<string> {
   const key = `benchmarks/${caseDefinition.id}/reference/screenshot.png`;
-  await putObject(env, key, caseDefinition.evidence.screenshotBytes, {
+  await putObject(env, key, caseDefinition.evidence.screenshotBytes.slice().buffer, {
     httpMetadata: { contentType: "image/png" },
   });
   return key;

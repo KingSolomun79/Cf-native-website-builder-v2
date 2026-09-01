@@ -17,6 +17,7 @@ import type { Env } from "../env.d";
 import { Value } from "@sinclair/typebox/value";
 import { generateId, nowIso } from "../lib/crypto";
 import { getObject, putImmutableObject } from "../lib/assets";
+import { validateScreenshot } from "../lib/reference-input";
 import { appendBuildWorkflowEvent } from "./lifecycle";
 import type { OnboardingSubmissionRow } from "./lifecycle";
 import { buildVersionEvidenceKey } from "./artifact-keys";
@@ -38,6 +39,7 @@ export type ReferenceIntakeErrorCode =
   | "GENERATION_NOT_FOUND"
   | "NOT_REFERENCE_BOUND"
   | "REFERENCE_SCREENSHOT_MISSING"
+  | "REFERENCE_SCREENSHOT_INVALID"
   | "REFERENCE_CAPTURE_FAILED"
   | "ADAPTATION_CONTRACT_REQUIRED"
   | "EVIDENCE_SCHEMA_INVALID";
@@ -158,7 +160,13 @@ async function loadSubmission(
   return { submission, reference: payload.reference ?? {}, buildMode: payload.buildMode };
 }
 
-async function readScreenshotBytes(env: Env, key: string): Promise<{ bytes: Uint8Array; mimeType: string }> {
+// Reads and validates the submitted Reference Screenshot before anything is
+// frozen: it must be a structurally complete PNG within the size/geometry
+// contract (QA-F2 — the retained reference-input validator is authoritative).
+async function readScreenshotBytes(
+  env: Env,
+  key: string
+): Promise<{ bytes: Uint8Array; mimeType: string; width: number; height: number }> {
   const body = await getObject(env, key);
   if (!body) {
     throw new ReferenceIntakeError(
@@ -166,9 +174,20 @@ async function readScreenshotBytes(env: Env, key: string): Promise<{ bytes: Uint
       `Reference Screenshot '${key}' is not persisted and cannot be frozen`
     );
   }
-  const buffer = new Uint8Array(await new Response(body).arrayBuffer());
-  const mimeType = key.toLowerCase().endsWith(".png") ? "image/png" : key.toLowerCase().endsWith(".jpg") || key.toLowerCase().endsWith(".jpeg") ? "image/jpeg" : "image/png";
-  return { bytes: buffer, mimeType };
+  const buffer = await new Response(body).arrayBuffer();
+  const validation = validateScreenshot({ data: buffer, byteSize: buffer.byteLength, mimeType: "image/png" });
+  if (!validation.ok) {
+    throw new ReferenceIntakeError(
+      "REFERENCE_SCREENSHOT_INVALID",
+      `Reference Screenshot '${key}' failed content validation (${validation.code}): ${validation.error}`
+    );
+  }
+  return {
+    bytes: new Uint8Array(buffer),
+    mimeType: validation.metadata.mimeType,
+    width: validation.metadata.width,
+    height: validation.metadata.height,
+  };
 }
 
 async function sha256Hex(data: string): Promise<string> {
@@ -234,6 +253,7 @@ export async function runReferenceIntake(
     const read = await readScreenshotBytes(env, reference.screenshotR2Key!);
     canonicalBytes = read.bytes;
     canonicalMime = read.mimeType;
+    screenshotMetadata = { pixelWidth: read.width, pixelHeight: read.height, likelyCssViewportWidth: read.width };
   } else {
     canonicalBytes = captureOutput!.canonicalScreenshot.content;
     canonicalMime = captureOutput!.canonicalScreenshot.mimeType;

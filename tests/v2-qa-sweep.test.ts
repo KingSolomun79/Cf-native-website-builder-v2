@@ -59,9 +59,9 @@ describe("QA #5 — Revision Request / Fact Update", () => {
 });
 
 describe("QA #7 — Reference intake", () => {
-  // QA-F2 (Medium): intake freezes non-image bytes. Tripwire: flip to `it`
-  // and drop this marker when fixed.
-  it.fails("rejects a screenshot object whose bytes are not a real image", async () => {
+  // QA-F2 RESOLVED: intake validates PNG structure/geometry before freezing
+  // (retained reference-input validator wired in readScreenshotBytes).
+  it("rejects a screenshot object whose bytes are not a real image", async () => {
     const context = await newGeneration();
     const submission = await env.DB.prepare(
       "SELECT payload_json FROM onboarding_submissions WHERE id = (SELECT onboarding_submission_id FROM site_generations WHERE id = ?)"
@@ -112,8 +112,9 @@ describe("QA #9 — fabrication lint", () => {
     blockers: [],
   };
 
-  // QA-F3 (Medium): founding-year phrasing escapes FABRICATED_YEAR.
-  it.fails("catches 'Established 1998'-style founding-year fabrication", () => {
+  // QA-F3 RESOLVED: FABRICATED_FOUNDING_YEAR matches contextual founding
+  // phrasing without flagging years in addresses/phones/copyright lines.
+  it("catches 'Established 1998'-style founding-year fabrication", () => {
     const home = '<!DOCTYPE html><html><head><title>h</title><meta name="description" content="d"><meta name="viewport" content="w"></head><body><header><nav><a href="/">h</a><a href="/about">a</a><a href="/services">s</a><a href="/contact">c</a></nav></header><main><h1>QA</h1><p>Established 1998 — family run ever since.</p></main><footer>f</footer></body></html>';
     const verdict = validateAssembledSite(source(home), { contract: contract as never, slots: deriveImagePlan({
       version: "1",
@@ -137,7 +138,7 @@ describe("QA #9 — fabrication lint", () => {
       accessibilityAdaptations: [],
       declaredLimitations: [],
     }).slots });
-    expect(verdict.findings.map((finding) => finding.id)).toContain("FABRICATED_YEAR");
+    expect(verdict.findings.map((finding) => finding.id)).toContain("FABRICATED_FOUNDING_YEAR");
   });
 });
 
@@ -284,9 +285,9 @@ describe("QA #24 — ORIGINAL_DESIGN mode gate", () => {
     expect((await evaluateProofGate(env)).gateOpen).toBe(false);
   });
 
-  // QA-F1 (Medium): the proof gate is bypassable via Revision Request on a
-  // pre-existing ORIGINAL_DESIGN build (#24 acceptance-criterion gap).
-  it.fails("blocks starting an ORIGINAL_DESIGN Build through the Revision Request path too", async () => {
+  // QA-F1 RESOLVED: createRevisionBuild enforces the ORIGINAL_DESIGN proof
+  // gate for OD parent generations (ORIGINAL_DESIGN_LOCKED while shut).
+  it("blocks starting an ORIGINAL_DESIGN Build through the Revision Request path too", async () => {
     // Seed one existing ORIGINAL_DESIGN build from a period when the gate
     // was open (fresh DBs start shut, so we open then shut around it).
     for (const definition of BENCHMARK_CASES) {
