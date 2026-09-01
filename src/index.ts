@@ -14,8 +14,17 @@ import { handleKieCallback } from "./routes/internal.kie-callback";
 import { runDeploySmokeTest } from "./routes/internal.deploy-smoke";
 import { handleGithubDeployCallback } from "./routes/webhook.github";
 import { handleCandidateValidation } from "./lib/candidate-validation";
+import { submitOnboardingSubmission } from "./routes/v2.onboarding-submit";
+import { getSiteGeneration } from "./routes/v2.site-generation-get";
+import { createBuildForSiteGeneration } from "./routes/v2.build-create";
+import { getBuild } from "./routes/v2.build-get";
 
 const app = new Hono<{ Bindings: Env }>();
+
+app.post("/api/v2/onboarding-submissions", submitOnboardingSubmission);
+app.get("/api/v2/site-generations/:siteGenerationId", getSiteGeneration);
+app.post("/api/v2/site-generations/:siteGenerationId/builds", createBuildForSiteGeneration);
+app.get("/api/v2/builds/:buildId", getBuild);
 
 app.post("/api/webhooks/fluentforms", handleFluentFormsWebhook);
 app.post("/api/webhooks/github", handleGithubDeployCallback);
@@ -45,4 +54,5 @@ app.onError((err, c) => {
 
 export default app;
 export { SiteBuildWorkflow } from "./workflows/site-build-workflow";
+export { WebsiteBuildWorkflow } from "./workflows/website-build-workflow";
 export { WebsiteAgent } from "./agents/website-agent";

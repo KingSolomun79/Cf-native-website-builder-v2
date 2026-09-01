@@ -50,6 +50,11 @@
       "name": "site-build-workflow",
       "binding": "SITE_BUILD_WORKFLOW",
       "class_name": "SiteBuildWorkflow"
+    },
+    {
+      "name": "website-build-workflow",
+      "binding": "WEBSITE_BUILD_WORKFLOW",
+      "class_name": "WebsiteBuildWorkflow"
     }
   ],
 

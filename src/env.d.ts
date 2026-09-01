@@ -5,6 +5,7 @@ export interface Env {
   SITE_BUCKET: R2Bucket;
   WEBSITE_AGENT: DurableObjectNamespace;
   SITE_BUILD_WORKFLOW: Workflow;
+  WEBSITE_BUILD_WORKFLOW: Workflow;
   BROWSER: BrowserWorker;
   IMAGES: ImagesBinding;
 
