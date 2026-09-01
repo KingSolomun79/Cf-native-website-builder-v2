@@ -45,4 +45,5 @@ after the CSO remediation at 428/428.
 | #17 Five-site benchmark harness | `dd67a43` | 454 pass | pass | OK WITH WATCH ITEMS (`docs/security/2026-09-01-v2-issue-17-cso.md`) |
 | #18 Benchmark Site 1 (asymmetric/editorial) | `ae739df` | 457 pass | pass | OK FOR CURRENT SCOPE (`docs/security/2026-09-01-v2-issue-18-cso.md`) |
 | #19 Benchmark Site 2 (hospitality/travel) | `b5f09c4` | 460 pass | pass | OK FOR CURRENT SCOPE (`docs/security/2026-09-01-v2-issue-19-cso.md`) |
-| #20 Benchmark Site 3 (corporate/professional) | (this commit) | 463 pass | pass | OK FOR CURRENT SCOPE (`docs/security/2026-09-01-v2-issue-20-cso.md`) |
+| #20 Benchmark Site 3 (corporate/professional) | `ccdfb0b` | 463 pass | pass | OK FOR CURRENT SCOPE (`docs/security/2026-09-01-v2-issue-20-cso.md`) |
+| #21 Benchmark Site 4 (trades/local service) | (this commit) | 466 pass | pass | OK FOR CURRENT SCOPE (`docs/security/2026-09-01-v2-issue-21-cso.md`) |
