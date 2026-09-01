@@ -3,8 +3,6 @@ import type { BrowserWorker } from "@cloudflare/playwright";
 export interface Env {
   DB: D1Database;
   SITE_BUCKET: R2Bucket;
-  WEBSITE_AGENT: DurableObjectNamespace;
-  SITE_BUILD_WORKFLOW: Workflow;
   WEBSITE_BUILD_WORKFLOW: Workflow;
   BROWSER: BrowserWorker;
   IMAGES: ImagesBinding;
@@ -19,19 +17,7 @@ export interface Env {
   KIE_API_URL: string;
   KIE_API_KEY: string;
   KIE_MODEL: string;
-  SMTP2GO_API_KEY: string;
   WEBHOOK_SECRET: string;
-  APPROVAL_SECRET: string;
-  APPROVAL_TIMEOUT_DAYS: string;
-  MAX_REVISIONS: string;
-  VISUAL_QA_MIN_SCORE?: string;
-  INTERNAL_NOTIFICATION_EMAIL: string;
-
-  GITHUB_TOKEN: string;
-  GITHUB_WEBHOOK_SECRET: string;
-  GITHUB_REPO_OWNER: string;
-  GITHUB_REPO_NAME: string;
-  GITHUB_BRANCH: string;
 
   ZHIPU_API_KEY?: string;
   ZHIPU_API_URL?: string;
@@ -40,7 +26,6 @@ export interface Env {
   PRIMARY_PROVIDER?: string;
 
   OPENROUTER_API_KEY: string;
-  R2_PUBLIC_URL?: string;
   VISION_MODEL?: string;
   VISION_PRIMARY_PROVIDER?: string;
   VISION_PRIMARY_MODEL?: string;
@@ -52,8 +37,6 @@ export interface Env {
   VISION_INPUT_MAX_BYTES?: string;
   VISION_INPUT_MAX_WIDTH?: string;
   VISION_INPUT_MAX_HEIGHT?: string;
-  CANDIDATE_VALIDATION_ENABLED?: string;
-  CANDIDATE_VALIDATION_SECRET?: string;
   FALLBACK_MODEL?: string;
 
   // Central WAZIBIZ Form Service (V2, issue #11). The transport URL is a

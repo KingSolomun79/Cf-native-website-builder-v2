@@ -2,7 +2,13 @@
 
 Cloudflare-native Website Builder V2 for high-fidelity four-page Business websites.
 
-This repository is a brownfield fork of the earlier builder. Existing V1 code may remain temporarily for infrastructure reuse, but V1 product behavior is not authoritative.
+This repository is a brownfield fork of the earlier builder. The migration
+contraction has completed: V1 product architecture (client/job/version
+semantics, Fluent Forms intake, SMTP2Go per-site contact delivery, the V1
+generator/render path, prompt registry and workflow) has been removed. Only
+audited platform infrastructure (AI gateway, browser boundary, R2/D1 utils,
+KIE client, CF deploy mechanics, crypto helpers) remains, serving the single
+V2 product architecture.
 
 ## Read this first
 

@@ -1,5 +1,4 @@
 import type { Env } from "../env.d";
-import { buildContactWorker } from "../builders/contact-worker-builder";
 
 function cfAuthHeaders(env: Env): Record<string, string> {
   return { Authorization: `Bearer ${env.CF_DEPLOY_API_TOKEN}` };
@@ -331,64 +330,6 @@ async function deployVersionAndEnable(env: Env, workerName: string, versionId: s
   }
 }
 
-export async function createWorker(
-  env: Env,
-  workerName: string,
-  uploadJwt: string,
-  contactEmail: string
-): Promise<void> {
-  const workerScript = generateContactWorkerScript(contactEmail);
-  const workerId = await ensureWorkerId(env, workerName);
-
-  const createVersionResponse = await cfApiFetch(
-    `https://api.cloudflare.com/client/v4/accounts/${env.CF_ACCOUNT_ID}/workers/workers/${workerId}/versions`,
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        main_module: "worker.js",
-        compatibility_date: "2026-04-22",
-        assets: {
-          jwt: uploadJwt,
-          config: { run_worker_first: ["/api/*"] },
-        },
-        bindings: [
-          { name: "ASSETS", type: "assets" },
-          { name: "SMTP2GO_API_KEY", type: "secret_text", text: env.SMTP2GO_API_KEY },
-        ],
-        modules: [
-          {
-            name: "worker.js",
-            content_type: "application/javascript+module",
-            content_base64: toBase64(new TextEncoder().encode(workerScript)),
-          },
-        ],
-      }),
-    },
-    env,
-    "workers/workers/versions"
-  );
-
-  let createVersionResult: {
-    success: boolean;
-    errors?: Array<{ code: number; message: string }>;
-    result?: { id?: string };
-  };
-  try {
-    createVersionResult = (await createVersionResponse.json()) as typeof createVersionResult;
-  } catch {
-    const text = await createVersionResponse.text();
-    throw new Error(`Worker version creation returned non-JSON: ${text.slice(0, 200)}`);
-  }
-
-  const versionId = createVersionResult.result?.id;
-  if (!createVersionResult.success || !versionId) {
-    throw new Error(`Worker version creation failed: ${JSON.stringify(createVersionResult.errors)}`);
-  }
-
-  await deployVersionAndEnable(env, workerName, versionId);
-}
-
 // V2 static-assets deploy path (issues #12+, CSO H1 remediation).
 //
 // Deploys a Worker whose version carries ONLY the uploaded static assets:
@@ -476,8 +417,4 @@ export async function deleteWorker(env: Env, workerName: string): Promise<void> 
   if (!response.ok) {
     throw new Error(`Worker deletion failed: ${response.status}`);
   }
-}
-
-export function generateContactWorkerScript(contactEmail: string): string {
-  return buildContactWorker({ recipient: { type: "literal", value: contactEmail } }).trim();
 }

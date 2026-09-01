@@ -49,4 +49,5 @@ after the CSO remediation at 428/428.
 | #21 Benchmark Site 4 (trades/local service) | `a52b883` | 466 pass | pass | OK FOR CURRENT SCOPE (`docs/security/2026-09-01-v2-issue-21-cso.md`) |
 | #22 Benchmark Site 5 (responsive/motion) | `66ea5f9` | 469 pass | pass | OK FOR CURRENT SCOPE (`docs/security/2026-09-01-v2-issue-22-cso.md`) |
 | #23 REFERENCE_BOUND proof gate | `39d4018` | 474 pass | pass | OK WITH WATCH ITEMS (`docs/security/2026-09-01-v2-issue-23-cso.md`) |
-| #24 ORIGINAL_DESIGN site generation | (this commit) | 478 pass | pass | OK WITH WATCH ITEMS (`docs/security/2026-09-01-v2-issue-24-cso.md`) |
+| #24 ORIGINAL_DESIGN site generation | `d7d98b8` | 478 pass | pass | OK WITH WATCH ITEMS (`docs/security/2026-09-01-v2-issue-24-cso.md`) |
+| #25 Contract away V1 architecture | (this commit) | 149 pass (V1 suites removed with their modules) | pass | OK WITH WATCH ITEMS (`docs/security/2026-09-01-v2-issue-25-cso.md`; W14 = operational secret deletion) |

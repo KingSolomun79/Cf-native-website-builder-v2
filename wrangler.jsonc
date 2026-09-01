@@ -29,28 +29,8 @@
     }
   ],
 
-  "durable_objects": {
-    "bindings": [
-      {
-        "name": "WEBSITE_AGENT",
-        "class_name": "WebsiteAgent"
-      }
-    ]
-  },
-
-  "migrations": [
-    {
-      "tag": "v1",
-      "new_sqlite_classes": ["WebsiteAgent"]
-    }
-  ],
 
   "workflows": [
-    {
-      "name": "site-build-workflow",
-      "binding": "SITE_BUILD_WORKFLOW",
-      "class_name": "SiteBuildWorkflow"
-    },
     {
       "name": "website-build-workflow",
       "binding": "WEBSITE_BUILD_WORKFLOW",
@@ -82,10 +62,6 @@
     "PUBLIC_APP_URL": "https://cf-website-factory.wazibizwebsites.workers.dev",
     "KIE_API_URL": "https://api.kie.ai",
     "KIE_MODEL": "z-image",
-    "APPROVAL_TIMEOUT_DAYS": "7",
-    "MAX_REVISIONS": "3",
-    "VISUAL_QA_MIN_SCORE": "80",
-    "INTERNAL_NOTIFICATION_EMAIL": "wazibizwebsites@gmail.com",
     "ZHIPU_API_URL": "https://api.z.ai/api/coding/paas/v4",
     "ZHIPU_GATEWAY_PROVIDER": "custom-zhipu",
     "ZHIPU_MODEL": "glm-5-turbo",
@@ -106,9 +82,6 @@
     // Cloudflare-native outbound email router endpoint is wired; delivery
     // then classifies transient with bounded retry (fail-closed). The bearer
     // token is a Worker secret (WAZIBIZ_EMAIL_TRANSPORT_TOKEN), not a var.
-    "WAZIBIZ_EMAIL_TRANSPORT_URL": "",
-    "GITHUB_REPO_OWNER": "Wazibiz-Webdesign-Kenya",
-    "GITHUB_REPO_NAME": "wazibiz-client-sites",
-    "GITHUB_BRANCH": "main"
+    "WAZIBIZ_EMAIL_TRANSPORT_URL": ""
   }
 }
