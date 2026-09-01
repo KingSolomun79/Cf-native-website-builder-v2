@@ -16,101 +16,146 @@ Before coding, read:
 
 If existing code, tests, migrations, root docs or retained prompt bodies conflict with those sources, treat the conflicting V1 behavior as migration work, not as V2 authority.
 
-# Mandatory execution protocol — first 11 implementation issues
+# Mandatory execution protocol — all implementation issues
 
-For the first implementation tranche, work **strictly sequentially** through these GitHub issues in this exact order:
+Issues `#3` through `#13` have already been implemented. Before beginning `#14`, finish the outstanding `/morabeza-cso` review for that tranche, resolve any blocking findings, run the required verification gates, commit all remaining `#3`–`#13` work, and leave the working tree clean.
 
-1. `#3` — Brownfield V1 → V2 migration manifest
-2. `#4` — Establish the V2 domain lifecycle backbone
-3. `#5` — Add Revision Request and Fact Update lifecycle
-4. `#6` — Activate canonical prompt, schema and provenance contracts
-5. `#7` — Implement Reference intake, suitability and evidence freeze
-6. `#8` — Produce Reference Analysis, Visual Blueprint and Implementation Contract
-7. `#9` — Generate a complete REFERENCE_BOUND four-page Site
-8. `#10` — Integrate budgeted two-wave image generation
-9. `#11` — Replace per-site contact email with WAZIBIZ Form Service
-10. `#12` — Make immutable Build Versions pass Technical Preflight and deploy Preview
-11. `#13` — Implement standardized visual evidence and release QA
+The earlier per-issue commit rule was not consistently followed for `#3`–`#13`. **Do not rewrite Git history solely to simulate per-issue commits retroactively.** The strict rule below is mandatory from `#14` onward.
 
-This sequential order is an explicit project instruction and **overrides any opportunity to parallelize these tickets**.
+For the remaining implementation work, execute these GitHub issues **strictly sequentially** in this exact order:
+
+1. `#14` — Implement bounded Automated Repair
+2. `#15` — Implement Approval, Publication and Rollback
+3. `#16` — Enforce Deployment and artifact retention lifecycle
+4. `#17` — Create and freeze the five-site REFERENCE_BOUND benchmark harness
+5. `#18` — Validate Benchmark Site 1 end-to-end
+6. `#19` — Validate Benchmark Site 2 end-to-end
+7. `#20` — Validate Benchmark Site 3 end-to-end
+8. `#21` — Validate Benchmark Site 4 end-to-end
+9. `#22` — Validate Benchmark Site 5 end-to-end
+10. `#23` — Enforce the REFERENCE_BOUND proof gate
+11. `#24` — Implement ORIGINAL_DESIGN Site Generation
+12. `#25` — Contract away superseded V1 product architecture
+13. `#26` — Run final V2 integration and release verification
+
+This order is an explicit project instruction and **overrides every opportunity to parallelize these tickets**, including the benchmark tickets.
+
+# Non-negotiable per-issue completion gate
+
+For every issue from `#14` through `#26`, the following sequence is mandatory:
+
+```text
+implement current issue
+-> satisfy every acceptance criterion
+-> run focused tests
+-> npm test
+-> npm run typecheck
+-> run /morabeza-cso
+-> resolve all blocking /morabeza-cso findings
+-> re-run affected tests/typecheck as necessary
+-> commit the complete issue
+-> record commit SHA + verification evidence
+-> confirm clean working tree
+-> only then begin the next issue
+```
+
+**No passing `/morabeza-cso` + no dedicated issue commit = issue not complete = next issue forbidden.**
+
+## `/morabeza-cso` gate
+
+`/morabeza-cso` is mandatory for **every remaining issue `#14` through `#26`**, not merely at milestones.
+
+- Run `/morabeza-cso` only after the issue implementation and normal tests/typecheck are complete enough for final review.
+- Treat any blocking/security/correctness finding from `/morabeza-cso` as part of the current issue.
+- Fix those findings before committing the issue.
+- If CSO-driven fixes change behavior, re-run the relevant focused tests plus `npm test` and `npm run typecheck` before committing.
+- Do not defer a valid CSO finding to the next issue unless the finding is explicitly out of scope under parent `#2` and the current issue; document that exception rather than silently ignoring it.
+- Record `/morabeza-cso` completion and the disposition of findings in the issue/PR verification note.
+- Do not start the next issue while the current issue still has unresolved CSO findings.
 
 ## Hard per-issue commit gate
 
-Every issue in `#3` through `#13` **must have its own completed commit before the next issue may begin**.
+Every issue from `#14` through `#26` **must have its own completed Git commit before the next issue may even be started**.
 
-- Finish the current issue completely.
-- Run and pass its required tests and typecheck.
-- Commit the complete issue work with a commit message that references the GitHub issue number.
-- Record that commit SHA in the issue or associated PR/verification note.
-- Only after that commit exists may the agent fetch, read, plan, scaffold, or implement the next issue.
+- One issue must be completed and committed before another issue is fetched for implementation.
+- The commit must contain the complete accepted implementation for that issue, including fixes required by `/morabeza-cso`.
+- The commit message must reference the GitHub issue number, preferably in the form `... (#14)` or equivalent.
+- Record the final commit SHA in the issue or associated PR/verification note.
 - Do not carry uncommitted changes from one issue into the next.
-- Do not combine two or more issue implementations into one commit.
-- Do not make a "checkpoint" commit for incomplete acceptance criteria merely to unlock the next issue.
-- If additional fixes are required for the same issue after its first commit, finish them and commit them as part of that same issue before advancing. The repository must be clean at the handoff to the next issue.
-
-**No commit = issue not complete = next issue forbidden.**
+- Do not combine implementations for two or more GitHub issues into one commit.
+- Do not use a checkpoint/WIP commit for incomplete acceptance criteria merely to unlock the next issue.
+- If a post-commit correction is required before starting the next issue, it still belongs to the current issue; commit that correction and record the final relevant SHA(s) before advancing.
+- The working tree must be clean at every issue boundary.
 
 ## Sequential-work guardrails
 
-- Work on **one issue only at a time**.
-- Do not start, partially implement, scaffold, pre-factor specifically for, or otherwise advance a later issue before the current issue is complete and committed.
-- Do not even begin implementation planning for the next issue while the current issue has uncommitted or unverified work.
-- Do not skip an issue because a later issue appears independently implementable.
-- Do not run `#5` and `#6` in parallel; execute and commit `#5` completely before beginning `#6`.
-- Do not run `#10` and `#11` in parallel; execute and commit `#10` completely before beginning `#11`.
-- Do not begin `#14` or any later implementation ticket as part of this tranche. Stop after `#13` is complete and committed, then report repository status.
-- If the current issue is blocked, ambiguous, or reveals a conflict with the authoritative V2 specification, resolve or report that problem **within the current issue**. Do not jump to another ticket to stay busy.
-- Treat each issue body as the immediate scope. Parent `#2` and the authoritative repo documents provide constraints and context, but they do not authorize unrelated work from later tickets.
-- Necessary supporting refactors are allowed only when they directly enable the current ticket and keep the repository green. Do not use a supporting refactor as a reason to implement future-ticket behavior early.
-- Preserve reusable V1 infrastructure only where compatible with the V2 contracts. Do not retain obsolete V1 product behavior merely to reduce migration work.
+- Work on **one GitHub issue only at a time**.
+- Do not start, partially implement, scaffold, pre-factor specifically for, investigate implementation details for, or otherwise advance a later issue while the current issue is open in the execution sequence.
+- Do not skip ahead because a later ticket appears independent or because the current one is difficult.
+- Do not run benchmark issues `#18`–`#22` in parallel. For this execution run they are intentionally sequential: `#18 -> #19 -> #20 -> #21 -> #22`.
+- If the current issue is blocked, ambiguous, or reveals a conflict with the authoritative V2 specification, resolve or report that problem **within the current issue**. Do not switch to another ticket to stay busy.
+- Parent `#2` and the authoritative repository documents provide constraints and context; they do not authorize unrelated work from later tickets.
+- Necessary supporting refactors are allowed only when they directly enable the current issue and keep the repository green.
+- Do not use a supporting refactor as a vehicle to implement future-ticket behavior early.
+- Keep diffs attributable to the current issue.
 
 ## Definition of complete before moving to the next issue
 
-The agent may move from issue `N` to issue `N+1` only when **all** of the following are true:
+The agent may move from issue `N` to the next mandated issue only when **all** of the following are true:
 
-1. Every acceptance criterion in the current GitHub issue is satisfied or explicitly demonstrated as not applicable by the issue/spec itself.
-2. Tests covering the changed externally observable behavior are added or updated at the highest practical existing test seam.
-3. `npm test` passes.
-4. `npm run typecheck` passes.
-5. No known P0/P1 regression introduced by the ticket remains unresolved.
-6. The implementation matches `CONTEXT.md`, parent `#2`, the implementation PRD, capability envelope and relevant prompt contracts.
-7. No temporary compatibility path, TODO, commented-out alternative, hidden fallback or skipped test silently defers a required acceptance criterion to a later ticket unless the current issue explicitly says so.
-8. **All work for the current issue is committed in Git before the next issue is opened for implementation.** The commit message must reference the issue number.
-9. The working tree is clean; no uncommitted current-issue changes are allowed to leak into the next ticket.
-10. The current issue is updated with concise verification evidence including tests run, important behavior verified, intentionally retained brownfield items, and the final commit SHA.
-11. Only then may the next issue in the mandated sequence be fetched for implementation and started.
+1. Every acceptance criterion in the current GitHub issue is satisfied, or explicitly demonstrated as not applicable by the issue/spec itself.
+2. Tests covering changed externally observable behavior are added or updated at the highest practical existing test seam.
+3. Focused tests for the changed area pass.
+4. `npm test` passes.
+5. `npm run typecheck` passes.
+6. `/morabeza-cso` has been run for the current issue.
+7. Every blocking `/morabeza-cso` finding has been resolved or explicitly documented as out of scope under the authoritative spec.
+8. Tests/typecheck affected by CSO fixes have been re-run and pass.
+9. No known P0/P1 regression introduced by the issue remains unresolved.
+10. The implementation matches `CONTEXT.md`, parent `#2`, the implementation PRD, capability envelope and relevant prompt contracts.
+11. No hidden fallback, skipped test, TODO, commented-out alternative or temporary compatibility path silently defers a required acceptance criterion to a later ticket unless the current issue explicitly requires an expand–contract overlap.
+12. **All work for the current issue has been committed in a dedicated issue commit.**
+13. The commit message references the current issue number.
+14. The issue/PR verification note records tests, typecheck, `/morabeza-cso` status, important behavior verified, intentionally retained brownfield items, and the final commit SHA.
+15. The working tree is clean.
+16. Only then may the next issue be fetched for implementation and started.
 
-A ticket being "mostly done" is not sufficient to advance.
+A ticket being "mostly done", "coded", "tests passing", or "awaiting CSO/commit" is **not complete**.
 
 ## Per-ticket working method
 
-For each of `#3` through `#13`:
+For each issue `#14` through `#26`:
 
-1. Re-read the current issue in full before changing code.
-2. Inspect the existing implementation and tests that cover the affected behavior.
-3. Prefer "make the change easy, then make the easy change" when a small enabling refactor is required.
-4. Where practical, update/add the externally observable test first and observe the expected failure.
-5. Implement the narrowest complete vertical slice that satisfies the issue.
-6. Run focused tests while developing, then run the full `npm test` and `npm run typecheck` gates.
-7. Re-check every acceptance criterion against the actual implementation, not merely the diff.
-8. Commit the issue work with an issue-referencing commit message.
-9. Verify the working tree is clean and record the commit SHA with the issue/PR verification evidence.
-10. Only then fetch and begin the next issue.
+1. Fetch and read only the current issue in full.
+2. Re-read the relevant authoritative V2 documents and domain definitions.
+3. Inspect existing implementation and tests that cover the affected behavior.
+4. Prefer "make the change easy, then make the easy change" when a small enabling refactor is required.
+5. Where practical, update/add the externally observable test first and observe the expected failure.
+6. Implement the narrowest complete vertical slice satisfying the current issue.
+7. Run focused tests while developing.
+8. Run full `npm test` and `npm run typecheck`.
+9. Re-check every acceptance criterion against the actual implementation.
+10. Run `/morabeza-cso` for this issue.
+11. Resolve all valid blocking CSO findings and re-run affected verification gates.
+12. Commit all work for this issue with the issue number in the commit message.
+13. Record the final commit SHA and verification/CSO evidence on the issue or associated PR.
+14. Confirm the working tree is clean.
+15. Only then fetch and begin the next issue in the sequence.
 
-Do not batch several issue implementations into one large speculative change or one combined commit.
+Do not batch several issue implementations into one speculative change or one combined commit.
 
 ## Scope and change-control guardrails
 
 - Do not reopen settled domain decisions while implementing tickets. If code conflicts with the model, migrate the code.
-- Do not invent new product concepts, states, modes, persistence entities or user-facing features that are absent from `CONTEXT.md`/parent `#2` merely because they simplify implementation.
+- Do not invent new product concepts, states, modes, persistence entities or user-facing features absent from `CONTEXT.md`/parent `#2` merely because they simplify implementation.
 - Do not weaken an acceptance criterion to fit existing V1 architecture.
 - Do not silently change the capability envelope.
 - Do not change Reference fidelity thresholds, image budget, QA gates, repair ceilings, Approval/Publication semantics or form-security rules without an explicit new project decision.
 - Do not turn temporary V1 compatibility into permanent V2 architecture.
-- Do not delete potentially reusable brownfield infrastructure until its role is understood; classify first where issue `#3` requires it.
 - Do not preserve superseded product paths once their current ticket explicitly replaces them, except where the migration manifest requires an expand–contract overlap.
-- Do not perform opportunistic unrelated cleanup. Keep diffs attributable to the current ticket.
-- Do not edit frozen benchmark targets or introduce benchmark substitutions while implementing pre-benchmark tickets.
+- Do not perform opportunistic unrelated cleanup.
+- Do not edit frozen benchmark targets, substitute easier benchmarks or manually repair generated benchmark source to obtain a PASS.
+- Do not relax benchmark gates after failures. Preserve failure evidence and diagnose the implementation.
 
 ## Testing guardrails
 
@@ -118,10 +163,11 @@ The preferred primary seam is the existing Cloudflare Worker / `WebsiteBuildWork
 
 Use narrower contract tests where the primary seam cannot reliably exercise an external/provider boundary, including runtime schemas, KIE budget behavior, browser evidence normalization, Form Service delivery adapters, publication idempotency and prompt composition.
 
-- Never disable, skip or relax a failing test merely to make a ticket pass unless the test encodes superseded V1 semantics and the current ticket explicitly replaces that behavior.
-- When replacing a stale V1 test, add the V2 behavior assertion in the same ticket.
+- Never disable, skip or relax a failing test merely to make an issue pass unless the test encodes superseded V1 semantics and the current issue explicitly replaces that behavior.
+- When replacing a stale V1 test, add the V2 behavior assertion in the same issue.
 - Keep CI/test fixtures deterministic where possible; external AI/image/browser providers should be stubbed/faked for ordinary automated tests.
 - Do not use benchmark PASS as a substitute for unit/contract/primary-seam coverage.
+- Do not treat `/morabeza-cso` as a replacement for tests or typecheck. It is an additional mandatory gate.
 
 ## Canonical V2 domain rules
 
