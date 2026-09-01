@@ -67,6 +67,7 @@ export default defineWorkersConfig({
       "tests/v2-lifecycle.test.ts",
       "tests/v2-prompt-contract.test.ts",
       "tests/v2-reference-intake.test.ts",
+      "tests/v2-blueprint-stages.test.ts",
       "tests/blueprint.test.ts",
       "tests/blueprint-v2.test.ts",
       "tests/vision-input.test.ts",
