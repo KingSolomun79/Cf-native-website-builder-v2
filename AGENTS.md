@@ -287,3 +287,15 @@ Final V2 release must remove superseded V1 generator paths, feature flags, promp
 - AI returns structured schema-validated outputs; application services perform idempotent writes.
 - Prefer deterministic extraction/validation for machine-measurable facts.
 - Persist Build-centric provenance, cost and error classification.
+
+## Production and environment guardrails
+
+- Treat V1 and V2 as separate products/environments. Never assume an existing Worker, D1 database, R2 bucket, route, binding or secret belongs to V2 because its name is similar.
+- Before any Cloudflare mutation, positively identify every target resource as V2 or intentionally shared. Unknown ownership is a blocker; do not guess.
+- Never deploy V2 over a preserved V1 Worker, bind V2 to preserved V1 persistence, or apply destructive V2 migrations to a V1 database.
+- Never delete or alter V1 secrets/resources merely because V2 no longer uses them. Retired V1 integrations must be absent from the V2 runtime; preserving the separate V1 product is allowed.
+- Production deployments must come from a clean working tree and an exact committed Git SHA. Record the Git SHA and resulting Cloudflare deployment/version identity.
+- Never patch generated production assets, D1 state, R2 artifacts or deployed Worker code manually to force acceptance. Fix source, run gates, commit, then redeploy.
+- Keep configuration swappable through environment bindings/variables where intended; never expose server-only configuration or secrets to generated-site/browser code.
+- Never print, log, commit or document secret values. Record secret names and presence/status only.
+- If a production action exposes a product defect or unclear environment ownership, stop the mutation path and return to a scoped source fix rather than improvising in production.
