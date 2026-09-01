@@ -1117,9 +1117,20 @@ export interface ChatCompletionResponse {
 }
 
 export interface GatewayMeta {
-  job_id: string;
-  site_id: string;
-  client_slug: string;
-  prompt_type: PromptType;
-  style_key: string;
+  // V1 identity fields (legacy pipeline callers). V2 stages populate the
+  // build-centric fields below instead; both stay optional so each pipeline
+  // sends only its own vocabulary.
+  job_id?: string;
+  site_id?: string;
+  client_slug?: string;
+  prompt_type?: PromptType;
+  style_key?: string;
+  // V2 Build-centric observability fields (PRD section 42).
+  build_id?: string;
+  site_generation_id?: string;
+  build_version_id?: string;
+  stage?: string;
+  prompt_id?: string;
+  prompt_version?: string;
+  attempt?: number;
 }

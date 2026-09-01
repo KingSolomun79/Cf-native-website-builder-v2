@@ -1,6 +1,6 @@
 import { defineWorkersConfig, readD1Migrations } from "@cloudflare/vitest-pool-workers/config";
 import { resolve } from "node:path";
-import { writeFileSync } from "node:fs";
+import { writeFileSync, readdirSync, readFileSync, mkdirSync } from "node:fs";
 
 // Read all D1 migrations once (in Node) and emit a generated module the
 // persistence test imports. The worker isolate cannot reliably read the repo
@@ -30,6 +30,24 @@ writeFileSync(
     .join("\n")}\n];\n`
 );
 
+// Regenerate the canonical prompt body transport from v2-docs/prompts so the
+// composed runtime prompts under test always match the markdown sources
+// (same output as scripts/generate-prompt-bodies.mjs).
+{
+  const promptsDir = resolve(process.cwd(), "v2-docs", "prompts");
+  const files = readdirSync(promptsDir)
+    .filter((name) => name.endsWith(".md") && name !== "PROMPT-MANIFEST.md")
+    .sort();
+  const entries = files
+    .map((name) => `  ${JSON.stringify(name)}: ${JSON.stringify(readFileSync(resolve(promptsDir, name), "utf8"))},`)
+    .join("\n");
+  mkdirSync(resolve(process.cwd(), "src", "domain", "generated"), { recursive: true });
+  writeFileSync(
+    resolve(process.cwd(), "src", "domain", "generated", "prompt-bodies.ts"),
+    `// AUTO-GENERATED from v2-docs/prompts/*.md — do not edit.\n// Source of truth: v2-docs/prompts/ + v2-docs/prompts/PROMPT-MANIFEST.md.\nexport const PROMPT_BODY_FILES: Record<string, string> = {\n${entries}\n};\n`
+  );
+}
+
 export default defineWorkersConfig({
   test: {
     poolOptions: {
@@ -47,7 +65,7 @@ export default defineWorkersConfig({
     testTimeout: 30000,
     include: [
       "tests/v2-lifecycle.test.ts",
-      "tests/v2-revision.test.ts",
+      "tests/v2-prompt-contract.test.ts",
       "tests/blueprint.test.ts",
       "tests/blueprint-v2.test.ts",
       "tests/vision-input.test.ts",

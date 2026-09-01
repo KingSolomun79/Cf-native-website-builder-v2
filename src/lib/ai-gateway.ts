@@ -442,7 +442,7 @@ export async function generateVisionWithGateway(
   const maxAttempts = configuredInteger(env.VISION_MAX_ATTEMPTS_PER_PROVIDER, 2, 1, 2);
   const retryDelayMs = configuredInteger(env.VISION_RETRY_DELAY_MS, 500, 0, 10000);
   const attempts: VisionAttemptDiagnostic[] = [];
-  const stage = options?.stage ?? meta.prompt_type;
+  const stage = options?.stage ?? meta.prompt_type ?? meta.stage ?? "vision";
 
   for (const route of routes) {
     if (!canUseVisionProvider(env, route.provider)) {
