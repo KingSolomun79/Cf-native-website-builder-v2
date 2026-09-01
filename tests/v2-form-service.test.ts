@@ -1,7 +1,7 @@
-import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+import { beforeAll, describe, expect, it, vi } from "vitest";
 import { env as providedEnv } from "cloudflare:test";
 import { Hono } from "hono";
-import type { Env } from "../src/env.d";
+import type { CloudflareEmailMessage, CloudflareEmailSender, Env } from "../src/env.d";
 import { submitForm } from "../src/routes/v2.form-submit";
 import { startSiteGeneration, createInitialBuild } from "../src/domain/lifecycle";
 import {
@@ -299,11 +299,7 @@ describe("WAZIBIZ Form Service", () => {
   });
 });
 
-describe("platform email transport wiring (CSO H2)", () => {
-  afterEach(() => {
-    vi.unstubAllGlobals();
-  });
-
+describe("platform email transport wiring (native Cloudflare Email Service binding, issue #28)", () => {
   function sendInput(): EmailSendInput {
     return {
       to: "owner@riftvalleyroasters.example",
@@ -314,97 +310,96 @@ describe("platform email transport wiring (CSO H2)", () => {
     };
   }
 
-  it("fails closed as transient when the transport endpoint is not configured", async () => {
+  function codedError(code: string): Error & { code: string } {
+    const error = new Error(`email service error ${code}`) as Error & { code: string };
+    error.code = code;
+    return error;
+  }
+
+  /** Email Service binding double: records every send() and answers per call. */
+  function emailBinding(behavior: (message: CloudflareEmailMessage, call: number) => Promise<{ messageId: string }>): {
+    binding: CloudflareEmailSender;
+    sent: CloudflareEmailMessage[];
+  } {
+    const sent: CloudflareEmailMessage[] = [];
+    let call = 0;
+    return {
+      sent,
+      binding: {
+        send: async (message: CloudflareEmailMessage) => {
+          call += 1;
+          sent.push(message);
+          return behavior(message, call);
+        },
+      },
+    };
+  }
+
+  it("fails closed as transient when the Email Service binding is not configured", async () => {
     const transport = createDefaultEmailTransport({} as Env);
     const outcome = await transport(sendInput());
     expect(outcome).toEqual({ ok: false, classification: "transient", error: "email transport not configured" });
   });
 
-  it("delivers through the configured endpoint with optional bearer auth and classifies failures", async () => {
-    const seen: Array<{ url: string; authorization: string | null; body: EmailSendInput }> = [];
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async (url: string | URL, init?: RequestInit) => {
-        seen.push({
-          url: String(url),
-          authorization: (init?.headers as Record<string, string> | undefined)?.Authorization ?? null,
-          body: JSON.parse(String(init?.body)) as EmailSendInput,
-        });
-        const status = String(url).endsWith("/reject-500") ? 500 : String(url).endsWith("/reject-400") ? 400 : 200;
-        return new Response("", { status });
-      })
-    );
-
-    const transport = createDefaultEmailTransport({
-      WAZIBIZ_EMAIL_TRANSPORT_URL: "https://mail-router.example/send",
-      WAZIBIZ_EMAIL_TRANSPORT_TOKEN: "router-token",
-    } as Env);
-
-    const ok = await transport(sendInput());
-    expect(ok).toEqual({ ok: true });
-    expect(seen[0].url).toBe("https://mail-router.example/send");
-    expect(seen[0].authorization).toBe("Bearer router-token");
-    expect(seen[0].body.replyTo).toBe("jane@visitor.example");
-    expect(seen[0].body.from).toBe(DEFAULT_PLATFORM_SENDER_IDENTITY);
-
-    const transient = await createDefaultEmailTransport({
-      WAZIBIZ_EMAIL_TRANSPORT_URL: "https://mail-router.example/reject-500",
-    } as Env)(sendInput());
-    expect(transient).toMatchObject({ ok: false, classification: "transient" });
-
-    const permanent = await createDefaultEmailTransport({
-      WAZIBIZ_EMAIL_TRANSPORT_URL: "https://mail-router.example/reject-400",
-    } as Env)(sendInput());
-    expect(permanent).toMatchObject({ ok: false, classification: "permanent" });
+  it("delivers through the native binding with platform-resolved recipient, sender and Reply-To", async () => {
+    const { binding, sent } = emailBinding(async () => ({ messageId: "msg-1" }));
+    const outcome = await createDefaultEmailTransport({ EMAIL: binding } as Env)(sendInput());
+    expect(outcome).toEqual({ ok: true });
+    expect(sent).toHaveLength(1);
+    // The binding receives only platform-resolved values: destination from
+    // Site Configuration, the platform Sender Identity as From, and the
+    // validated visitor address strictly as Reply-To.
+    expect(sent[0]).toEqual({
+      to: "owner@riftvalleyroasters.example",
+      from: DEFAULT_PLATFORM_SENDER_IDENTITY,
+      replyTo: "jane@visitor.example",
+      subject: "New contact message",
+      text: "Hello",
+    });
   });
 
-  it("routes same-account delivery through the EMAIL_ROUTER service binding with identical semantics", async () => {
-    const bindingCalls: Array<{ url: string; authorization: string | null; body: EmailSendInput }> = [];
-    let call = 0;
-    const routerBinding = {
-      fetch: async (url: string | URL | Request, init?: RequestInit): Promise<Response> => {
-        call += 1;
-        bindingCalls.push({
-          url: typeof url === "string" ? url : url instanceof URL ? url.toString() : url.url,
-          authorization: (init?.headers as Record<string, string> | undefined)?.Authorization ?? null,
-          body: JSON.parse(String(init?.body)) as EmailSendInput,
-        });
-        const status = call === 1 ? 200 : call === 2 ? 503 : 401;
-        return new Response("", { status });
-      },
-    };
-    const bindingEnv = {
-      WAZIBIZ_EMAIL_TRANSPORT_URL: "https://wazibiz-email-router.wazibizwebsites.workers.dev/send",
-      WAZIBIZ_EMAIL_TRANSPORT_TOKEN: "router-token",
-      EMAIL_ROUTER: routerBinding,
-    } as unknown as Env;
+  it("classifies documented Email Service error codes into transient/permanent ledger semantics", async () => {
+    // Documented quota/service/availability codes: bounded retry can heal.
+    for (const code of ["E_RATE_LIMIT_EXCEEDED", "E_DAILY_LIMIT_EXCEEDED", "E_INTERNAL_SERVER_ERROR", "E_DELIVERY_FAILED", "E_SENDER_DOMAIN_NOT_AVAILABLE"]) {
+      const failing = emailBinding(async () => {
+        throw codedError(code);
+      });
+      const outcome = await createDefaultEmailTransport({ EMAIL: failing.binding } as Env)(sendInput());
+      expect(outcome).toEqual({ ok: false, classification: "transient", error: code });
+    }
 
-    // Workers cannot fetch same-account *.workers.dev URLs, so the binding
-    // channel must carry the identical request (URL, bearer, body) instead.
-    const ok = await createDefaultEmailTransport(bindingEnv)(sendInput());
-    expect(ok).toEqual({ ok: true });
-    expect(bindingCalls[0].url).toBe("https://wazibiz-email-router.wazibizwebsites.workers.dev/send");
-    expect(bindingCalls[0].authorization).toBe("Bearer router-token");
-    expect(bindingCalls[0].body.replyTo).toBe("jane@visitor.example");
-    expect(bindingCalls[0].body.from).toBe(DEFAULT_PLATFORM_SENDER_IDENTITY);
+    // Documented validation/sender/recipient codes: retrying cannot change them.
+    for (const code of ["E_SENDER_NOT_VERIFIED", "E_RECIPIENT_NOT_ALLOWED", "E_RECIPIENT_SUPPRESSED", "E_VALIDATION_ERROR", "E_FIELD_MISSING", "E_CONTENT_TOO_LARGE", "E_HEADER_NOT_ALLOWED"]) {
+      const failing = emailBinding(async () => {
+        throw codedError(code);
+      });
+      const outcome = await createDefaultEmailTransport({ EMAIL: failing.binding } as Env)(sendInput());
+      expect(outcome).toEqual({ ok: false, classification: "permanent", error: code });
+    }
 
-    const transient = await createDefaultEmailTransport(bindingEnv)(sendInput());
-    expect(transient).toMatchObject({ ok: false, classification: "transient", error: "transport responded 503" });
-
-    const bindingPermanent = await createDefaultEmailTransport(bindingEnv)(sendInput());
-    expect(bindingPermanent).toMatchObject({ ok: false, classification: "permanent", error: "transport responded 401" });
+    // Undocumented or code-less errors: permanence is unproven, so the
+    // narrowest defensible mapping keeps them transient (bounded).
+    const unknown = emailBinding(async () => {
+      throw codedError("E_SOME_FUTURE_CODE");
+    });
+    expect(await createDefaultEmailTransport({ EMAIL: unknown.binding } as Env)(sendInput())).toMatchObject({
+      ok: false,
+      classification: "transient",
+      error: "E_SOME_FUTURE_CODE",
+    });
+    const codeless = emailBinding(async () => {
+      throw new Error("network glitch");
+    });
+    expect(await createDefaultEmailTransport({ EMAIL: codeless.binding } as Env)(sendInput())).toEqual({
+      ok: false,
+      classification: "transient",
+      error: "email send failed without a documented code",
+    });
   });
 
-  it("wires the env-configured transport into acceptance end to end", async () => {
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async () => new Response("", { status: 200 }))
-    );
-    const wiredEnv = {
-      ...env,
-      WAZIBIZ_EMAIL_TRANSPORT_URL: "https://mail-router.example/send",
-      WAZIBIZ_EMAIL_TRANSPORT_TOKEN: "router-token",
-    } as Env;
+  it("wires the native binding into acceptance end to end", async () => {
+    const { binding, sent } = emailBinding(async () => ({ messageId: "accepted-1" }));
+    const wiredEnv = { ...env, EMAIL: binding } as Env;
 
     const siteId = await newSiteWithConfiguration();
     const accepted = await acceptFormSubmission(wiredEnv, {
@@ -421,21 +416,20 @@ describe("platform email transport wiring (CSO H2)", () => {
     expect(delivery!.status).toBe("delivered");
     expect(delivery!.sender_identity).toBe(DEFAULT_PLATFORM_SENDER_IDENTITY);
     expect(delivery!.reply_to).toBe("jane@visitor.example");
+    expect(sent[0].to).toBe("owner@riftvalleyroasters.example");
+    expect(sent[0].from).toBe(DEFAULT_PLATFORM_SENDER_IDENTITY);
+    expect(sent[0].replyTo).toBe("jane@visitor.example");
   });
 
-  it("fires bounded server-side retries through the scheduled sweep (issue #28)", async () => {
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async () => new Response("", { status: 503 }))
-    );
-    const wiredEnv = {
-      ...env,
-      WAZIBIZ_EMAIL_TRANSPORT_URL: "https://mail-router.example/send",
-      WAZIBIZ_EMAIL_TRANSPORT_TOKEN: "router-token",
-    } as Env;
+  it("fires bounded server-side retries through the scheduled sweep without a new submission (issue #28)", async () => {
+    // Acceptance hits a transient Email Service condition (quota).
+    const throttled = emailBinding(async () => {
+      throw codedError("E_RATE_LIMIT_EXCEEDED");
+    });
+    const acceptEnv = { ...env, EMAIL: throttled.binding } as Env;
 
     const siteId = await newSiteWithConfiguration();
-    const accepted = await acceptFormSubmission(wiredEnv, {
+    const accepted = await acceptFormSubmission(acceptEnv, {
       origin: "https://riftvalleyroasters.example",
       remoteAddress: "203.0.113.201",
       payload: browserPayload(siteId),
@@ -447,17 +441,14 @@ describe("platform email transport wiring (CSO H2)", () => {
       .first<{ id: string; status: string }>();
     expect(firstAttempt!.status).toBe("transient_failure");
 
-    // Make the backoff window due, then let the cron sweep retry through
-    // the configured transport.
+    // Make the backoff window due; the cron sweep retries through a now
+    // healthy Email Service using the SAME Accepted Submission.
     await env.DB.prepare("UPDATE email_deliveries SET scheduled_retry_at = ? WHERE form_submission_id = ?")
       .bind(new Date(Date.now() - 60_000).toISOString(), accepted.submissionId)
       .run();
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async () => new Response("", { status: 200 }))
-    );
+    const recovered = emailBinding(async () => ({ messageId: "retry-1" }));
     const { scheduled } = await import("../src/index");
-    await scheduled({ cron: "*/10 * * * *" } as unknown as ScheduledController, wiredEnv);
+    await scheduled({ cron: "*/10 * * * *" } as unknown as ScheduledController, { ...env, EMAIL: recovered.binding } as Env);
 
     const attempts = await env.DB.prepare(
       "SELECT attempt_number, status FROM email_deliveries WHERE form_submission_id = ? ORDER BY attempt_number"
@@ -465,6 +456,42 @@ describe("platform email transport wiring (CSO H2)", () => {
       .bind(accepted.submissionId)
       .all<{ attempt_number: number; status: string }>();
     expect(attempts.results.map((row) => row.status)).toEqual(["transient_failure", "delivered"]);
+    expect(recovered.sent).toHaveLength(1);
+    const submissions = await env.DB.prepare(
+      "SELECT COUNT(*) AS n FROM form_submissions WHERE id = ?"
+    )
+      .bind(accepted.submissionId)
+      .first<{ n: number }>();
+    expect(submissions!.n).toBe(1);
+  });
+
+  it("never resends a completed Email Delivery (sweep idempotency)", async () => {
+    const { binding, sent } = emailBinding(async () => ({ messageId: "once-1" }));
+    const wiredEnv = { ...env, EMAIL: binding } as Env;
+
+    const siteId = await newSiteWithConfiguration();
+    const accepted = await acceptFormSubmission(wiredEnv, {
+      origin: "https://riftvalleyroasters.example",
+      remoteAddress: "203.0.113.202",
+      payload: browserPayload(siteId),
+    });
+    expect(sent).toHaveLength(1);
+
+    // Even with the retry window artificially due, a delivered ledger row
+    // is never re-selected and the binding is never invoked again.
+    await env.DB.prepare("UPDATE email_deliveries SET scheduled_retry_at = ? WHERE form_submission_id = ?")
+      .bind(new Date(Date.now() - 60_000).toISOString(), accepted.submissionId)
+      .run();
+    const { scheduled } = await import("../src/index");
+    await scheduled({ cron: "*/10 * * * *" } as unknown as ScheduledController, wiredEnv);
+
+    expect(sent).toHaveLength(1);
+    const attempts = await env.DB.prepare(
+      "SELECT COUNT(*) AS n FROM email_deliveries WHERE form_submission_id = ?"
+    )
+      .bind(accepted.submissionId)
+      .first<{ n: number }>();
+    expect(attempts!.n).toBe(1);
   });
 
   it("registers both handlers on the default export object (cron sweep is reachable)", async () => {

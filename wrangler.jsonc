@@ -38,14 +38,17 @@
     }
   ],
 
-  // Same-account channel to the outbound email router (issue #28): Workers
-  // cannot fetch each other's *.workers.dev URLs within one account, so the
-  // Form Service transports delivery calls through this binding. The router
-  // still enforces its public contract (bearer token, /send path).
-  "services": [
+  // Outbound email transport: the native Cloudflare Email Service binding
+  // (issue #28 follow-up). The `from` address must belong to a domain
+  // onboarded to Email Sending in the dashboard (Compute > Email Service >
+  // Email Sending > Onboard Domain — Cloudflare writes the cf-bounce
+  // MX/SPF/DKIM and DMARC records). Before that onboarding, sends fail
+  // closed with E_SENDER_DOMAIN_NOT_AVAILABLE (bounded transient retry).
+  // Once the platform sender domain is onboarded, consider tightening this
+  // binding with allowed_sender_addresses to the approved platform senders.
+  "send_email": [
     {
-      "binding": "EMAIL_ROUTER",
-      "service": "wazibiz-email-router"
+      "name": "EMAIL"
     }
   ],
 
@@ -94,14 +97,7 @@
     "VISION_INPUT_MAX_BYTES": "4194304",
     "VISION_INPUT_MAX_WIDTH": "1920",
     "VISION_INPUT_MAX_HEIGHT": "12000",
-    "FALLBACK_MODEL": "xiaomi/mimo-v2.5",
-    // Central WAZIBIZ Form Service email transport (issue #28): the
-    // Cloudflare-native outbound email router, deployed from
-    // wrangler.email-router.jsonc as worker `wazibiz-email-router`. The
-    // shared bearer token is a Worker secret (WAZIBIZ_EMAIL_TRANSPORT_TOKEN)
-    // on both Workers, never a var. The router fails closed (503 -> bounded
-    // transient retry) until its own secrets are complete.
-    "WAZIBIZ_EMAIL_TRANSPORT_URL": "https://wazibiz-email-router.wazibizwebsites.workers.dev/send"
+    "FALLBACK_MODEL": "xiaomi/mimo-v2.5"
   },
 
   // Staging-equivalent deployment for controlled verification (issue #28).
@@ -109,10 +105,9 @@
   // the #27 release runbook executes) and prod D1 are never touched. Note
   // wrangler environments do NOT inherit top-level bindings/vars — this
   // environment deliberately binds only what the Form Service smoke path
-  // needs (D1, transport URL, email-router service binding):
+  // needs (D1, native Email Service binding, cron sweep):
   //   npx wrangler d1 migrations apply website_factory_staging --remote --env staging
   //   npx wrangler deploy --env staging
-  //   npx wrangler secret put WAZIBIZ_EMAIL_TRANSPORT_TOKEN --env staging
   "env": {
     "staging": {
       "name": "cf-website-factory-staging",
@@ -123,18 +118,16 @@
           "database_id": "c347bcf9-b349-40db-b5a4-f507d8710795"
         }
       ],
-      "services": [
+      "send_email": [
         {
-          "binding": "EMAIL_ROUTER",
-          "service": "wazibiz-email-router"
+          "name": "EMAIL"
         }
       ],
       "triggers": {
         "crons": ["*/10 * * * *"]
       },
       "vars": {
-        "PUBLIC_APP_URL": "https://cf-website-factory-staging.wazibizwebsites.workers.dev",
-        "WAZIBIZ_EMAIL_TRANSPORT_URL": "https://wazibiz-email-router.wazibizwebsites.workers.dev/send"
+        "PUBLIC_APP_URL": "https://cf-website-factory-staging.wazibizwebsites.workers.dev"
       }
     }
   }

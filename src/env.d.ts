@@ -1,5 +1,20 @@
 import type { BrowserWorker } from "@cloudflare/playwright";
 
+/** Subset of the documented Cloudflare Email Service send() message shape used by the Form Service. */
+export interface CloudflareEmailMessage {
+  to: string;
+  from: string;
+  subject: string;
+  text: string;
+  html?: string;
+  replyTo?: string;
+}
+
+/** Structural type for the Cloudflare Email Service `send_email` binding (wrangler: send_email / name: EMAIL). */
+export interface CloudflareEmailSender {
+  send(message: CloudflareEmailMessage): Promise<{ messageId: string }>;
+}
+
 export interface Env {
   DB: D1Database;
   SITE_BUCKET: R2Bucket;
@@ -39,18 +54,17 @@ export interface Env {
   VISION_INPUT_MAX_HEIGHT?: string;
   FALLBACK_MODEL?: string;
 
-  // Central WAZIBIZ Form Service (V2, issue #11). The transport URL is a
-  // non-secret var; the transport bearer token and Turnstile secret are set
-  // as Worker secrets (`wrangler secret put`).
-  WAZIBIZ_EMAIL_TRANSPORT_URL?: string;
-  WAZIBIZ_EMAIL_TRANSPORT_TOKEN?: string;
-  // Same-account service binding to the wazibiz-email-router Worker
-  // (issue #28). Workers cannot fetch each other via *.workers.dev URLs
-  // within one account (the edge unrouts the same-zone request), so the
-  // platform transports delivery calls through this binding when present.
-  // The URL var still names the endpoint (and its /send path) and stays the
-  // fallback channel when no binding exists.
-  EMAIL_ROUTER?: Fetcher;
+  // Central WAZIBIZ Form Service (V2, issue #11). Outbound email goes
+  // through the native Cloudflare Email Service `send_email` binding
+  // (issue #28 follow-up): no provider API key, no shared transport
+  // secret, no HTTP email-router hop. Fail-closed when the binding is
+  // absent (delivery classifies transient, bounded retry). The Turnstile
+  // secret is a Worker secret (`wrangler secret put`). The structural
+  // sender type below matches the documented Workers Email Sending API
+  // (`send({to, from, subject, text, html?, replyTo?})` returning
+  // `{messageId}` and throwing Errors with an `E_*` code property)
+  // independently of the ambient workers-types version.
+  EMAIL?: CloudflareEmailSender;
   TURNSTILE_SECRET_KEY?: string;
   // Days a superseded Published Version stays available as Rollback Version.
   ROLLBACK_WINDOW_DAYS?: string;

@@ -1,5 +1,9 @@
 # Local development secrets for `wrangler dev` (V2). Copy to .dev.vars.
 # Never commit real values.
+#
+# Note: outbound form email needs NO secret — it flows through the native
+# Cloudflare Email Service send_email binding (EMAIL), which wrangler dev
+# simulates locally by default (messages are logged, not delivered).
 
 # AI providers
 ZHIPU_API_KEY=
@@ -13,10 +17,7 @@ CF_DEPLOY_API_TOKEN=
 # Inbound route HMAC (onboarding/revision/build-create webhooks)
 WEBHOOK_SECRET=
 
-# Central WAZIBIZ Form Service (issue #28). The transport URL is a var in
-# wrangler.jsonc; the shared bearer token is a secret on BOTH the main
-# Worker and the wazibiz-email-router Worker.
-WAZIBIZ_EMAIL_TRANSPORT_TOKEN=
+# Form Service bot protection
 TURNSTILE_SECRET_KEY=
 
 # Operator capability tokens for Approval/Rollback routes (issue #29)

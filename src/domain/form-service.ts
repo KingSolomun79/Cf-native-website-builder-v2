@@ -223,41 +223,88 @@ export type EmailSendResult = { ok: true } | { ok: false; classification: "trans
 
 export type EmailTransport = (input: EmailSendInput) => Promise<EmailSendResult>;
 
-// Default platform transport: the Cloudflare-native outbound email router
-// declared as WAZIBIZ_EMAIL_TRANSPORT_URL (env var) with an optional bearer
-// token secret (WAZIBIZ_EMAIL_TRANSPORT_TOKEN). Same-account delivery goes
-// through the EMAIL_ROUTER service binding because Workers cannot fetch
-// each other's *.workers.dev URLs from within one account (the edge
-// unrouts the same-zone subrequest); the public URL channel remains the
-// fallback for bindings-less environments. When the endpoint is not
-// configured the delivery classifies transient and retry stays bounded —
-// acceptance never depends on delivery (PRD section 37).
+// Default platform transport: the native Cloudflare Email Service
+// `send_email` binding (issue #28 follow-up). One authoritative outbound
+// channel — no provider API key, no shared transport secret, no HTTP
+// email-router hop. When the binding is absent the delivery classifies
+// transient and retry stays bounded — acceptance never depends on delivery
+// (PRD section 37).
+//
+// Failure classification maps the documented Email Service error codes
+// (Workers Email Sending API: thrown Errors carry an `E_*` code property)
+// onto the ledger's transient/permanent semantics. Cloudflare documents no
+// official retryability table, so this is the narrowest defensible mapping:
+//   transient  — quota/service/availability conditions that heal
+//                (E_RATE_LIMIT_EXCEEDED, E_DAILY_LIMIT_EXCEEDED,
+//                E_INTERNAL_SERVER_ERROR, E_DELIVERY_FAILED,
+//                E_SENDER_DOMAIN_NOT_AVAILABLE: the domain may finish
+//                onboarding while bounded retry is still running)
+//   permanent  — validation/sender/recipient conditions that retrying
+//                cannot change (E_SENDER_NOT_VERIFIED,
+//                E_RECIPIENT_NOT_ALLOWED, E_RECIPIENT_SUPPRESSED,
+//                E_VALIDATION_ERROR, E_FIELD_MISSING,
+//                E_TOO_MANY_RECIPIENTS, E_TOO_MANY_ATTACHMENTS,
+//                E_CONTENT_TOO_LARGE, E_HEADER_*)
+//   unknown    — undocumented or code-less errors classify transient:
+//                permanence is unproven and retry is capped at
+//                MAX_DELIVERY_ATTEMPTS, so misclassification costs at
+//                most a few bounded attempts instead of lost mail.
+const TRANSIENT_EMAIL_ERROR_CODES = new Set([
+  "E_RATE_LIMIT_EXCEEDED",
+  "E_DAILY_LIMIT_EXCEEDED",
+  "E_INTERNAL_SERVER_ERROR",
+  "E_DELIVERY_FAILED",
+  "E_SENDER_DOMAIN_NOT_AVAILABLE",
+]);
+
+const PERMANENT_EMAIL_ERROR_CODES = new Set([
+  "E_SENDER_NOT_VERIFIED",
+  "E_RECIPIENT_NOT_ALLOWED",
+  "E_RECIPIENT_SUPPRESSED",
+  "E_VALIDATION_ERROR",
+  "E_FIELD_MISSING",
+  "E_TOO_MANY_RECIPIENTS",
+  "E_TOO_MANY_ATTACHMENTS",
+  "E_CONTENT_TOO_LARGE",
+  "E_HEADER_NOT_ALLOWED",
+  "E_HEADER_USE_API_FIELD",
+  "E_HEADER_VALUE_INVALID",
+  "E_HEADER_VALUE_TOO_LONG",
+  "E_HEADER_NAME_INVALID",
+  "E_HEADERS_TOO_LARGE",
+  "E_HEADERS_TOO_MANY",
+]);
+
 export function createDefaultEmailTransport(env: Env): EmailTransport {
   return async (input) => {
-    const endpoint = env.WAZIBIZ_EMAIL_TRANSPORT_URL;
-    if (!endpoint) {
+    const emailService = env.EMAIL;
+    if (!emailService) {
       return { ok: false, classification: "transient", error: "email transport not configured" };
     }
-    const headers: Record<string, string> = { "content-type": "application/json" };
-    if (env.WAZIBIZ_EMAIL_TRANSPORT_TOKEN) {
-      headers.Authorization = `Bearer ${env.WAZIBIZ_EMAIL_TRANSPORT_TOKEN}`;
+    try {
+      await emailService.send({
+        to: input.to,
+        from: input.from,
+        replyTo: input.replyTo,
+        subject: input.subject,
+        text: input.text,
+      });
+      return { ok: true };
+    } catch (error) {
+      const code = (error as { code?: unknown }).code;
+      const errorCode = typeof code === "string" ? code : "";
+      if (errorCode && PERMANENT_EMAIL_ERROR_CODES.has(errorCode)) {
+        return { ok: false, classification: "permanent", error: errorCode };
+      }
+      if (errorCode && TRANSIENT_EMAIL_ERROR_CODES.has(errorCode)) {
+        return { ok: false, classification: "transient", error: errorCode };
+      }
+      return {
+        ok: false,
+        classification: "transient",
+        error: errorCode || "email send failed without a documented code",
+      };
     }
-    const request = {
-      method: "POST",
-      headers,
-      body: JSON.stringify(input),
-    };
-    // The service-binding channel preserves the endpoint's URL and path so
-    // the router observes the identical request either way.
-    const response = env.EMAIL_ROUTER
-      ? await env.EMAIL_ROUTER.fetch(endpoint, request)
-      : await fetch(endpoint, request);
-    if (response.ok) return { ok: true };
-    return {
-      ok: false,
-      classification: response.status >= 500 ? "transient" : "permanent",
-      error: `transport responded ${response.status}`,
-    };
   };
 }
 

@@ -1,4 +1,4 @@
-import { beforeAll, describe, expect, it, vi } from "vitest";
+import { beforeAll, describe, expect, it } from "vitest";
 import { env as providedEnv } from "cloudflare:test";
 import type { Env } from "../src/env.d";
 import { CAPABILITY_ENVELOPE } from "../src/domain/generated/capability-envelope";
@@ -97,10 +97,9 @@ describe("canonical lifecycle end-to-end (fresh Onboarding Submission through Ro
     expect((await getPublicationState(env, siteId)).current!.buildVersionId).toBe(outcome.buildVersionId);
 
     // Central Form Service against the published Site's public form
-    // identity: Accepted Submission + Email Delivery with the wired
-    // transport; visitor email is Reply-To only.
-    vi.stubGlobal("fetch", vi.fn(async () => new Response("", { status: 200 })));
-    const wiredEnv = { ...env, WAZIBIZ_EMAIL_TRANSPORT_URL: "https://mail-router.example/send" } as Env;
+    // identity: Accepted Submission + Email Delivery through the native
+    // Cloudflare Email Service binding; visitor email is Reply-To only.
+    const wiredEnv = { ...env, EMAIL: { send: async () => ({ messageId: "final-verification-1" }) } } as Env;
     const accepted = await acceptFormSubmission(wiredEnv, {
       origin: "https://riftvalleyroasters.example",
       remoteAddress: "203.0.113.240",
@@ -112,7 +111,6 @@ describe("canonical lifecycle end-to-end (fresh Onboarding Submission through Ro
     expect(delivery!.status).toBe("delivered");
     expect(delivery!.sender_identity).toBe(DEFAULT_PLATFORM_SENDER_IDENTITY);
     expect(delivery!.reply_to).toBe("final@visitor.example");
-    vi.unstubAllGlobals();
 
     // A second version is published, retaining the first as Rollback Version…
     const next = await createNextBuildVersion(env, { buildId: outcome.buildId, cause: "automated_repair" });

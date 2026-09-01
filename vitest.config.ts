@@ -85,7 +85,6 @@ export default defineWorkersConfig({
       "tests/v2-site-generator.test.ts",
       "tests/v2-image-pipeline.test.ts",
       "tests/v2-form-service.test.ts",
-      "tests/v2-email-router.test.ts",
       "tests/v2-assembly-preview.test.ts",
       "tests/v2-release-qa.test.ts",
       "tests/v2-static-deploy.test.ts",

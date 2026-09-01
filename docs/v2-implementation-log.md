@@ -54,6 +54,7 @@ after the CSO remediation at 428/428.
 | #26 Final integration + release verification | `9812017` | 153 pass | pass | OK FOR CURRENT SCOPE (`docs/security/2026-09-01-v2-issue-26-cso.md`; W17 fixed in-diff) |
 | #29 Capability-token gating of Approval/Rollback operator routes (W4) | `66f5019` | 182 pass | pass | OK WITH WATCH ITEMS (`docs/security/2026-09-01-v2-issue-29-cso.md`; F1-F4 fixed in-diff; W-29a = set `OPERATOR_CAPABILITY_SECRET` in production) |
 | #28 WAZIBIZ Form Service email transport (H2) | `bde4be5` | 195 pass | pass | OK WITH WATCH ITEMS (`docs/security/2026-09-01-v2-issue-28-cso.md`; F1 caught live + fixed in-diff; W-28d = production token + `SMTP2GO_API_KEY` set at the #27 deploy; W-28f = real verified Sender Identity) |
+| #28 follow-up: native Cloudflare Email Service transport | (this commit) | 186 pass | pass | OK FOR CURRENT SCOPE (`docs/security/2026-09-01-v2-issue-28-email-service-cso.md`; interim SMTP2Go/router architecture fully removed; W-28h = dashboard domain onboarding before production delivery; W-28g = tighten binding sender allowlist after onboarding) |
 
 | QA sweep (#5-#16, #24, #25) | `7ff3433` | 166 pass | pass | 4 findings (1 Medium criterion gap, 2 Medium, 1 Low) — `docs/qa/2026-09-01-v2-qa-sweep.md` |
 | QA remediation (F1-F3) | (this commit) | 166 pass | pass | OK FOR CURRENT SCOPE (`docs/security/2026-09-01-v2-qa-remediation-cso.md`); F4 deferred |
@@ -90,3 +91,20 @@ the cron-driven retry. Production secret wiring stays deploy-coupled to the
 the final `delivered` status additionally needs the operator to set
 `SMTP2GO_API_KEY` on the router. Final state: 29 test files / 195 tests,
 typecheck clean, `wrangler deploy --dry-run` passes.
+
+The #28 follow-up commit then replaced that interim architecture with the
+**native Cloudflare Email Service `send_email` binding** (`env.EMAIL`) as
+the single authoritative outbound transport: no provider API key, no
+shared transport secret, no HTTP email-router hop. The router Worker
+(live), its config, tests, deploy script and the staging transport-token
+secret were all removed; failure classification now maps only documented
+Cloudflare `E_*` error codes (quota/service/availability → transient,
+validation/sender/recipient → permanent, undocumented → bounded
+transient). The `*/10` cron sweep and the staging environment remain. Live
+re-verification: the redeployed staging Worker invoked the real Email
+Service and recorded the documented `E_SENDER_DOMAIN_NOT_AVAILABLE` as
+bounded `transient_failure` — fail-closed pending the dashboard domain
+onboarding (Compute > Email Service > Email Sending), which replaces all
+email-secret steps in the #27 runbook. Final state: 28 test files / 186
+tests, typecheck clean, `wrangler deploy --dry-run` passes for production
+and staging.
