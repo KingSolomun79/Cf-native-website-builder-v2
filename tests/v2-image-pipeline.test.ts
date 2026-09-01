@@ -1,0 +1,315 @@
+import { describe, expect, it } from "vitest";
+import { env as providedEnv } from "cloudflare:test";
+import type { Env } from "../src/env.d";
+import { startSiteGeneration, createInitialBuild } from "../src/domain/lifecycle";
+import {
+  runImageGeneration,
+  runImageWave,
+  getImageSpendReport,
+  getAcceptedImageMap,
+  loadAcceptedImageBytes,
+  splitWaves,
+  waveForSlot,
+  orderSlotsByPriority,
+  expandSlotsToTarget,
+  planImageDefectRepair,
+  resolveDefectWithoutRegeneration,
+  generationBudgetUsd,
+  KIE_SPEND_LIMIT_USD,
+  ImageBudgetExceededError,
+  type ImageGenerationProvider,
+  type ImagePromptRecord,
+} from "../src/domain/image-pipeline";
+import type { ImageSlot } from "../src/domain/site-generator";
+
+// Primary-seam tests for budgeted two-wave image generation (issue #10).
+
+const env = providedEnv as unknown as Env;
+
+function slot(overrides: Partial<ImageSlot> & { id: string }): ImageSlot {
+  return {
+    page: "home",
+    semanticRole: "editorial hero",
+    blueprintRole: "role-hero",
+    priority: "CRITICAL",
+    orientation: "landscape",
+    negativeSpaceForText: true,
+    ...overrides,
+  };
+}
+
+const SLOTS: ImageSlot[] = [
+  slot({ id: "home-hero", priority: "CRITICAL" }),
+  slot({ id: "home-showcase", priority: "HIGH", page: "home" }),
+  slot({ id: "services-banner", priority: "HIGH", page: "services" }),
+  slot({ id: "about-main", priority: "NORMAL", page: "about" }),
+  slot({ id: "contact-atmosphere", priority: "NORMAL", page: "contact" }),
+];
+
+function promptRecordsFor(slots: ImageSlot[]): Map<string, ImagePromptRecord> {
+  return new Map(
+    slots.map((entry) => [
+      entry.id,
+      {
+        slotId: entry.id,
+        promptText: `Editorial documentary photograph realizing ${entry.semanticRole} with natural light, ${entry.orientation} framing, generous negative space.`,
+        altText: `${entry.semanticRole} photograph`,
+        shotType: "wide editorial",
+        lighting: "natural window light",
+        avoidance: "no text overlays, no logos, no watermarks",
+      },
+    ])
+  );
+}
+
+function providerStub(options: {
+  costUsd?: number;
+  failSlots?: string[];
+  failFirstAttemptFor?: string[];
+  urlFor?: (slotId: string) => string;
+} = {}): { provider: ImageGenerationProvider; created: string[] } {
+  const created: string[] = [];
+  const cost = options.costUsd ?? 0.2;
+  return {
+    created,
+    provider: {
+      createTask: async (task) => {
+        created.push(task.slotId);
+        return { taskId: `task-${task.slotId}-${created.length}`, costUsd: cost };
+      },
+      fetchResult: async (taskId) => {
+        const slotId = taskId.split("-").slice(1, -1).join("-");
+        if (options.failSlots?.includes(slotId)) return { status: "failed" };
+        if (options.failFirstAttemptFor?.includes(slotId) && !taskId.endsWith("-2")) {
+          // first attempt for the slot fails, the bounded retry is task-2
+          if (taskId.includes("-1")) return { status: "failed" };
+        }
+        return {
+          status: "complete",
+          bytes: new TextEncoder().encode(`WEBP-${slotId}-${taskId}`),
+          temporaryUrl: options.urlFor?.(slotId) ?? `https://tmp.kie.example/${taskId}.webp`,
+        };
+      },
+    },
+  };
+}
+
+async function newBuild(): Promise<{ buildId: string; buildVersionId: string }> {
+  const started = await startSiteGeneration(env, {
+    payload: {
+      buildMode: "REFERENCE_BOUND",
+      facts: { businessName: "Rift Valley Roasters", contactEmail: "hi@rvr.example" },
+      reference: { screenshotR2Key: `references/uploads/ip-${Math.random().toString(36).slice(2)}.png` },
+    },
+  });
+  const created = await createInitialBuild(env, { siteGenerationId: started.siteGenerationId });
+  return { buildId: created.buildId, buildVersionId: created.buildVersionId };
+}
+
+describe("wave and priority planning", () => {
+  it("splits Wave 1 (CRITICAL + HIGH homepage) from Wave 2 (supporting)", () => {
+    const { wave1, wave2 } = splitWaves(SLOTS);
+    expect(wave1.map((entry) => entry.id)).toEqual(["home-hero", "home-showcase"]);
+    expect(wave2.map((entry) => entry.id)).toEqual(["services-banner", "about-main", "contact-atmosphere"]);
+    expect(waveForSlot({ priority: "CRITICAL", page: "about" })).toBe(1);
+    expect(waveForSlot({ priority: "HIGH", page: "about" })).toBe(2);
+    expect(orderSlotsByPriority([...SLOTS].reverse())[0].id).toBe("home-hero");
+  });
+
+  it("tops up supporting slots toward the ~12 accepted-image target", () => {
+    const expanded = expandSlotsToTarget(SLOTS, 12);
+    expect(expanded.length).toBe(12);
+    expect(expanded.slice(0, SLOTS.length)).toEqual(SLOTS);
+    expect(new Set(expanded.map((entry) => entry.id)).size).toBe(expanded.length);
+    expect(expanded.slice(SLOTS.length).every((entry) => entry.priority === "NORMAL")).toBe(true);
+  });
+
+  it("orders defect repair: crop/routing/remap before any regeneration", () => {
+    const crop = planImageDefectRepair({ kind: "crop_framing" });
+    expect(crop.findIndex((step) => step.applies)).toBe(0);
+    expect(resolveDefectWithoutRegeneration({ kind: "crop_framing" })!.strategy).toBe("css_crop_object_position");
+    expect(resolveDefectWithoutRegeneration({ kind: "asset_routing" })!.strategy).toBe("asset_routing");
+    expect(resolveDefectWithoutRegeneration({ kind: "content_remap" })!.strategy).toBe("content_remap");
+    expect(resolveDefectWithoutRegeneration({ kind: "generation_quality" })).toBeNull();
+    const regen = planImageDefectRepair({ kind: "generation_quality" });
+    expect(regen.find((step) => step.applies)!.strategy).toBe("image_attempt_regeneration");
+  });
+});
+
+describe("budgeted two-wave generation", () => {
+  it("generates waves in priority order, persists Accepted Images to project-controlled storage and accounts cost", async () => {
+    const { buildId, buildVersionId } = await newBuild();
+    const { provider, created } = providerStub({ costUsd: 0.2 });
+
+    const result = await runImageGeneration(env, {
+      siteGenerationId: "sg",
+      buildId,
+      buildVersionId,
+      buildVersionNumber: 1,
+      slots: SLOTS,
+      expandToTarget: false,
+      provider,
+      generate: async (_system, user) => ({
+        content: JSON.stringify({ records: [...promptRecordsFor(SLOTS).values()] }),
+        provider: "test",
+        model: "test-model-i",
+      }),
+    });
+
+    // 5 slots at $0.20 = $1.00 — inside the generation budget and hard gate.
+    expect(result.report.spentUsd).toBeCloseTo(1.0, 4);
+    expect(result.report.hardLimitUsd).toBe(KIE_SPEND_LIMIT_USD);
+    expect(result.report.repairReserveUsd).toBeCloseTo(0.675, 3);
+    expect(result.outcomes.filter((outcome) => outcome.status === "accepted")).toHaveLength(5);
+    expect(result.report.unresolvedSlots).toEqual([]);
+
+    // Wave-1 CRITICAL slot generated first.
+    expect(created[0]).toBe("home-hero");
+
+    // Accepted Images persisted and readable from project-controlled storage;
+    // no temporary provider URL is referenced.
+    const accepted = await getAcceptedImageMap(env, buildVersionId);
+    expect(accepted.size).toBe(5);
+    const bytes = await loadAcceptedImageBytes(env, accepted.get("home-hero")!.r2Key);
+    expect(bytes).not.toBeNull();
+    expect(new TextDecoder().decode(bytes!)).toContain("WEBP-home-hero");
+
+    const attempts = await env.DB.prepare(
+      "SELECT provider_url, r2_key FROM image_attempts WHERE build_id = ? AND slot_id = ?"
+    )
+      .bind(buildId, "home-hero")
+      .all<{ provider_url: string | null; r2_key: string | null }>();
+    expect(attempts.results![0].provider_url).toContain("tmp.kie.example"); // audit-only
+    expect(attempts.results![0].r2_key).toContain("assets/images/home-hero-a1.webp");
+
+    // Immutability of acceptance decisions.
+    await expect(
+      env.DB.prepare("UPDATE accepted_images SET r2_key = 'x' WHERE slot_id = ? AND build_version_id = ?")
+        .bind("home-hero", buildVersionId)
+        .run()
+    ).rejects.toThrow("ACCEPTED_IMAGE_IMMUTABLE");
+  });
+
+  it("retries a failed slot once (bounded) and records both attempts", async () => {
+    const { buildId, buildVersionId } = await newBuild();
+    const { provider } = providerStub({ failFirstAttemptFor: ["home-hero"] });
+
+    const outcomes = await runImageWave(env, {
+      buildId,
+      buildVersionId,
+      buildVersionNumber: 1,
+      wave: 1,
+      slots: [SLOTS[0]],
+      promptRecords: promptRecordsFor([SLOTS[0]]),
+      provider,
+    });
+
+    expect(outcomes[0].status).toBe("accepted");
+    const attempts = await env.DB.prepare(
+      "SELECT attempt_number, status FROM image_attempts WHERE build_id = ? AND slot_id = ? ORDER BY attempt_number"
+    )
+      .bind(buildId, "home-hero")
+      .all<{ attempt_number: number; status: string }>();
+    expect((attempts.results ?? []).map((row) => row.status)).toEqual(["failed", "succeeded"]);
+
+    // A permanently failing slot stays bounded at MAX_ATTEMPTS_PER_SLOT.
+    const failing = await newBuild();
+    const { provider: failingProvider } = providerStub({ failSlots: ["home-hero"] });
+    const failedOutcomes = await runImageWave(env, {
+      buildId: failing.buildId,
+      buildVersionId: failing.buildVersionId,
+      buildVersionNumber: 1,
+      wave: 1,
+      slots: [SLOTS[0]],
+      promptRecords: promptRecordsFor([SLOTS[0]]),
+      provider: failingProvider,
+    });
+    expect(failedOutcomes[0].status).toBe("failed");
+    const count = await env.DB.prepare("SELECT COUNT(*) AS n FROM image_attempts WHERE build_id = ?")
+      .bind(failing.buildId)
+      .first<{ n: number }>();
+    expect(count!.n).toBe(2);
+    const report = await getImageSpendReport(env, failing.buildId, [SLOTS[0]]);
+    expect(report.unresolvedSlots).toEqual(["home-hero"]);
+  });
+
+  it("preserves the repair reserve during generation and never exceeds the hard gate", async () => {
+    // 7 slots at $0.40 = $2.80 needed; generation budget is 3.00*0.775 = $2.325.
+    // Wave-1 generation stops beyond the reserve; wave 2 may still use it.
+    const reserve = await newBuild();
+    const slots = [
+      SLOTS[0],
+      slot({ id: "home-b", priority: "CRITICAL" }),
+      slot({ id: "home-c", priority: "CRITICAL" }),
+      slot({ id: "home-d", priority: "CRITICAL" }),
+      slot({ id: "home-e", priority: "CRITICAL" }),
+      slot({ id: "home-f", priority: "CRITICAL" }),
+      slot({ id: "home-g", priority: "CRITICAL" }),
+    ];
+    const { provider } = providerStub({ costUsd: 0.4 });
+    const outcomes = await runImageWave(env, {
+      buildId: reserve.buildId,
+      buildVersionId: reserve.buildVersionId,
+      buildVersionNumber: 1,
+      wave: 1,
+      slots,
+      promptRecords: promptRecordsFor(slots),
+      provider,
+    });
+    const accepted = outcomes.filter((outcome) => outcome.status === "accepted").length;
+    const rejected = outcomes.filter((outcome) => outcome.status === "rejected_budget").length;
+    expect(accepted).toBe(5); // 5 * 0.4 = $2.0 <= $2.325; the 6th ($2.4 > $2.325) is deferred
+    expect(rejected).toBe(2);
+    const report = await getImageSpendReport(env, reserve.buildId, slots);
+    expect(report.spentUsd).toBeCloseTo(2.0, 4);
+    expect(generationBudgetUsd()).toBeCloseTo(2.325, 3);
+
+    // Hard gate: a provider cost that would cross $3.00 throws instead of
+    // spending — retry may not exceed the gate under any circumstances.
+    const hard = await newBuild();
+    const { provider: expensive } = providerStub({ costUsd: 0.5 });
+    // pre-spend $2.75 via direct ledger rows for 11 attempts (build-scoped)
+    for (let i = 0; i < 11; i++) {
+      await env.DB.prepare(
+        `INSERT INTO image_attempts (id, build_id, build_version_id, slot_id, wave, attempt_number, status, cost_usd, created_at)
+         VALUES (?, ?, ?, ?, 2, 1, 'succeeded', 0.25, '2026-09-01T00:00:00Z')`
+      )
+        .bind(`pre-${i}`, hard.buildId, hard.buildVersionId, `slot-pre-${i}`).run();
+    }
+    const before = await getImageSpendReport(env, hard.buildId, [SLOTS[3]]);
+    expect(before.spentUsd).toBeCloseTo(2.75, 4);
+    await expect(
+      runImageWave(env, {
+        buildId: hard.buildId,
+        buildVersionId: hard.buildVersionId,
+        buildVersionNumber: 1,
+        wave: 2,
+        slots: [SLOTS[3]],
+        promptRecords: promptRecordsFor([SLOTS[3]]),
+        provider: expensive,
+      })
+    ).rejects.toBeInstanceOf(ImageBudgetExceededError);
+  });
+
+  it("keeps slot identity stable across attempts (no new slot per candidate)", async () => {
+    const { buildId, buildVersionId } = await newBuild();
+    const { provider } = providerStub({ failFirstAttemptFor: ["home-hero"] });
+    await runImageWave(env, {
+      buildId,
+      buildVersionId,
+      buildVersionNumber: 1,
+      wave: 1,
+      slots: [SLOTS[0]],
+      promptRecords: promptRecordsFor([SLOTS[0]]),
+      provider,
+    });
+    const attempts = await env.DB.prepare(
+      "SELECT DISTINCT slot_id FROM image_attempts WHERE build_id = ?"
+    )
+      .bind(buildId)
+      .all<{ slot_id: string }>();
+    expect((attempts.results ?? []).map((row) => row.slot_id)).toEqual(["home-hero"]);
+    const accepted = await getAcceptedImageMap(env, buildVersionId);
+    expect([...accepted.keys()]).toEqual(["home-hero"]);
+  });
+});
