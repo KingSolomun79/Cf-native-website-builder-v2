@@ -55,7 +55,7 @@ Machine-checked integration: `tests/v2-final-verification.test.ts` (full canonic
 
 ## Release-follow-up register (non-code, from CSO passes)
 
-- **W14 (#25):** delete retired production secrets (`SMTP2GO_API_KEY`, GitHub/APPROVAL/CANDIDATE_VALIDATION) via `wrangler secret delete` during the production deploy.
+- **W14 (#25, tracked as #27):** delete retired production secrets during the production deploy. Audit 2026-09-01 (#27): production holds exactly `SMTP2GO_API_KEY`, `GITHUB_TOKEN`, `GITHUB_WEBHOOK_SECRET`, `APPROVAL_SECRET` (`CANDIDATE_VALIDATION_SECRET` not present); all four are unreferenced by the V2 runtime. Deletion is blocked until a version that does not bind them is deployed — Cloudflare rejects secret changes with error 10215 while the latest uploaded version is undeployed, and the live version is still V1 (`dc99fb34`, restored by the 2026-08-19 rollback). Runbook: backup/export prod D1, reconcile migration tracker (0001-0016), apply 0017-0030, `wrangler deploy` V2, `wrangler secret delete` the four names, verify `wrangler secret list` shows only active V2 secrets. Full record: issue #27 audit comment.
 - **W4 (#15):** capability-token gating required before approval/rollback operator routes are exposed.
 - **H2 wiring:** set `WAZIBIZ_EMAIL_TRANSPORT_URL` (+ token secret) before production form traffic; fail-closed until then.
 - Standing watch items M1–M3, L2–L3, W1–W16 are recorded in the individual CSO reports under `docs/security/`.
