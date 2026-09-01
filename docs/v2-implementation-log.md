@@ -40,4 +40,5 @@ after the CSO remediation at 428/428.
 | Issue | Commit | Tests | Typecheck | CSO |
 |---|---|---|---|---|
 | #14 Bounded Automated Repair | `b78ed69` | 436 pass | pass | OK FOR CURRENT SCOPE (`docs/security/2026-09-01-v2-issue-14-cso.md`, watch items W1-W3, none blocking) |
-| #15 Approval, Publication, Rollback | (this commit) | 442 pass | pass | OK WITH WATCH ITEMS (`docs/security/2026-09-01-v2-issue-15-cso.md`, W4 gates future operator routes) |
+| #15 Approval, Publication, Rollback | `4b1cec7` | 442 pass | pass | OK WITH WATCH ITEMS (`docs/security/2026-09-01-v2-issue-15-cso.md`, W4 gates future operator routes) |
+| #16 Deployment + artifact retention lifecycle | (this commit) | 448 pass | pass | OK WITH WATCH ITEMS (`docs/security/2026-09-01-v2-issue-16-cso.md`, W7 fixed in-diff) |

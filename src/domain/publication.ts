@@ -279,7 +279,10 @@ export async function publishApprovedBuildVersion(
   await env.DB.prepare(
     `INSERT INTO build_deployments (id, build_id, build_version_id, role, worker_name, preview_url, artifact_manifest_hash, status, created_at, updated_at)
      VALUES (?, ?, ?, 'published', ?, ?, ?, 'active', ?, ?)
-     ON CONFLICT (build_version_id, role) DO NOTHING`
+     ON CONFLICT (build_version_id, role) DO UPDATE SET
+       status = 'active', worker_name = excluded.worker_name,
+       preview_url = excluded.preview_url, artifact_manifest_hash = excluded.artifact_manifest_hash,
+       updated_at = excluded.updated_at`
   )
     .bind(generateId(), input.buildId, input.buildVersionId, workerName, deployed.publishedUrl, manifest.artifactManifestHash, completedAt, completedAt)
     .run();

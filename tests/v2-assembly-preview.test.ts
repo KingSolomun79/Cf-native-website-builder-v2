@@ -285,12 +285,14 @@ describe("assembly and preview deployment", () => {
     expect(v2.deploymentId).not.toBe(v1.deploymentId);
     expect(v2.alreadyActive).toBe(false);
 
-    // The v1 deployment remains exactly as deployed.
+    // The v1 deployment keeps its exact deployed hash; its role status is
+    // superseded by v2's preview (retention lifecycle, issue #16) but the
+    // row was never mutated in content or reassigned to v2.
     const v1Row = await env.DB.prepare("SELECT artifact_manifest_hash, status FROM build_deployments WHERE id = ?")
       .bind(v1.deploymentId)
       .first<{ artifact_manifest_hash: string; status: string }>();
     expect(v1Row!.artifact_manifest_hash).toBe(candidateV1.artifactManifestHash);
-    expect(v1Row!.status).toBe("active");
+    expect(v1Row!.status).toBe("superseded");
 
     // Both candidates' source sets coexist immutably.
     const v1Html = await getObject(env, `builds/${context.buildId}/v1/source/index.html`);

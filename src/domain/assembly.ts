@@ -248,6 +248,11 @@ export async function deployPreview(env: Env, input: DeployPreviewInput): Promis
     detail: `Preview deployed exact candidate ${input.candidate.artifactManifestHash.slice(0, 12)} at ${deployed.previewUrl}`,
   });
 
+  // Older Preview Deployments of this Build no longer hold the candidate
+  // role; the retention lifecycle (issue #16) disposes of them.
+  const { markSupersededPreviews } = await import("./retention");
+  await markSupersededPreviews(env, { buildId: input.buildId, activeBuildVersionId: input.buildVersionId });
+
   return {
     deploymentId,
     workerName,
