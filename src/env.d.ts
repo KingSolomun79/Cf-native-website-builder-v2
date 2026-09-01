@@ -55,4 +55,11 @@ export interface Env {
   CANDIDATE_VALIDATION_ENABLED?: string;
   CANDIDATE_VALIDATION_SECRET?: string;
   FALLBACK_MODEL?: string;
+
+  // Central WAZIBIZ Form Service (V2, issue #11). The transport URL is a
+  // non-secret var; the transport bearer token and Turnstile secret are set
+  // as Worker secrets (`wrangler secret put`).
+  WAZIBIZ_EMAIL_TRANSPORT_URL?: string;
+  WAZIBIZ_EMAIL_TRANSPORT_TOKEN?: string;
+  TURNSTILE_SECRET_KEY?: string;
 }

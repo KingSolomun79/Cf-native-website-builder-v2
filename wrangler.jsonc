@@ -102,6 +102,11 @@
     "VISION_INPUT_MAX_WIDTH": "1920",
     "VISION_INPUT_MAX_HEIGHT": "12000",
     "FALLBACK_MODEL": "xiaomi/mimo-v2.5",
+    // Central WAZIBIZ Form Service email transport. Empty until the
+    // Cloudflare-native outbound email router endpoint is wired; delivery
+    // then classifies transient with bounded retry (fail-closed). The bearer
+    // token is a Worker secret (WAZIBIZ_EMAIL_TRANSPORT_TOKEN), not a var.
+    "WAZIBIZ_EMAIL_TRANSPORT_URL": "",
     "GITHUB_REPO_OWNER": "Wazibiz-Webdesign-Kenya",
     "GITHUB_REPO_NAME": "wazibiz-client-sites",
     "GITHUB_BRANCH": "main"

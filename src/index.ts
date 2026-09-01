@@ -19,6 +19,7 @@ import { getSiteGeneration } from "./routes/v2.site-generation-get";
 import { createBuildForSiteGeneration } from "./routes/v2.build-create";
 import { getBuild } from "./routes/v2.build-get";
 import { createRevisionRequest, getRevisionRequest } from "./routes/v2.revision-request";
+import { submitForm } from "./routes/v2.form-submit";
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -28,6 +29,7 @@ app.post("/api/v2/site-generations/:siteGenerationId/builds", createBuildForSite
 app.get("/api/v2/builds/:buildId", getBuild);
 app.post("/api/v2/builds/:buildId/revision-requests", createRevisionRequest);
 app.get("/api/v2/builds/:buildId/revision-requests/latest", getRevisionRequest);
+app.post("/api/v2/forms/submit", submitForm);
 
 app.post("/api/webhooks/fluentforms", handleFluentFormsWebhook);
 app.post("/api/webhooks/github", handleGithubDeployCallback);
