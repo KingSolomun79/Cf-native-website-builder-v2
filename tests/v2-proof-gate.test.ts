@@ -1,12 +1,8 @@
 import { beforeAll, describe, expect, it } from "vitest";
 import { env as providedEnv } from "cloudflare:test";
 import type { Env } from "../src/env.d";
-import {
-  BENCHMARK_CASES,
-  benchmarkCaseById,
-  freezeBenchmarkCases,
-  recordBenchmarkRun,
-} from "../src/domain/benchmark";
+import { BENCHMARK_CASES, benchmarkCaseById, freezeBenchmarkCases, recordBenchmarkRun } from "../src/domain/benchmark";
+import { startSiteGeneration, createInitialBuild } from "../src/domain/lifecycle";
 import {
   evaluateProofGate,
   assertOriginalDesignUnlocked,
@@ -21,11 +17,20 @@ import {
 const env = providedEnv as unknown as Env;
 
 async function appendRun(caseId: string, pass: boolean, overrides: { manualEdits?: number; rootCause?: string } = {}): Promise<void> {
+  // Real lifecycle entities so the run rows satisfy foreign keys.
+  const started = await startSiteGeneration(env, {
+    payload: {
+      buildMode: "REFERENCE_BOUND",
+      facts: { businessName: "Gate Probe Co", contactEmail: "gate@example.com" },
+      reference: { screenshotR2Key: `references/uploads/gate-${Math.random().toString(36).slice(2)}.png` },
+    },
+  });
+  const created = await createInitialBuild(env, { siteGenerationId: started.siteGenerationId });
   await recordBenchmarkRun(env, {
     benchmarkCaseId: caseId,
-    siteGenerationId: `sg-gate-${Math.random().toString(36).slice(2)}`,
-    buildId: `b-gate-${Math.random().toString(36).slice(2)}`,
-    buildVersionId: `bv-gate-${Math.random().toString(36).slice(2)}`,
+    siteGenerationId: started.siteGenerationId,
+    buildId: created.buildId,
+    buildVersionId: created.buildVersionId,
     releaseReady: pass,
     imageSpendUsd: pass ? 1.8 : 2.9,
     manualSourceEdits: overrides.manualEdits ?? 0,
@@ -118,9 +123,19 @@ describe("REFERENCE_BOUND proof gate", () => {
 
     // Budget-bypassed attempts are equally inert: a spend-over run row is a
     // failure regardless of release readiness.
+    const spendStarted = await startSiteGeneration(env, {
+      payload: {
+        buildMode: "REFERENCE_BOUND",
+        facts: { businessName: "Spend Over Co", contactEmail: "spend@example.com" },
+        reference: { screenshotR2Key: `references/uploads/spend-${Math.random().toString(36).slice(2)}.png` },
+      },
+    });
+    const spendBuild = await createInitialBuild(env, { siteGenerationId: spendStarted.siteGenerationId });
     await recordBenchmarkRun(env, {
       benchmarkCaseId: benchmarkCaseById("bench-trades-local-service").id,
-      siteGenerationId: "sg-x", buildId: "b-x", buildVersionId: "bv-x",
+      siteGenerationId: spendStarted.siteGenerationId,
+      buildId: spendBuild.buildId,
+      buildVersionId: spendBuild.buildVersionId,
       releaseReady: true, imageSpendUsd: 3.5, manualSourceEdits: 0,
     });
     const after = await evaluateProofGate(env);

@@ -85,6 +85,7 @@ export default defineWorkersConfig({
       "tests/v2-benchmark-site-4.test.ts",
       "tests/v2-benchmark-site-5.test.ts",
       "tests/v2-proof-gate.test.ts",
+      "tests/v2-original-design.test.ts",
       "tests/blueprint.test.ts",
       "tests/blueprint-v2.test.ts",
       "tests/vision-input.test.ts",

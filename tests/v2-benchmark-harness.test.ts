@@ -167,11 +167,13 @@ describe("benchmark case runner", () => {
 
     // The difficult case keeps its Adaptation Contract through intake (the
     // run reached the image stage, so SUPPORTED_WITH_LIMITATIONS was
-    // satisfied with the frozen contract).
+    // satisfied with the frozen contract). The case-level verdict is the
+    // durable signal; the global 3/5 aggregate legitimately depends on the
+    // other cases' latest runs.
     const suite = await getBenchmarkSuiteStatus(env);
     const entry = suite.perCase.find((item) => item.caseId === caseDefinition.id);
     expect(entry?.latestStatus).toBe("fail");
-    expect(suite.gateSatisfied).toBe(false);
+    expect((entry?.fails ?? 0)).toBeGreaterThanOrEqual(1);
   });
 
   it("records manual-source-edit failures as non-PASS", async () => {

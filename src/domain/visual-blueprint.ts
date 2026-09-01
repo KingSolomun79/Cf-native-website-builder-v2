@@ -31,9 +31,11 @@ export const VisualBlueprintSchema = Type.Object(
       Type.Object({
         id: Type.String({ minLength: 1, maxLength: 120 }),
         description: Type.String({ minLength: 1, maxLength: 2000 }),
-        // The analysis trait this Blueprint trait preserves through Business
-        // adaptation; may not invent unanalyzed traits.
-        sourceTraitId: Type.String({ minLength: 1, maxLength: 120 }),
+        // The Reference Analysis trait this Blueprint trait preserves through
+        // Business adaptation. Required on the REFERENCE_BOUND path (the
+        // identity-preservation validator enforces it); ORIGINAL_DESIGN
+        // derives traits from Business/creative inputs instead and omits it.
+        sourceTraitId: Type.Optional(Type.String({ minLength: 1, maxLength: 120 })),
       }),
       { minItems: 3, maxItems: 8 }
     ),
@@ -117,6 +119,10 @@ export function validateBlueprintIdentityPreservation(
   const problems: string[] = [];
   const analysisTraitIds = new Set(analysis.signatureTraits.map((trait) => trait.id));
   for (const trait of blueprint.signatureTraits) {
+    if (!trait.sourceTraitId) {
+      problems.push(`signature trait '${trait.id}' has no Reference Analysis trace; REFERENCE_BOUND traits must preserve analyzed identity`);
+      continue;
+    }
     if (!analysisTraitIds.has(trait.sourceTraitId)) {
       problems.push(`signature trait '${trait.id}' traces to unknown analysis trait '${trait.sourceTraitId}'`);
     }

@@ -285,6 +285,14 @@ export async function createInitialBuild(
     );
   }
 
+  // ORIGINAL_DESIGN work is locked behind the REFERENCE_BOUND proof gate
+  // (issue #23): at least 3 of 5 fixed Benchmark Sites must satisfy
+  // Benchmark Pass before any ORIGINAL_DESIGN Build may start.
+  if (generation.build_mode === "ORIGINAL_DESIGN") {
+    const { assertOriginalDesignUnlocked } = await import("./proof-gate");
+    await assertOriginalDesignUnlocked(env);
+  }
+
   const createdAt = nowIso();
   const buildId = generateId();
   const buildVersionId = generateId();
