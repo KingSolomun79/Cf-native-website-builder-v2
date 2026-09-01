@@ -62,4 +62,6 @@ export interface Env {
   WAZIBIZ_EMAIL_TRANSPORT_URL?: string;
   WAZIBIZ_EMAIL_TRANSPORT_TOKEN?: string;
   TURNSTILE_SECRET_KEY?: string;
+  // Days a superseded Published Version stays available as Rollback Version.
+  ROLLBACK_WINDOW_DAYS?: string;
 }
