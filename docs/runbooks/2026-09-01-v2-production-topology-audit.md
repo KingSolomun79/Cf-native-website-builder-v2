@@ -57,6 +57,7 @@ V2-runtime mapping of those names (per `src/env.d.ts` + corrected #28):
 - Retired V1 integrations, **must not exist on the V2 Worker**: `SMTP2GO_API_KEY`, `GITHUB_TOKEN`, `GITHUB_WEBHOOK_SECRET`, `APPROVAL_SECRET`, `CANDIDATE_VALIDATION_SECRET` (not present anywhere).
 - Required by V2 but **values are operator-held** (cannot be read back from V1): `ZHIPU_API_KEY`, `OPENROUTER_API_KEY`, `KIE_API_KEY`, `CF_AIG_TOKEN`, `CF_DEPLOY_API_TOKEN`, `TURNSTILE_SECRET_KEY` (optional while `turnstile_required = 0`).
 - Required by V2 and **generatable fresh**: `WEBHOOK_SECRET` (inbound route HMAC), `OPERATOR_CAPABILITY_SECRET` (issue #29, W-29a).
+- **#33 re-audit (2026-09-01):** every name above re-verified against live `src/` references (env.d.ts + routes/domains); zero source references remain for `SMTP2GO_API_KEY` (only a negative-assertion comment in `src/lib/publish.ts`), `GITHUB_TOKEN`, `GITHUB_WEBHOOK_SECRET`, `APPROVAL_SECRET`, `CANDIDATE_VALIDATION_SECRET`, `WAZIBIZ_EMAIL_TRANSPORT_TOKEN`, `WAZIBIZ_EMAIL_TRANSPORT_URL`, `EMAIL_ROUTER`. Retired dummy vars removed from `wrangler.test.jsonc`. Name-only hygiene gate: `scripts/verify-v2-secrets.mjs`.
 - Email: **no secret at all** — native Cloudflare Email Service `send_email` binding (issue #28 follow-up); the platform Sender Identity is the `WAZIBIZ_SENDER_EMAIL` Worker **var** (issue #32, configuration not a secret) — unset in production until the operator approves the mailbox; delivery fails closed without it.
 
 ### Other

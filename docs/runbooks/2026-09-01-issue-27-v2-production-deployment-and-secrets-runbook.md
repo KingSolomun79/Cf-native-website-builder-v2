@@ -52,16 +52,26 @@ npx wrangler secret put OPERATOR_CAPABILITY_SECRET   # Worker: cf-website-factor
 npx wrangler secret put WEBHOOK_SECRET
 ```
 
-Then the operator-supplied values:
+Then the operator-supplied values (provider ownership; audited against actual `src/` references in #33):
 
 ```bash
-npx wrangler secret put ZHIPU_API_KEY
-npx wrangler secret put OPENROUTER_API_KEY
-npx wrangler secret put KIE_API_KEY
-npx wrangler secret put CF_AIG_TOKEN
-npx wrangler secret put CF_DEPLOY_API_TOKEN
-npx wrangler secret put TURNSTILE_SECRET_KEY   # optional
+npx wrangler secret put ZHIPU_API_KEY          # Z.ai / Zhipu — api.z.ai LLM key (primary text-provider leg)
+npx wrangler secret put OPENROUTER_API_KEY     # OpenRouter — openrouter.ai key (text + vision fallback legs)
+npx wrangler secret put KIE_API_KEY            # KIE.ai — image-generation API key
+npx wrangler secret put CF_AIG_TOKEN           # Cloudflare AI Gateway token (account c1c0f6b1…, gateway "website-factory")
+npx wrangler secret put CF_DEPLOY_API_TOKEN    # Cloudflare API token with Workers Scripts + static-assets permissions
+npx wrangler secret put TURNSTILE_SECRET_KEY   # optional — Cloudflare Turnstile (only once any Site sets turnstile_required = 1)
 ```
+
+Fresh credentials are preferred over reusing V1 values: secrets are write-only (unreadable from V1 anyway), V1 stays independently alive on its own credentials, and fresh keys isolate blast radius and keep rotation simple. Reuse is possible only if the operator still holds the V1-era values — a deliberate choice, not a requirement.
+
+Post-provision name hygiene (names only; values are never readable):
+
+```bash
+node scripts/verify-v2-secrets.mjs --worker cf-website-factory-v2
+```
+
+Must report: exactly the required set, no retired names (`SMTP2GO_API_KEY`, `GITHUB_TOKEN`, `GITHUB_WEBHOOK_SECRET`, `APPROVAL_SECRET`, `CANDIDATE_VALIDATION_SECRET`, `WAZIBIZ_EMAIL_TRANSPORT_TOKEN`), nothing unexpected. Also confirm the `WAZIBIZ_SENDER_EMAIL` **var** via `npx wrangler versions view <id>` (it is configuration, not a secret).
 
 ## Step 5 — Gates, then deploy
 
