@@ -54,7 +54,7 @@ after the CSO remediation at 428/428.
 | #26 Final integration + release verification | `9812017` | 153 pass | pass | OK FOR CURRENT SCOPE (`docs/security/2026-09-01-v2-issue-26-cso.md`; W17 fixed in-diff) |
 | #29 Capability-token gating of Approval/Rollback operator routes (W4) | `66f5019` | 182 pass | pass | OK WITH WATCH ITEMS (`docs/security/2026-09-01-v2-issue-29-cso.md`; F1-F4 fixed in-diff; W-29a = set `OPERATOR_CAPABILITY_SECRET` in production) |
 | #28 WAZIBIZ Form Service email transport (H2) | `bde4be5` | 195 pass | pass | OK WITH WATCH ITEMS (`docs/security/2026-09-01-v2-issue-28-cso.md`; F1 caught live + fixed in-diff; W-28d = production token + `SMTP2GO_API_KEY` set at the #27 deploy; W-28f = real verified Sender Identity) |
-| #28 follow-up: native Cloudflare Email Service transport | (this commit) | 186 pass | pass | OK FOR CURRENT SCOPE (`docs/security/2026-09-01-v2-issue-28-email-service-cso.md`; interim SMTP2Go/router architecture fully removed; W-28h = dashboard domain onboarding before production delivery; W-28g = tighten binding sender allowlist after onboarding) |
+| #28 follow-up: native Cloudflare Email Service transport | `f8e6afb` | 186 pass | pass | OK FOR CURRENT SCOPE (`docs/security/2026-09-01-v2-issue-28-email-service-cso.md`; interim SMTP2Go/router architecture fully removed; W-28h = dashboard domain onboarding before production delivery; W-28g = tighten binding sender allowlist after onboarding) |
 
 | QA sweep (#5-#16, #24, #25) | `7ff3433` | 166 pass | pass | 4 findings (1 Medium criterion gap, 2 Medium, 1 Low) — `docs/qa/2026-09-01-v2-qa-sweep.md` |
 | QA remediation (F1-F3) | (this commit) | 166 pass | pass | OK FOR CURRENT SCOPE (`docs/security/2026-09-01-v2-qa-remediation-cso.md`); F4 deferred |
