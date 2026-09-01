@@ -316,6 +316,80 @@ export async function createInitialBuild(
   return { buildId, buildVersionId, buildVersionNumber: 1 };
 }
 
+// ── Automated Repair version primitive ──────────────────────────────────────
+
+export interface CreateNextBuildVersionInput {
+  buildId: string;
+  /** Short machine cause, e.g. 'automated_repair', 'release_blocker_fix'. */
+  cause: string;
+  detail?: string | null;
+}
+
+export interface NextBuildVersionCreated {
+  buildId: string;
+  buildVersionId: string;
+  buildVersionNumber: number;
+}
+
+// Bounded Automated Repair creates a new immutable Build Version INSIDE the
+// same Build (issues #14+). Human-requested changes never call this — they
+// create a new Build via Revision Request or a new Site Generation.
+export async function createNextBuildVersion(
+  env: Env,
+  input: CreateNextBuildVersionInput
+): Promise<NextBuildVersionCreated> {
+  const build = await env.DB.prepare("SELECT * FROM builds WHERE id = ?")
+    .bind(input.buildId)
+    .first<BuildRow>();
+  if (!build) {
+    throw new LifecycleError("BUILD_NOT_FOUND", `Build ${input.buildId} does not exist`);
+  }
+
+  const createdAt = nowIso();
+  const buildVersionId = generateId();
+
+  let nextNumber = 1;
+  try {
+    await env.DB.prepare(
+      `INSERT INTO build_versions (id, build_id, version_number, created_at)
+       VALUES (?, ?, (SELECT COALESCE(MAX(version_number), 0) + 1 FROM build_versions WHERE build_id = ?), ?)`
+    )
+      .bind(buildVersionId, input.buildId, input.buildId, createdAt)
+      .run();
+    const row = await env.DB.prepare(
+      "SELECT version_number FROM build_versions WHERE id = ?"
+    )
+      .bind(buildVersionId)
+      .first<{ version_number: number }>();
+    nextNumber = row?.version_number ?? 1;
+  } catch (error) {
+    if (isUniqueViolation(error, "build_versions.build_id, build_versions.version_number")) {
+      throw new LifecycleError(
+        "BUILD_VERSION_MISMATCH",
+        `Build ${input.buildId} already gained a newer Build Version concurrently`
+      );
+    }
+    throw error;
+  }
+
+  await env.DB.prepare(
+    `INSERT INTO build_workflow_events (id, build_id, build_version_id, from_state, to_state, stage, detail, created_at)
+     VALUES (?, ?, ?, ?, ?, 'automated_repair', ?, ?)`
+  )
+    .bind(
+      generateId(),
+      input.buildId,
+      buildVersionId,
+      build.state,
+      build.state,
+      input.detail ?? `New immutable Build Version created (${input.cause})`,
+      createdAt
+    )
+    .run();
+
+  return { buildId: input.buildId, buildVersionId, buildVersionNumber: nextNumber };
+}
+
 // ── State transitions and events ────────────────────────────────────────────
 
 export async function appendBuildWorkflowEvent(

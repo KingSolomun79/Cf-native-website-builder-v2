@@ -47,6 +47,7 @@ export default defineWorkersConfig({
     testTimeout: 30000,
     include: [
       "tests/v2-lifecycle.test.ts",
+      "tests/v2-revision.test.ts",
       "tests/blueprint.test.ts",
       "tests/blueprint-v2.test.ts",
       "tests/vision-input.test.ts",
