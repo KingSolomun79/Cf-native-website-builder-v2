@@ -81,6 +81,7 @@ export default defineWorkersConfig({
       "tests/v2-benchmark-harness.test.ts",
       "tests/v2-benchmark-site-1.test.ts",
       "tests/v2-benchmark-site-2.test.ts",
+      "tests/v2-benchmark-site-3.test.ts",
       "tests/blueprint.test.ts",
       "tests/blueprint-v2.test.ts",
       "tests/vision-input.test.ts",
