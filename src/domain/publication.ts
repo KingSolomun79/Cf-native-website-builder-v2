@@ -136,6 +136,11 @@ export interface PublishInput {
   buildVersionId: string;
   buildVersionNumber: number;
   deployer?: PublicationDeployer;
+  /** Manifest hash the CALLER authorized (capability-token routes, issue
+   *  #31). Enforced at the mutation boundary so state drifting between
+   *  authorization and publication cannot redirect the deploy — the same
+   *  TOCTOU class #29 closed for Rollback via expectedCurrentBuildVersionId. */
+  expectedArtifactManifestHash?: string;
 }
 
 export interface PublicationResult {
@@ -185,6 +190,15 @@ export async function publishApprovedBuildVersion(
   // Approval drift guard: the version's current manifest must still hash to
   // what was approved.
   const manifest = await loadAssembledManifest(env, input.buildId, input.buildVersionId);
+  if (
+    input.expectedArtifactManifestHash !== undefined &&
+    manifest.artifactManifestHash !== input.expectedArtifactManifestHash
+  ) {
+    throw new PublicationError(
+      "APPROVAL_HASH_MISMATCH",
+      "The Build Version's artifact manifest no longer matches the manifest the caller authorized; review current state and use a fresh capability"
+    );
+  }
   if (manifest.artifactManifestHash !== approval.artifact_manifest_hash) {
     throw new PublicationError(
       "APPROVAL_HASH_MISMATCH",

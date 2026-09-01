@@ -1,14 +1,19 @@
 #!/usr/bin/env node
-// Offline minting of operator capability tokens (issue #29).
+// Offline minting of operator capability tokens (issue #29; issue #31 adds
+// the publish action).
 //
-// The Worker never mints: Approval and Rollback capabilities are produced
-// here, on an operator machine, using OPERATOR_CAPABILITY_SECRET (Worker
-// secret — `wrangler secret put OPERATOR_CAPABILITY_SECRET`). The canonical
-// signing form must stay byte-identical to src/lib/operator-capability.ts
-// (pinned by the known-answer vector in tests/v2-operator-capability.test.ts).
+// The Worker never mints: Approval, Publication and Rollback capabilities are
+// produced here, on an operator machine, using OPERATOR_CAPABILITY_SECRET
+// (Worker secret — `wrangler secret put OPERATOR_CAPABILITY_SECRET`). The
+// canonical signing form must stay byte-identical to
+// src/lib/operator-capability.ts (pinned by the known-answer vectors in
+// tests/v2-operator-capability.test.ts).
 //
 // Usage:
 //   node scripts/mint-operator-capability.mjs approve \
+//     --build-id <id> --build-version-id <id> --artifact-manifest-hash <hash> \
+//     [--ttl-minutes 30]
+//   node scripts/mint-operator-capability.mjs publish \
 //     --build-id <id> --build-version-id <id> --artifact-manifest-hash <hash> \
 //     [--ttl-minutes 30]
 //   node scripts/mint-operator-capability.mjs rollback \
@@ -31,6 +36,8 @@ function canonical(payload) {
   switch (payload.action) {
     case "approve":
       return `v2opcap/1:approve:${payload.buildId}:${payload.buildVersionId}:${payload.artifactManifestHash}:${payload.exp}`;
+    case "publish":
+      return `v2opcap/1:publish:${payload.buildId}:${payload.buildVersionId}:${payload.artifactManifestHash}:${payload.exp}`;
     case "rollback":
       return `v2opcap/1:rollback:${payload.siteId}:${payload.fromBuildVersionId}:${payload.exp}`;
   }
@@ -64,16 +71,16 @@ if (!Number.isFinite(ttlMinutes) || ttlMinutes <= 0 || ttlMinutes > MAX_TTL_MINU
 const exp = Date.now() + ttlMinutes * 60_000;
 
 let payload;
-if (action === "approve") {
+if (action === "approve" || action === "publish") {
   const { "build-id": buildId, "build-version-id": buildVersionId, "artifact-manifest-hash": hash } = values;
-  if (!buildId || !buildVersionId || !hash) die("approve requires --build-id, --build-version-id and --artifact-manifest-hash");
+  if (!buildId || !buildVersionId || !hash) die(`${action} requires --build-id, --build-version-id and --artifact-manifest-hash`);
   payload = { action, buildId, buildVersionId, artifactManifestHash: hash, exp };
 } else if (action === "rollback") {
   const { "site-id": siteId, "from-build-version-id": fromBuildVersionId } = values;
   if (!siteId || !fromBuildVersionId) die("rollback requires --site-id and --from-build-version-id");
   payload = { action, siteId, fromBuildVersionId, exp };
 } else {
-  die(`unknown action '${action ?? ""}' (expected 'approve' or 'rollback')`);
+  die(`unknown action '${action ?? ""}' (expected 'approve', 'publish' or 'rollback')`);
 }
 
 const sig = createHmac("sha256", secret).update(canonical(payload)).digest("hex");

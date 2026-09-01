@@ -9,6 +9,7 @@ import { getBuild } from "./routes/v2.build-get";
 import { createRevisionRequest, getRevisionRequest } from "./routes/v2.revision-request";
 import { submitForm } from "./routes/v2.form-submit";
 import { createApproval } from "./routes/v2.approval-create";
+import { createPublication } from "./routes/v2.publication-create";
 import { rollbackSitePublication } from "./routes/v2.rollback";
 
 // V2-only route table. The V1 product routes (Fluent Forms webhook, jobs,
@@ -24,9 +25,11 @@ app.get("/api/v2/builds/:buildId", getBuild);
 app.post("/api/v2/builds/:buildId/revision-requests", createRevisionRequest);
 app.get("/api/v2/builds/:buildId/revision-requests/latest", getRevisionRequest);
 app.post("/api/v2/forms/submit", submitForm);
-// Operator release actions: both gated by offline-minted capability tokens
-// (issue #29); they deny by default when OPERATOR_CAPABILITY_SECRET is unset.
+// Operator release actions: all gated by offline-minted, action-bound
+// capability tokens (issues #29 and #31); they deny by default when
+// OPERATOR_CAPABILITY_SECRET is unset.
 app.post("/api/v2/build-versions/:buildVersionId/approval", createApproval);
+app.post("/api/v2/build-versions/:buildVersionId/publication", createPublication);
 app.post("/api/v2/sites/:siteId/rollback", rollbackSitePublication);
 
 app.post("/api/internal/kie-callback", handleKieCallback);

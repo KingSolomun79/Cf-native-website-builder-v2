@@ -1,16 +1,21 @@
-// Operator capability tokens (issue #29, W4 from the #15 CSO pass).
+// Operator capability tokens (issue #29, W4 from the #15 CSO pass; issue #31
+// adds the publish action).
 //
-// Approval and Rollback are the two human/operational release actions, and
-// their routes must never trust an unauthenticated caller. A capability token
-// is a short-lived HMAC-SHA256-signed credential minted OFFLINE by an operator
-// holding OPERATOR_CAPABILITY_SECRET (scripts/mint-operator-capability.mjs);
-// the Worker only ever verifies. There is deliberately no minting route: no
-// HTTP surface, public or internal, can produce a token, so generated-site
-// code and visitors cannot obtain one.
+// Approval, Publication and Rollback are the three human/operational release
+// actions, and their routes must never trust an unauthenticated caller. A
+// capability token is a short-lived HMAC-SHA256-signed credential minted
+// OFFLINE by an operator holding OPERATOR_CAPABILITY_SECRET
+// (scripts/mint-operator-capability.mjs); the Worker only ever verifies.
+// There is deliberately no minting route: no HTTP surface, public or
+// internal, can produce a token, so generated-site code and visitors cannot
+// obtain one.
 //
 // Bindings follow the #15 CSO prescription — an Approval capability binds
 // buildId + buildVersionId + artifactManifestHash, so a token minted for one
 // Build Version can never approve another or survive manifest drift. A
+// Publication capability (#31) binds the same triple under its own action:
+// it authorizes making exactly that manifest live, never Approval or
+// Rollback, and never a version whose manifest has drifted since minting. A
 // Rollback capability binds siteId + the Build Version that is current at
 // mint time, so a stale token cannot roll a Site back after a newer
 // publication has replaced what the operator reviewed.
@@ -21,7 +26,7 @@
 import type { Env } from "../env.d";
 import { hmacSha256, timingSafeEqualStrings } from "./crypto";
 
-export type OperatorCapabilityAction = "approve" | "rollback";
+export type OperatorCapabilityAction = "approve" | "publish" | "rollback";
 
 /** Hard ceiling on token lifetime at verification time (defense against
  *  long-lived credentials minted with far-future expiry). */
@@ -29,6 +34,15 @@ export const OPERATOR_CAPABILITY_MAX_TTL_MS = 60 * 60_000;
 
 export interface ApproveCapability {
   action: "approve";
+  buildId: string;
+  buildVersionId: string;
+  artifactManifestHash: string;
+  /** Expiry, epoch milliseconds. */
+  exp: number;
+}
+
+export interface PublishCapability {
+  action: "publish";
   buildId: string;
   buildVersionId: string;
   artifactManifestHash: string;
@@ -45,7 +59,7 @@ export interface RollbackCapability {
   exp: number;
 }
 
-export type OperatorCapability = ApproveCapability | RollbackCapability;
+export type OperatorCapability = ApproveCapability | PublishCapability | RollbackCapability;
 
 // Ids, hashes and other bound values are limited to this charset so the ':'
 // delimiter of the canonical string below can never be smuggled into a field.
@@ -55,6 +69,8 @@ function canonical(payload: OperatorCapability): string {
   switch (payload.action) {
     case "approve":
       return `v2opcap/1:approve:${payload.buildId}:${payload.buildVersionId}:${payload.artifactManifestHash}:${payload.exp}`;
+    case "publish":
+      return `v2opcap/1:publish:${payload.buildId}:${payload.buildVersionId}:${payload.artifactManifestHash}:${payload.exp}`;
     case "rollback":
       return `v2opcap/1:rollback:${payload.siteId}:${payload.fromBuildVersionId}:${payload.exp}`;
   }
@@ -89,6 +105,7 @@ export async function signOperatorCapability(
 function boundFieldsValid(payload: OperatorCapability): boolean {
   switch (payload.action) {
     case "approve":
+    case "publish":
       return (
         BOUND_VALUE.test(payload.buildId ?? "") &&
         BOUND_VALUE.test(payload.buildVersionId ?? "") &&
@@ -123,7 +140,7 @@ export async function verifyOperatorCapability(
     return null;
   }
 
-  if (decoded.action !== "approve" && decoded.action !== "rollback") return null;
+  if (decoded.action !== "approve" && decoded.action !== "publish" && decoded.action !== "rollback") return null;
   if (typeof decoded.sig !== "string") return null;
   if (!boundFieldsValid(decoded)) return null;
   if (!Number.isSafeInteger(decoded.exp) || decoded.exp <= now || decoded.exp > now + OPERATOR_CAPABILITY_MAX_TTL_MS) {

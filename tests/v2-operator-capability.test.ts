@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import { env as providedEnv } from "cloudflare:test";
 import { Hono } from "hono";
 import type { Env } from "../src/env.d";
@@ -21,17 +21,20 @@ import {
   OPERATOR_CAPABILITY_MAX_TTL_MS,
 } from "../src/lib/operator-capability";
 import { createApproval } from "../src/routes/v2.approval-create";
+import { createPublication } from "../src/routes/v2.publication-create";
 import { rollbackSitePublication } from "../src/routes/v2.rollback";
 
-// Capability-token gating for the Approval and Rollback operator routes
-// (issue #29 / W4): allowed paths, every denial class, fail-closed behavior,
-// and authorization-before-mutation ordering.
+// Capability-token gating for the Approval, Publication and Rollback operator
+// routes (issue #29 / W4; issue #31 adds Publication): allowed paths, every
+// denial class, fail-closed behavior, and authorization-before-mutation
+// ordering.
 
 const env = providedEnv as unknown as Env;
 
 function operatorApp(): Hono<{ Bindings: Env }> {
   const app = new Hono<{ Bindings: Env }>();
   app.post("/api/v2/build-versions/:buildVersionId/approval", createApproval);
+  app.post("/api/v2/build-versions/:buildVersionId/publication", createPublication);
   app.post("/api/v2/sites/:siteId/rollback", rollbackSitePublication);
   return app;
 }
@@ -173,9 +176,16 @@ async function stateOf(buildId: string): Promise<string | null> {
 // ── token library ───────────────────────────────────────────────────────────
 
 describe("operator capability tokens", () => {
-  it("round-trips signed approve and rollback claims", async () => {
+  it("round-trips signed approve, publish and rollback claims", async () => {
     const approve = {
       action: "approve" as const,
+      buildId: "b1",
+      buildVersionId: "bv1",
+      artifactManifestHash: "hash-1",
+      exp: Date.now() + 10 * 60_000,
+    };
+    const publish = {
+      action: "publish" as const,
       buildId: "b1",
       buildVersionId: "bv1",
       artifactManifestHash: "hash-1",
@@ -188,6 +198,7 @@ describe("operator capability tokens", () => {
       exp: Date.now() + 10 * 60_000,
     };
     expect(await verifyOperatorCapability(env, await signOperatorCapability(env, approve))).toEqual(approve);
+    expect(await verifyOperatorCapability(env, await signOperatorCapability(env, publish))).toEqual(publish);
     expect(await verifyOperatorCapability(env, await signOperatorCapability(env, rollback))).toEqual(rollback);
   });
 
@@ -195,6 +206,13 @@ describe("operator capability tokens", () => {
     const vectorEnv = { ...env, OPERATOR_CAPABILITY_SECRET: "vector-secret" } as Env;
     const approve = await signOperatorCapability(vectorEnv, {
       action: "approve",
+      buildId: "b-1",
+      buildVersionId: "bv-1",
+      artifactManifestHash: "hash-vector",
+      exp: 1780000000000,
+    });
+    const publish = await signOperatorCapability(vectorEnv, {
+      action: "publish",
       buildId: "b-1",
       buildVersionId: "bv-1",
       artifactManifestHash: "hash-vector",
@@ -210,6 +228,9 @@ describe("operator capability tokens", () => {
     // canonical form; pins byte-level agreement between the two signers.
     expect(approve).toBe(
       "eyJhY3Rpb24iOiJhcHByb3ZlIiwiYnVpbGRJZCI6ImItMSIsImJ1aWxkVmVyc2lvbklkIjoiYnYtMSIsImFydGlmYWN0TWFuaWZlc3RIYXNoIjoiaGFzaC12ZWN0b3IiLCJleHAiOjE3ODAwMDAwMDAwMDAsInNpZyI6IjYxOGExY2JkYzM5YmE4OWQxZmJkY2I4ZDZiYjA1MzY0MWE3Y2NkNmE5OWM5MTBmMjk0MzFkYmU3MWI3NzlmZTEifQ"
+    );
+    expect(publish).toBe(
+      "eyJhY3Rpb24iOiJwdWJsaXNoIiwiYnVpbGRJZCI6ImItMSIsImJ1aWxkVmVyc2lvbklkIjoiYnYtMSIsImFydGlmYWN0TWFuaWZlc3RIYXNoIjoiaGFzaC12ZWN0b3IiLCJleHAiOjE3ODAwMDAwMDAwMDAsInNpZyI6IjVkOTZlYjIwYzVjMTk1Y2NiYmE4NDA0MzlhN2FkZjIwM2Q3ZDJmYzVkZWE0MGE0NzM5ZGMzNGZmNzAzYTkyY2EifQ"
     );
     expect(rollback).toBe(
       "eyJhY3Rpb24iOiJyb2xsYmFjayIsInNpdGVJZCI6InNpdGUtMSIsImZyb21CdWlsZFZlcnNpb25JZCI6ImJ2LTkiLCJleHAiOjE3ODAwMDAwNjAwMDAsInNpZyI6Ijc5ODA0YmFhNzNmZDZmZTRlNTZhNzkwZDM5M2RiOTVlZWViZmYwMWMzZDYyMWM0NzQ4ZWRjYmEzMjgwNWZhNWUifQ"
@@ -534,5 +555,332 @@ describe("rollback operator route", () => {
       rollbackPublication(env, { siteId: site.siteId, expectedCurrentBuildVersionId: "not-current-anymore" })
     ).rejects.toMatchObject({ code: "NO_ROLLBACK_VERSION" });
     expect(await getPublicationState(env, site.siteId)).toEqual(before);
+  });
+});
+
+// ── publication operator route ──────────────────────────────────────────────
+
+async function publishToken(input: {
+  buildId: string;
+  buildVersionId: string;
+  artifactManifestHash: string;
+  exp?: number;
+  secret?: string;
+}): Promise<string> {
+  return signOperatorCapability(
+    { ...env, OPERATOR_CAPABILITY_SECRET: input.secret ?? env.OPERATOR_CAPABILITY_SECRET } as Env,
+    {
+      action: "publish",
+      buildId: input.buildId,
+      buildVersionId: input.buildVersionId,
+      artifactManifestHash: input.artifactManifestHash,
+      exp: input.exp ?? Date.now() + 30 * 60_000,
+    }
+  );
+}
+
+// Cloudflare API stub so the route's PRODUCTION default deployer (assets-only
+// path through src/lib/publish.ts) runs for real inside success tests — the
+// same technique as tests/v2-static-deploy.test.ts.
+function stubCloudflareApi(): { uploadSessionBodies: string[] } {
+  const uploadSessionBodies: string[] = [];
+  const fetchStub = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+    const method = init?.method ?? "GET";
+    const body = typeof init?.body === "string" ? init.body : undefined;
+
+    if (url.includes("/assets-upload-session")) {
+      if (body) uploadSessionBodies.push(body);
+      return Response.json({ success: true, result: { jwt: "upload-complete-jwt", buckets: [] } });
+    }
+    if (url.endsWith("/workers/workers") && method === "POST") {
+      return Response.json({ success: true, result: { id: "worker-1" } });
+    }
+    if (url.includes("/workers/workers/worker-1/versions")) {
+      return Response.json({ success: true, result: { id: "version-1" } });
+    }
+    if (url.includes("/deployments")) {
+      return Response.json({ success: true });
+    }
+    if (url.includes("/workers/subdomain")) {
+      if (method === "POST") return Response.json({ success: true });
+      return Response.json({ success: true, result: { subdomain: "wazibizwebsites" } });
+    }
+    if (url.includes(".workers.dev/")) {
+      return new Response("ok", { status: 200 });
+    }
+    return Response.json({ success: false, errors: [{ code: 0, message: `unexpected ${method} ${url}` }] });
+  });
+  vi.stubGlobal("fetch", fetchStub);
+  return { uploadSessionBodies };
+}
+
+async function publicationCount(buildVersionId: string): Promise<number> {
+  const row = await env.DB.prepare("SELECT COUNT(*) AS n FROM publications WHERE build_version_id = ?")
+    .bind(buildVersionId)
+    .first<{ n: number }>();
+  return row!.n;
+}
+
+describe("publication operator route", () => {
+  beforeEach(() => {
+    stubCloudflareApi();
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("publishes the exact approved Build Version with a sufficient capability and no regeneration", async () => {
+    const app = operatorApp();
+    const context = await newSite();
+    await releaseReadyVersion({ ...context, buildVersionNumber: 1, hash: "hash-pub-1" });
+    await approveBuildVersion(env, context);
+    const versionsBefore = await env.DB.prepare("SELECT COUNT(*) AS n FROM build_versions WHERE build_id = ?")
+      .bind(context.buildId)
+      .first<{ n: number }>();
+
+    const token = await publishToken({ ...context, artifactManifestHash: "hash-pub-1" });
+    const response = await post(app, `/api/v2/build-versions/${context.buildVersionId}/publication`, token);
+    expect(response.status).toBe(201);
+    const body = (await response.json()) as {
+      publicationId: string;
+      artifactManifestHash: string;
+      workerName: string;
+      publishedUrl: string;
+      alreadyPublished: boolean;
+    };
+    expect(body.artifactManifestHash).toBe("hash-pub-1");
+    expect(body.alreadyPublished).toBe(false);
+    expect(body.workerName).toContain("-v1");
+    expect(body.publishedUrl).toContain(".workers.dev");
+
+    // Exact approved artifact deployed: the upload session manifest carries
+    // the exact immutable-storage bytes of the approved version.
+    const view = await getPublicationState(env, context.siteId);
+    expect(view.current!.buildVersionId).toBe(context.buildVersionId);
+    const row = await env.DB.prepare("SELECT artifact_manifest_hash FROM publications WHERE id = ?")
+      .bind(body.publicationId)
+      .first<{ artifact_manifest_hash: string }>();
+    expect(row!.artifact_manifest_hash).toBe("hash-pub-1");
+
+    // No regeneration: the Build still has exactly the same Build Versions.
+    const versionsAfter = await env.DB.prepare("SELECT COUNT(*) AS n FROM build_versions WHERE build_id = ?")
+      .bind(context.buildId)
+      .first<{ n: number }>();
+    expect(versionsAfter!.n).toBe(versionsBefore!.n);
+  });
+
+  it("denies missing, invalid, expired and wrong-secret tokens before any mutation", async () => {
+    const app = operatorApp();
+    const context = await newSite();
+    await releaseReadyVersion({ ...context, buildVersionNumber: 1, hash: "hash-pub-2" });
+    await approveBuildVersion(env, context);
+
+    const cases: Array<[string, string | null]> = [
+      ["missing Authorization", null],
+      ["garbage token", "garbage"],
+      ["expired token", await publishToken({ ...context, artifactManifestHash: "hash-pub-2", exp: Date.now() - 1_000 })],
+      ["wrong-secret token", await publishToken({ ...context, artifactManifestHash: "hash-pub-2", secret: "attacker-secret" })],
+    ];
+    for (const [label, token] of cases) {
+      const response = await post(app, `/api/v2/build-versions/${context.buildVersionId}/publication`, token);
+      expect(response.status, label).toBe(401);
+      expect(((await response.json()) as { error: { code: string } }).error.code).toBe("CAPABILITY_REQUIRED");
+    }
+    expect(await publicationCount(context.buildVersionId)).toBe(0);
+    expect(await getPublicationState(env, context.siteId)).toEqual({ current: null, rollback: null });
+  });
+
+  it("denies wrong actions and capabilities bound to another Build, Version or manifest", async () => {
+    const app = operatorApp();
+    const context = await newSite();
+    await releaseReadyVersion({ ...context, buildVersionNumber: 1, hash: "hash-pub-3" });
+    await approveBuildVersion(env, context);
+    // A real second Build Version of the same Build, Release Ready.
+    const next = await createNextBuildVersion(env, { buildId: context.buildId, cause: "automated_repair" });
+    await releaseReadyVersion({
+      siteGenerationId: context.siteGenerationId,
+      buildId: context.buildId,
+      buildVersionId: next.buildVersionId,
+      buildVersionNumber: next.buildVersionNumber,
+      hash: "hash-pub-3-next",
+    });
+
+    const approveCapability = await approveToken({ ...context, artifactManifestHash: "hash-pub-3" });
+    const rollbackCapability = await rollbackToken({ siteId: context.siteId, fromBuildVersionId: context.buildVersionId });
+    const wrongBuild = await publishToken({ ...context, buildId: "not-this-build", artifactManifestHash: "hash-pub-3" });
+    const wrongVersion = await publishToken({
+      buildId: context.buildId,
+      buildVersionId: next.buildVersionId,
+      artifactManifestHash: "hash-pub-3-next",
+    });
+    const wrongHash = await publishToken({ ...context, artifactManifestHash: "hash-not-current" });
+
+    for (const [label, token] of [
+      ["approve capability on publication route", approveCapability],
+      ["rollback capability on publication route", rollbackCapability],
+      ["capability bound to a different Build", wrongBuild],
+      ["capability minted for a different Build Version", wrongVersion],
+      ["capability bound to a stale manifest hash", wrongHash],
+    ] as Array<[string, string]>) {
+      const response = await post(app, `/api/v2/build-versions/${context.buildVersionId}/publication`, token);
+      expect(response.status, label).toBe(403);
+      expect(((await response.json()) as { error: { code: string } }).error.code).toBe("CAPABILITY_INSUFFICIENT");
+    }
+    expect(await publicationCount(context.buildVersionId)).toBe(0);
+  });
+
+  it("denies publication when the manifest drifted after minting", async () => {
+    const app = operatorApp();
+    const context = await newSite();
+    await releaseReadyVersion({ ...context, buildVersionNumber: 1, hash: "hash-pub-4" });
+    await approveBuildVersion(env, context);
+    const token = await publishToken({ ...context, artifactManifestHash: "hash-pub-4" });
+
+    // Simulate manifest drift on the immutable store: the D1 artifact index
+    // is fully immutable (no UPDATE, no DELETE), so tamper at the R2 layer —
+    // overwrite the manifest object at its existing key with content whose
+    // hash differs. The token no longer describes the state the operator
+    // reviewed and must be denied.
+    const artifactRow = await env.DB.prepare(
+      "SELECT artifact_r2_key FROM build_stage_artifacts WHERE build_version_id = ? AND kind = 'assembled_manifest'"
+    )
+      .bind(context.buildVersionId)
+      .first<{ artifact_r2_key: string }>();
+    await putObject(
+      env,
+      artifactRow!.artifact_r2_key,
+      JSON.stringify({ artifactManifestHash: "hash-drifted", files: [{ path: "index.html", sha256: "a", bytes: 10 }] })
+    );
+
+    const response = await post(app, `/api/v2/build-versions/${context.buildVersionId}/publication`, token);
+    expect(response.status).toBe(403);
+    expect(((await response.json()) as { error: { code: string } }).error.code).toBe("CAPABILITY_INSUFFICIENT");
+    expect(await publicationCount(context.buildVersionId)).toBe(0);
+  });
+
+  it("keeps domain ordering after authorization: unapproved is 409, missing candidate is 500, unknown version is 404", async () => {
+    const app = operatorApp();
+    const context = await newSite();
+    await releaseReadyVersion({ ...context, buildVersionNumber: 1, hash: "hash-pub-5" });
+
+    // Valid capability, but the domain still requires Approval first.
+    const unapproved = await post(
+      app,
+      `/api/v2/build-versions/${context.buildVersionId}/publication`,
+      await publishToken({ ...context, artifactManifestHash: "hash-pub-5" })
+    );
+    expect(unapproved.status).toBe(409);
+    expect(((await unapproved.json()) as { error: { code: string } }).error.code).toBe("NOT_APPROVED");
+
+    // Approved, but an assembled candidate file is missing from immutable
+    // storage: domain-invalid publication fails without publishing anything
+    // else (PUBLISH_FAILED, failed attempt recorded).
+    await approveBuildVersion(env, context);
+    const missingFile = await newSite();
+    await storeBuildStageArtifact(env, {
+      buildId: missingFile.buildId,
+      buildVersionId: missingFile.buildVersionId,
+      siteGenerationId: missingFile.siteGenerationId,
+      kind: "assembled_manifest",
+      schemaVersion: "build-manifest/1",
+      value: {
+        schemaVersion: "build-manifest/1",
+        buildId: missingFile.buildId,
+        buildVersionId: missingFile.buildVersionId,
+        versionNumber: 1,
+        artifactManifestHash: "hash-pub-missing",
+        files: [{ path: "index.html", sha256: "a", bytes: 10 }],
+        routingNotes: [],
+      },
+    });
+    await assignReleaseReady(env, {
+      buildId: missingFile.buildId,
+      buildVersionId: missingFile.buildVersionId,
+      siteGenerationId: missingFile.siteGenerationId,
+      qaA: PASS_A,
+      qaB: PASS_B,
+      qaBuildVersionId: missingFile.buildVersionId,
+    });
+    await approveBuildVersion(env, missingFile);
+    const failed = await post(
+      app,
+      `/api/v2/build-versions/${missingFile.buildVersionId}/publication`,
+      await publishToken({ ...missingFile, artifactManifestHash: "hash-pub-missing" })
+    );
+    expect(failed.status).toBe(500);
+    expect(((await failed.json()) as { error: { code: string } }).error.code).toBe("PUBLISH_FAILED");
+
+    const missing = await post(
+      app,
+      "/api/v2/build-versions/does-not-exist/publication",
+      await publishToken({ buildId: "nope", buildVersionId: "does-not-exist", artifactManifestHash: "nope" })
+    );
+    expect(missing.status).toBe(404);
+  });
+
+  it("re-publishes the same exact version idempotently, and only that version", async () => {
+    const app = operatorApp();
+    const context = await newSite();
+    await releaseReadyVersion({ ...context, buildVersionNumber: 1, hash: "hash-pub-6" });
+    await approveBuildVersion(env, context);
+
+    const first = await post(
+      app,
+      `/api/v2/build-versions/${context.buildVersionId}/publication`,
+      await publishToken({ ...context, artifactManifestHash: "hash-pub-6" })
+    );
+    expect(first.status).toBe(201);
+    const firstBody = (await first.json()) as { publicationId: string };
+
+    // Idempotent retry for the SAME permitted exact version: a read, not a
+    // new publication.
+    const again = await post(
+      app,
+      `/api/v2/build-versions/${context.buildVersionId}/publication`,
+      await publishToken({ ...context, artifactManifestHash: "hash-pub-6" })
+    );
+    expect(again.status).toBe(200);
+    const againBody = (await again.json()) as { publicationId: string; alreadyPublished: boolean };
+    expect(againBody.alreadyPublished).toBe(true);
+    expect(againBody.publicationId).toBe(firstBody.publicationId);
+    expect(await publicationCount(context.buildVersionId)).toBe(1);
+  });
+
+  it("denies by default when OPERATOR_CAPABILITY_SECRET is not configured", async () => {
+    const app = operatorApp();
+    const context = await newSite();
+    await releaseReadyVersion({ ...context, buildVersionNumber: 1, hash: "hash-pub-7" });
+    await approveBuildVersion(env, context);
+    const token = await publishToken({ ...context, artifactManifestHash: "hash-pub-7" });
+
+    const response = await app.request(
+      `https://test.example.com/api/v2/build-versions/${context.buildVersionId}/publication`,
+      { method: "POST", headers: { Authorization: `Bearer ${token}` } },
+      { ...env, OPERATOR_CAPABILITY_SECRET: undefined }
+    );
+    expect(response.status).toBe(401);
+    expect(await publicationCount(context.buildVersionId)).toBe(0);
+  });
+
+  it("refuses at the mutation boundary when the manifest changes after authorization (TOCTOU)", async () => {
+    const context = await newSite();
+    await releaseReadyVersion({ ...context, buildVersionNumber: 1, hash: "hash-pub-8" });
+    await approveBuildVersion(env, context);
+    const before = await getPublicationState(env, context.siteId);
+
+    // The authorized hash no longer matches the version's current manifest
+    // at the persistence boundary: nothing is deployed or recorded.
+    await expect(
+      publishApprovedBuildVersion(env, {
+        ...context,
+        buildVersionNumber: 1,
+        deployer: stubDeployer,
+        expectedArtifactManifestHash: "hash-someone-authorized-earlier",
+      })
+    ).rejects.toMatchObject({ code: "APPROVAL_HASH_MISMATCH" });
+    expect(await getPublicationState(env, context.siteId)).toEqual(before);
+    expect(await publicationCount(context.buildVersionId)).toBe(0);
   });
 });
