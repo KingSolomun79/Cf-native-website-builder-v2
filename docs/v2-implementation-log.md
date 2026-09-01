@@ -47,4 +47,5 @@ after the CSO remediation at 428/428.
 | #19 Benchmark Site 2 (hospitality/travel) | `b5f09c4` | 460 pass | pass | OK FOR CURRENT SCOPE (`docs/security/2026-09-01-v2-issue-19-cso.md`) |
 | #20 Benchmark Site 3 (corporate/professional) | `ccdfb0b` | 463 pass | pass | OK FOR CURRENT SCOPE (`docs/security/2026-09-01-v2-issue-20-cso.md`) |
 | #21 Benchmark Site 4 (trades/local service) | `a52b883` | 466 pass | pass | OK FOR CURRENT SCOPE (`docs/security/2026-09-01-v2-issue-21-cso.md`) |
-| #22 Benchmark Site 5 (responsive/motion) | (this commit) | 469 pass | pass | OK FOR CURRENT SCOPE (`docs/security/2026-09-01-v2-issue-22-cso.md`) |
+| #22 Benchmark Site 5 (responsive/motion) | `66ea5f9` | 469 pass | pass | OK FOR CURRENT SCOPE (`docs/security/2026-09-01-v2-issue-22-cso.md`) |
+| #23 REFERENCE_BOUND proof gate | (this commit) | 474 pass | pass | OK WITH WATCH ITEMS (`docs/security/2026-09-01-v2-issue-23-cso.md`) |
