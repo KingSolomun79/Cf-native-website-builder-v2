@@ -229,13 +229,9 @@ export async function uploadAssets(
   return completionJwt;
 }
 
-export async function createWorker(
-  env: Env,
-  workerName: string,
-  uploadJwt: string,
-  contactEmail: string
-): Promise<void> {
-  const workerScript = generateContactWorkerScript(contactEmail);
+// Creates (or resolves) the Worker resource for a name and returns its id.
+// Shared by the V1 contact-worker path and the V2 static-assets path.
+async function ensureWorkerId(env: Env, workerName: string): Promise<string> {
   const createWorkerResponse = await cfApiFetch(
     `https://api.cloudflare.com/client/v4/accounts/${env.CF_ACCOUNT_ID}/workers/workers`,
     {
@@ -275,52 +271,12 @@ export async function createWorker(
     throw new Error(`Worker resource creation failed: ${JSON.stringify(createWorkerResult.errors)}`);
   }
 
-  const createVersionResponse = await cfApiFetch(
-    `https://api.cloudflare.com/client/v4/accounts/${env.CF_ACCOUNT_ID}/workers/workers/${workerId}/versions`,
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        main_module: "worker.js",
-        compatibility_date: "2026-04-22",
-        assets: {
-          jwt: uploadJwt,
-          config: { run_worker_first: ["/api/*"] },
-        },
-        bindings: [
-          { name: "ASSETS", type: "assets" },
-          { name: "SMTP2GO_API_KEY", type: "secret_text", text: env.SMTP2GO_API_KEY },
-        ],
-        modules: [
-          {
-            name: "worker.js",
-            content_type: "application/javascript+module",
-            content_base64: toBase64(new TextEncoder().encode(workerScript)),
-          },
-        ],
-      }),
-    },
-    env,
-    "workers/workers/versions"
-  );
+  return workerId!;
+}
 
-  let createVersionResult: {
-    success: boolean;
-    errors?: Array<{ code: number; message: string }>;
-    result?: { id?: string };
-  };
-  try {
-    createVersionResult = (await createVersionResponse.json()) as typeof createVersionResult;
-  } catch {
-    const text = await createVersionResponse.text();
-    throw new Error(`Worker version creation returned non-JSON: ${text.slice(0, 200)}`);
-  }
-
-  const versionId = createVersionResult.result?.id;
-  if (!createVersionResult.success || !versionId) {
-    throw new Error(`Worker version creation failed: ${JSON.stringify(createVersionResult.errors)}`);
-  }
-
+// Deploys one version at 100%, enables the workers.dev subdomain and waits
+// for readiness. Shared by both deploy paths.
+async function deployVersionAndEnable(env: Env, workerName: string, versionId: string): Promise<void> {
   const deployResponse = await cfApiFetch(
     `https://api.cloudflare.com/client/v4/accounts/${env.CF_ACCOUNT_ID}/workers/scripts/${workerName}/deployments`,
     {
@@ -373,6 +329,117 @@ export async function createWorker(
       // not ready yet
     }
   }
+}
+
+export async function createWorker(
+  env: Env,
+  workerName: string,
+  uploadJwt: string,
+  contactEmail: string
+): Promise<void> {
+  const workerScript = generateContactWorkerScript(contactEmail);
+  const workerId = await ensureWorkerId(env, workerName);
+
+  const createVersionResponse = await cfApiFetch(
+    `https://api.cloudflare.com/client/v4/accounts/${env.CF_ACCOUNT_ID}/workers/workers/${workerId}/versions`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        main_module: "worker.js",
+        compatibility_date: "2026-04-22",
+        assets: {
+          jwt: uploadJwt,
+          config: { run_worker_first: ["/api/*"] },
+        },
+        bindings: [
+          { name: "ASSETS", type: "assets" },
+          { name: "SMTP2GO_API_KEY", type: "secret_text", text: env.SMTP2GO_API_KEY },
+        ],
+        modules: [
+          {
+            name: "worker.js",
+            content_type: "application/javascript+module",
+            content_base64: toBase64(new TextEncoder().encode(workerScript)),
+          },
+        ],
+      }),
+    },
+    env,
+    "workers/workers/versions"
+  );
+
+  let createVersionResult: {
+    success: boolean;
+    errors?: Array<{ code: number; message: string }>;
+    result?: { id?: string };
+  };
+  try {
+    createVersionResult = (await createVersionResponse.json()) as typeof createVersionResult;
+  } catch {
+    const text = await createVersionResponse.text();
+    throw new Error(`Worker version creation returned non-JSON: ${text.slice(0, 200)}`);
+  }
+
+  const versionId = createVersionResult.result?.id;
+  if (!createVersionResult.success || !versionId) {
+    throw new Error(`Worker version creation failed: ${JSON.stringify(createVersionResult.errors)}`);
+  }
+
+  await deployVersionAndEnable(env, workerName, versionId);
+}
+
+// V2 static-assets deploy path (issues #12+, CSO H1 remediation).
+//
+// Deploys a Worker whose version carries ONLY the uploaded static assets:
+// no main module, no injected contact-worker script and — critically — no
+// SMTP2GO_API_KEY (or any other) secret binding. Generated Sites are static
+// and use the central WAZIBIZ Form Service; no per-site mail Worker logic
+// may ship (PRD section 35).
+export async function createStaticAssetsWorker(
+  env: Env,
+  workerName: string,
+  uploadJwt: string
+): Promise<void> {
+  const workerId = await ensureWorkerId(env, workerName);
+
+  const createVersionResponse = await cfApiFetch(
+    `https://api.cloudflare.com/client/v4/accounts/${env.CF_ACCOUNT_ID}/workers/workers/${workerId}/versions`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        // Assets-only: Workers with static assets need no script; requests
+        // are served straight from the asset manifest. No bindings, no
+        // modules, no secrets.
+        assets: {
+          jwt: uploadJwt,
+          config: {},
+        },
+      }),
+    },
+    env,
+    "workers/workers/versions"
+  );
+
+  let createVersionResult: {
+    success: boolean;
+    errors?: Array<{ code: number; message: string }>;
+    result?: { id?: string };
+  };
+  try {
+    createVersionResult = (await createVersionResponse.json()) as typeof createVersionResult;
+  } catch {
+    const text = await createVersionResponse.text();
+    throw new Error(`Worker version creation returned non-JSON: ${text.slice(0, 200)}`);
+  }
+
+  const versionId = createVersionResult.result?.id;
+  if (!createVersionResult.success || !versionId) {
+    throw new Error(`Worker version creation failed: ${JSON.stringify(createVersionResult.errors)}`);
+  }
+
+  await deployVersionAndEnable(env, workerName, versionId);
 }
 
 export async function getWorkerPreviewUrl(env: Env, workerName: string): Promise<string> {
