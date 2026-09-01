@@ -55,6 +55,7 @@ after the CSO remediation at 428/428.
 | #29 Capability-token gating of Approval/Rollback operator routes (W4) | `66f5019` | 182 pass | pass | OK WITH WATCH ITEMS (`docs/security/2026-09-01-v2-issue-29-cso.md`; F1-F4 fixed in-diff; W-29a = set `OPERATOR_CAPABILITY_SECRET` in production) |
 | #28 WAZIBIZ Form Service email transport (H2) | `bde4be5` | 195 pass | pass | OK WITH WATCH ITEMS (`docs/security/2026-09-01-v2-issue-28-cso.md`; F1 caught live + fixed in-diff; W-28d = production token + `SMTP2GO_API_KEY` set at the #27 deploy; W-28f = real verified Sender Identity) |
 | #28 follow-up: native Cloudflare Email Service transport | `f8e6afb` | 186 pass | pass | OK FOR CURRENT SCOPE (`docs/security/2026-09-01-v2-issue-28-email-service-cso.md`; interim SMTP2Go/router architecture fully removed; W-28h = dashboard domain onboarding before production delivery; W-28g = tighten binding sender allowlist after onboarding) |
+| #31 Capability-gated Publication operator route | `fc1a75c` | 194 pass | pass | OK FOR CURRENT SCOPE (`docs/security/2026-09-01-v2-issue-31-cso.md`; W-29b closed; publish-side TOCTOU enforced at the mutation boundary) |
 
 | QA sweep (#5-#16, #24, #25) | `7ff3433` | 166 pass | pass | 4 findings (1 Medium criterion gap, 2 Medium, 1 Low) — `docs/qa/2026-09-01-v2-qa-sweep.md` |
 | QA remediation (F1-F3) | (this commit) | 166 pass | pass | OK FOR CURRENT SCOPE (`docs/security/2026-09-01-v2-qa-remediation-cso.md`); F4 deferred |
@@ -108,3 +109,21 @@ onboarding (Compute > Email Service > Email Sending), which replaces all
 email-secret steps in the #27 runbook. Final state: 28 test files / 186
 tests, typecheck clean, `wrangler deploy --dry-run` passes for production
 and staging.
+
+Issue #31 then exposed the Publication domain service through its own
+operator surface, `POST /api/v2/build-versions/:buildVersionId/publication`,
+closing W-29b: a publish capability is its own action-bound token
+(buildId + buildVersionId + artifactManifestHash + expiry) under the #29
+HMAC scheme, so Approval and Rollback capabilities are structurally
+insufficient and vice versa. Denial order is fixed (401 absent/invalid/
+expired, 403 wrong action/binding, then the domain call), the authorized
+manifest hash is re-enforced at the persistence mutation boundary
+(`expectedArtifactManifestHash` — the publish-side analogue of rollback's
+conditional state flip), the mint script gained the `publish` action
+(byte-pinned by a new known-answer vector), and route success tests
+exercise the real production assets-only deployer against a stubbed
+Cloudflare API. Publication semantics are unchanged: exact approved
+version, exact manifest hash, no regeneration, idempotent retry only for
+the same permitted version. Final state: 28 test files / 194 tests,
+typecheck clean, `wrangler deploy --dry-run` passes for production and
+staging.
