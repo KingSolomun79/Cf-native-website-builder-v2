@@ -35,7 +35,7 @@ Per-issue test counts above are the cumulative suite size at the time the
 issue's implementation was verified; the tranche was verified end-to-end
 after the CSO remediation at 428/428.
 
-## Sequential issues #14-#26
+## Sequential issues #14-#26, #29
 
 | Issue | Commit | Tests | Typecheck | CSO |
 |---|---|---|---|---|
@@ -52,6 +52,7 @@ after the CSO remediation at 428/428.
 | #24 ORIGINAL_DESIGN site generation | `d7d98b8` | 478 pass | pass | OK WITH WATCH ITEMS (`docs/security/2026-09-01-v2-issue-24-cso.md`) |
 | #25 Contract away V1 architecture | `75cd12d` | 149 pass (V1 suites removed with their modules) | pass | OK WITH WATCH ITEMS (`docs/security/2026-09-01-v2-issue-25-cso.md`; W14 = operational secret deletion) |
 | #26 Final integration + release verification | `9812017` | 153 pass | pass | OK FOR CURRENT SCOPE (`docs/security/2026-09-01-v2-issue-26-cso.md`; W17 fixed in-diff) |
+| #29 Capability-token gating of Approval/Rollback operator routes (W4) | `(recorded below)` | 182 pass | pass | OK WITH WATCH ITEMS (`docs/security/2026-09-01-v2-issue-29-cso.md`; F1-F4 fixed in-diff; W-29a = set `OPERATOR_CAPABILITY_SECRET` in production) |
 
 | QA sweep (#5-#16, #24, #25) | `7ff3433` | 166 pass | pass | 4 findings (1 Medium criterion gap, 2 Medium, 1 Low) — `docs/qa/2026-09-01-v2-qa-sweep.md` |
 | QA remediation (F1-F3) | (this commit) | 166 pass | pass | OK FOR CURRENT SCOPE (`docs/security/2026-09-01-v2-qa-remediation-cso.md`); F4 deferred |
@@ -66,3 +67,9 @@ state: 26 test files / 153 tests, typecheck clean, `wrangler deploy
 --dry-run` passes, working tree clean. Requirement-to-evidence map:
 `docs/v2-verification-evidence.md`. Release follow-ups: W14 secret
 deletions, H2 transport wiring, W4 gating before operator routes.
+
+Issue #29 (post-verification follow-up W4) later added the capability-token
+gated Approval and Rollback operator routes on the same gates: 28 test
+files / 182 tests, typecheck clean, `wrangler deploy --dry-run` passes.
+W4 is closed; remaining release follow-ups: W14 secret deletions, H2
+transport wiring, W-29a production secret set.

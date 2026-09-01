@@ -27,6 +27,10 @@ function timingSafeEqual(a: Uint8Array, b: Uint8Array): boolean {
   return result === 0;
 }
 
+export function timingSafeEqualStrings(a: string, b: string): boolean {
+  return timingSafeEqual(new TextEncoder().encode(a), new TextEncoder().encode(b));
+}
+
 export async function verifyWebhookSignature(
   secret: string,
   body: string,

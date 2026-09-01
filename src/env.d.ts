@@ -47,4 +47,9 @@ export interface Env {
   TURNSTILE_SECRET_KEY?: string;
   // Days a superseded Published Version stays available as Rollback Version.
   ROLLBACK_WINDOW_DAYS?: string;
+  // HMAC secret for operator capability tokens on the Approval/Rollback
+  // routes (Worker secret, never a var). Optional at the type level so the
+  // Worker still boots without it: verification then fails closed and every
+  // operator route denies (issue #29). Minting happens offline only.
+  OPERATOR_CAPABILITY_SECRET?: string;
 }

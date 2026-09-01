@@ -346,7 +346,10 @@ export interface RollbackResult {
   restoredUrl: string;
 }
 
-export async function rollbackPublication(env: Env, input: { siteId: string; now?: Date }): Promise<RollbackResult> {
+export async function rollbackPublication(
+  env: Env,
+  input: { siteId: string; now?: Date; expectedCurrentBuildVersionId?: string }
+): Promise<RollbackResult> {
   const state = await env.DB.prepare("SELECT * FROM site_published_state WHERE site_id = ?")
     .bind(input.siteId)
     .first<{
@@ -377,15 +380,30 @@ export async function rollbackPublication(env: Env, input: { siteId: string; now
   // Restore the exact prior version: no new Build, no new Build Version, no
   // new Approval, no regeneration. Publication history (rows) is preserved;
   // mutable Site Configuration is deliberately untouched.
-  await env.DB.prepare(
+  //
+  // When the caller authorized the rollback against a specific current
+  // version (capability-token routes), the state flip is conditional on that
+  // version still being current, so a publication that lands between
+  // authorization and this write cannot redirect the rollback.
+  const updated = await env.DB.prepare(
     `UPDATE site_published_state SET
        current_publication_id = ?, current_build_version_id = ?,
        rollback_publication_id = NULL, rollback_build_version_id = NULL, rollback_expires_at = NULL,
        updated_at = ?
-     WHERE site_id = ?`
+     WHERE site_id = ?${input.expectedCurrentBuildVersionId ? " AND current_build_version_id = ?" : ""}`
   )
-    .bind(restored.id, restored.build_version_id, now, input.siteId)
+    .bind(
+      ...(input.expectedCurrentBuildVersionId
+        ? [restored.id, restored.build_version_id, now, input.siteId, input.expectedCurrentBuildVersionId]
+        : [restored.id, restored.build_version_id, now, input.siteId])
+    )
     .run();
+  if (input.expectedCurrentBuildVersionId && (updated.meta.changes ?? 0) === 0) {
+    throw new PublicationError(
+      "NO_ROLLBACK_VERSION",
+      "Published state changed after authorization; review current state and use a fresh capability"
+    );
+  }
 
   // Deployment roles follow the restored truth.
   await env.DB.prepare(
