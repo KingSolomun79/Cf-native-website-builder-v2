@@ -20,7 +20,7 @@ findings. CSO reports live in `docs/security/`.
 | #11 WAZIBIZ Form Service | `712b1ad` | 408 pass | pass | tranche CSO + H2 remediation |
 | #12 Technical Preflight + Preview deployment | `c89a91d` | 414 pass | pass | tranche CSO + H1 remediation |
 | #13 Standardized visual evidence + release QA | `d32b7ab` | 423 pass | pass | tranche CSO |
-| CSO tranche sign-off + H1/H2 remediation regression tests | this commit | 428 pass | pass | **SECURITY OK FOR CURRENT SCOPE** |
+| CSO tranche sign-off + H1/H2 remediation regression tests | `a40a145` | 428 pass | pass | **SECURITY OK FOR CURRENT SCOPE** |
 
 Tranche CSO report: `docs/security/2026-09-01-v2-issues-3-13-cso.md`.
 Findings H1 (V1 contact-worker/SMTP2GO injection in the preview deployer)
@@ -34,3 +34,9 @@ working tree clean.
 Per-issue test counts above are the cumulative suite size at the time the
 issue's implementation was verified; the tranche was verified end-to-end
 after the CSO remediation at 428/428.
+
+## Sequential issues #14-#26
+
+| Issue | Commit | Tests | Typecheck | CSO |
+|---|---|---|---|---|
+| #14 Bounded Automated Repair | (this commit) | 436 pass | pass | OK FOR CURRENT SCOPE (`docs/security/2026-09-01-v2-issue-14-cso.md`, watch items W1-W3, none blocking) |

@@ -75,6 +75,7 @@ export default defineWorkersConfig({
       "tests/v2-assembly-preview.test.ts",
       "tests/v2-release-qa.test.ts",
       "tests/v2-static-deploy.test.ts",
+      "tests/v2-automated-repair.test.ts",
       "tests/blueprint.test.ts",
       "tests/blueprint-v2.test.ts",
       "tests/vision-input.test.ts",
