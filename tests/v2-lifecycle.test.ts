@@ -101,7 +101,7 @@ async function runWebsiteBuildWorkflow(env: Env, siteGenerationId: string): Prom
   const workflow = Object.assign(Object.create(WebsiteBuildWorkflow.prototype), { env }) as WebsiteBuildWorkflow;
   workflow.pipelineDeps = createPipelineScripts();
   const step = {
-    do: async (_name: string, fn: () => Promise<unknown>) => await fn(),
+    do: async (_name: string, a: unknown, b?: unknown) => await (typeof b === "function" ? (b as () => Promise<unknown>) : (a as () => Promise<unknown>))(),
   } as unknown as WorkflowStep;
   const event = { payload: { siteGenerationId } } as unknown as WorkflowEvent<{ siteGenerationId: string }>;
   return (await workflow.run(event, step)) as { buildId: string; buildVersionId: string };

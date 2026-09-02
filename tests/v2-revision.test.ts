@@ -81,7 +81,7 @@ async function createInitialBuildViaWorkflow(env: Env): Promise<{
 }> {
   const submission = await startSiteGeneration(env, { payload: submissionPayload() });
   const workflow = Object.assign(Object.create(WebsiteBuildWorkflow.prototype), { env }) as WebsiteBuildWorkflow;
-  const step = { do: async (_name: string, fn: () => Promise<unknown>) => await fn() } as unknown as WorkflowStep;
+  const step = { do: async (_name: string, a: unknown, b?: unknown) => await (typeof b === "function" ? (b as () => Promise<unknown>) : (a as () => Promise<unknown>))() } as unknown as WorkflowStep;
   const event = { payload: { siteGenerationId: submission.siteGenerationId } } as unknown as WorkflowEvent<{
     siteGenerationId: string;
   }>;
