@@ -21,10 +21,10 @@ import type {
 export const KIE_TASK_COST_USD_DEFAULT = 0.05;
 const POLL_INTERVAL_MS = 5000;
 const POLL_TIMEOUT_MS_DEFAULT = 150_000;
-// KIE rejects prompts beyond its text-length limit (live evidence, issue
-// #30: code 500 "The text length cannot exceed the maximum limit"). Cap the
-// assembled prompt well under it.
-const MAX_PROMPT_CHARS = 1400;
+// KIE z-image documents a 1000-character prompt maximum; exceeding it fails
+// with code 500 "The text length cannot exceed the maximum limit" (live
+// evidence, issue #30). Cap the assembled prompt at the documented limit.
+const MAX_PROMPT_CHARS = 1000;
 const CREATE_MAX_ATTEMPTS = 3;
 
 function sleep(ms: number): Promise<void> {
@@ -56,7 +56,7 @@ export class KieV2ImageProvider implements ImageGenerationProvider {
   }
 
   async createTask(task: ResolvedSlotTask): Promise<{ taskId: string; costUsd: number }> {
-    const brief = task.promptText.length > 900 ? `${task.promptText.slice(0, 900)}...` : task.promptText;
+    const brief = task.promptText.length > 640 ? `${task.promptText.slice(0, 640)}...` : task.promptText;
     const assembledPrompt = [
       "Create one natural editorial photograph intended to be placed inside a website, grounded in the supplied slot brief.",
       `Aspect ratio: ${task.aspectRatio}.`,

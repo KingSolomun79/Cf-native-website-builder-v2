@@ -13,7 +13,7 @@ import { Value } from "@sinclair/typebox/value";
 import type { Env } from "../env.d";
 import { runSchemaValidatedAiStage, type RawAiGenerate } from "./ai-boundary";
 import { appendBuildWorkflowEvent } from "./lifecycle";
-import { storeBuildStageArtifact, type StoredStageArtifact } from "./stage-artifacts";
+import { getBuildStageArtifact, storeBuildStageArtifact, type StoredStageArtifact } from "./stage-artifacts";
 import type { ReferenceEvidence } from "./reference-evidence-schema";
 
 export const REFERENCE_ANALYSIS_SCHEMA_VERSION = "reference-analysis/1";
@@ -149,6 +149,20 @@ export async function runReferenceAnalysisStage(
   env: Env,
   input: RunReferenceAnalysisInput
 ): Promise<ReferenceAnalysisProduced> {
+  // Workflow-step retry safety: if this Build Version already has a frozen
+  // Reference Analysis artifact, reuse it instead of regenerating (a retried
+  // step must be idempotent; a fresh LLM answer would collide with the
+  // artifact immutability boundary).
+  const existing = await getBuildStageArtifact<ReferenceAnalysis>(env, input.buildVersionId, "reference_analysis");
+  if (existing) {
+    return {
+      artifactId: existing.artifactId,
+      artifactR2Key: existing.artifactR2Key,
+      checksum: existing.checksum,
+      analysis: existing.value,
+    };
+  }
+
   const run = await runSchemaValidatedAiStage<ReferenceAnalysis>(env, {
     stage: "reference-analyzer",
     schema: ReferenceAnalysisSchema,

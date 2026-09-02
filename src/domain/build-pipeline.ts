@@ -36,7 +36,7 @@ import { assembleBuildVersionCandidate, deployPreview, type AssembledCandidate, 
 import { buildStandardEvidenceBundle, compareGeometry, geometryFromRegions, type QaCaptureFn } from "./qa-evidence";
 import { createProductionQaCapture } from "./qa-capture";
 import { runQaAStage, runQaBStage, type QaAReport, type QaBReport, type QaFinding } from "./qa-stages";
-import { assignReleaseReady } from "./release";
+import { assignReleaseReady, ReleaseGateError } from "./release";
 import { getEffectiveBusinessFacts } from "./revision";
 import {
   applyRepairBatch,
@@ -360,16 +360,29 @@ export async function runBuildPipeline(
         generate: deps.generate,
       });
 
-      const release = await assignReleaseReady(env, {
-        buildId: ctx.buildId,
-        buildVersionId: ctx.buildVersionId,
-        siteGenerationId: ctx.siteGenerationId,
-        qaA: qaA.report,
-        qaB: qaB.report,
-        qaBuildVersionId: ctx.buildVersionId,
-        geometryComparison,
-        evidenceR2Keys: [evidenceBundle.artifactR2Key],
-      });
+      let release: Awaited<ReturnType<typeof assignReleaseReady>>;
+      try {
+        release = await assignReleaseReady(env, {
+          buildId: ctx.buildId,
+          buildVersionId: ctx.buildVersionId,
+          siteGenerationId: ctx.siteGenerationId,
+          qaA: qaA.report,
+          qaB: qaB.report,
+          qaBuildVersionId: ctx.buildVersionId,
+          geometryComparison,
+          evidenceR2Keys: [evidenceBundle.artifactR2Key],
+        });
+      } catch (error) {
+        // Workflow-step retry safety: the exact Build Version already carries
+        // a Release Ready record — a retried evaluation is an idempotent
+        // success at the orchestration seam (the domain boundary stays
+        // strict).
+        if (error instanceof ReleaseGateError && error.code === "RELEASE_ALREADY_ASSIGNED") {
+          release = { releaseReady: true, reasons: [], blockers: [], polish: [], recordId: `release:${ctx.buildVersionId}` };
+        } else {
+          throw error;
+        }
+      }
       return { qaA: qaA.report, qaB: qaB.report, release };
     };
 

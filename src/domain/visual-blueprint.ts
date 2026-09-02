@@ -15,7 +15,7 @@ import { Value } from "@sinclair/typebox/value";
 import type { Env } from "../env.d";
 import { runSchemaValidatedAiStage, type RawAiGenerate } from "./ai-boundary";
 import { appendBuildWorkflowEvent } from "./lifecycle";
-import { storeBuildStageArtifact, type StoredStageArtifact } from "./stage-artifacts";
+import { getBuildStageArtifact, storeBuildStageArtifact, type StoredStageArtifact } from "./stage-artifacts";
 import type { ReferenceAnalysis } from "./reference-analysis";
 import type { AdaptationContract } from "./reference-evidence-schema";
 import type { BusinessFacts } from "./lifecycle-schema";
@@ -228,6 +228,18 @@ export async function runVisualBlueprintStage(
   env: Env,
   input: RunVisualBlueprintInput
 ): Promise<VisualBlueprintProduced> {
+  // Workflow-step retry safety: reuse the frozen Blueprint artifact for this
+  // Build Version instead of regenerating (immutable collision otherwise).
+  const existing = await getBuildStageArtifact<VisualBlueprint>(env, input.buildVersionId, "visual_blueprint");
+  if (existing) {
+    return {
+      artifactId: existing.artifactId,
+      artifactR2Key: existing.artifactR2Key,
+      checksum: existing.checksum,
+      blueprint: existing.value,
+    };
+  }
+
   const run = await runSchemaValidatedAiStage<VisualBlueprint>(env, {
     stage: "visual-blueprint-generator",
     schema: VisualBlueprintSchema,
