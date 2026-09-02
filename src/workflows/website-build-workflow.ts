@@ -65,7 +65,7 @@ export class WebsiteBuildWorkflow extends WorkflowEntrypoint<Env, WebsiteBuildPa
             step: async <T,>(name: string, fn: () => Promise<T>) =>
               (await step.do(
                 name,
-                { retries: { maxAttempts: 8, initialInterval: "10 seconds", maxInterval: "2 minutes", factor: 1.5 } } as never,
+                { retries: { limit: 8, delay: "10 seconds", backoff: "exponential" } } as never,
                 () => fn() as never
               )) as T,
           },
