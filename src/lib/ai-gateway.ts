@@ -225,6 +225,15 @@ export async function generateWithGatewayDetailed(
       max_tokens: options?.maxTokens ?? 4096,
     };
 
+    // The canonical glm-5.3-flash is a REASONING model on the ZAI leg:
+    // reasoning_content draws from the same max_tokens budget, so a 4096 cap
+    // exhausts on thinking and returns empty content with finish_reason
+    // "length" (live production evidence, issue #30). Give the leg a generous
+    // floor so reasoning plus the JSON answer both fit.
+    if (provider === "zhipu") {
+      body.max_tokens = Math.max(body.max_tokens ?? 0, 16384);
+    }
+
     if (options?.jsonMode && provider !== "zhipu") {
       body.response_format = { type: "json_object" };
     }
