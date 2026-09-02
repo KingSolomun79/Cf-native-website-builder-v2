@@ -13,6 +13,7 @@
 
 import type { Env } from "../env.d";
 import { generateId, nowIso } from "../lib/crypto";
+import { getObject } from "../lib/assets";
 import {
   ONBOARDING_SUBMISSION_SCHEMA_VERSION,
   normalizeBusinessFacts,
@@ -571,7 +572,7 @@ export interface BuildView {
     createdAt: string;
     updatedAt: string;
   };
-  versions: Array<{ id: string; versionNumber: number; createdAt: string }>;
+  versions: Array<{ id: string; versionNumber: number; createdAt: string; artifactManifestHash: string | null }>;
   workflowEvents: Array<{
     id: string;
     buildVersionId: string | null;
@@ -601,6 +602,22 @@ export async function getBuildView(env: Env, buildId: string): Promise<BuildView
     .bind(buildId)
     .all<BuildWorkflowEventRow>();
 
+  // The assembled manifest hash per version is the identity Approval and
+  // Publication bind to; the operator mint flow needs it from the build view.
+  const manifests = await env.DB.prepare(
+    "SELECT build_version_id, artifact_r2_key FROM build_stage_artifacts WHERE build_id = ? AND kind = 'assembled_manifest'"
+  )
+    .bind(buildId)
+    .all<{ build_version_id: string; artifact_r2_key: string }>();
+  const manifestHashByVersion = new Map<string, string | null>();
+  for (const row of manifests.results ?? []) {
+    const body = await getObject(env, row.artifact_r2_key);
+    const hash = body
+      ? ((JSON.parse(await new Response(body).text()) as { artifactManifestHash?: string }).artifactManifestHash ?? null)
+      : null;
+    manifestHashByVersion.set(row.build_version_id, hash);
+  }
+
   return {
     build: {
       id: build.id,
@@ -615,6 +632,7 @@ export async function getBuildView(env: Env, buildId: string): Promise<BuildView
       id: version.id,
       versionNumber: version.version_number,
       createdAt: version.created_at,
+      artifactManifestHash: manifestHashByVersion.get(version.id) ?? null,
     })),
     workflowEvents: (events.results ?? []).map((event) => ({
       id: event.id,
