@@ -169,10 +169,11 @@ export function validateAssembledSite(
     if (h1Count === 0) findings.push({ id: "MISSING_H1", detail: `${pageId}: no H1` });
     if (h1Count > 1) findings.push({ id: "MULTIPLE_H1", detail: `${pageId}: ${h1Count} H1 elements` });
 
-    if (!doc.includes('rel="stylesheet" href="site.css"') && !doc.includes("href='site.css'") && !doc.includes('href="site.css"')) {
+    const stylesheetLinked = [/href="site\.css"/i, /href='site\.css'/i, /href="\.\/site\.css"/i, /href="\/site\.css"/i].some((pattern) => pattern.test(html));
+    if (!stylesheetLinked) {
       findings.push({ id: "MISSING_SHARED_CSS_LINK", detail: `${pageId}: site.css not linked` });
     }
-    if (!doc.includes('src="site.js"')) {
+    if (!/src="(?:\.?\/)?site\.js"/i.test(html)) {
       findings.push({ id: "MISSING_SHARED_JS_LINK", detail: `${pageId}: site.js not referenced` });
     }
     if (!doc.includes('name="viewport"')) {
@@ -288,12 +289,14 @@ function pagePrompt(input: {
   blueprint: VisualBlueprint;
   contract: ImplementationContract;
   facts: BusinessFacts;
+  slots: ImageSlot[];
 }): string {
-  const { pageId, blueprint, contract, facts } = input;
+  const { pageId, blueprint, contract, facts, slots } = input;
+  const slotsForPage = (page: PageId, all: ImageSlot[]) => all.filter((slot) => slot.page === page).map((slot) => slot.id);
   const page = contract.pages.find((candidate) => candidate.id === pageId)!;
   const base = `Generate the complete semantic HTML page '${page.path}' (document for page id '${pageId}'). Requirements:
 - <!DOCTYPE html>, <html lang>, semantic <header>/<nav>/<main>/<footer>, exactly ONE <h1>.
-- Link site.css, reference site.js, include the responsive viewport meta.
+- Include EXACTLY these tags in <head>/<body>: <link rel="stylesheet" href="site.css"> and <script src="site.js" defer></script>, plus the responsive viewport meta.
 - Navigation links to /, /about, /services, /contact exactly.
 - Every image is an unresolved placeholder: <img src="IMG:{slotId}" data-image-id="{slotId}" alt="..."> using ONLY the slot ids listed below.
 - ${factsBlock(facts)}
@@ -308,7 +311,7 @@ function pagePrompt(input: {
 HOMEPAGE REGIONS (ordered): ${JSON.stringify(blueprint.homepageRegions)}
 FIRST VIEWPORT: ${JSON.stringify(blueprint.homepageFirstViewport)}
 SIGNATURE TRAITS (must be visually expressed through structure/classes): ${JSON.stringify(blueprint.signatureTraits)}
-AVAILABLE IMAGE SLOTS: home-region slots derived from regions with imageRoleId (use 'home-' + regionId).`;
+AVAILABLE IMAGE SLOTS (use EXACTLY these ids, verbatim): ${slotsForPage("home", slots).join(", ")}.`;
   }
   if (pageId === "contact") {
     return `${base}
@@ -317,13 +320,13 @@ AVAILABLE IMAGE SLOTS: home-region slots derived from regions with imageRoleId (
 - Present supported contact facts (email/phone/address only when present in the facts).
 
 FORM CONTRACT: ${JSON.stringify(contract.formContract)}
-AVAILABLE IMAGE SLOTS: contact-atmosphere.`;
+AVAILABLE IMAGE SLOTS (use EXACTLY these ids, verbatim): ${slotsForPage("contact", slots).join(", ")}.`;
   }
   return `${base}
 - Build the page from the Blueprint inner-page vocabulary: ${JSON.stringify(blueprint.innerPageVocabulary)}.
 - Present only supported facts for this Business (description, type, city/country, socials when present).
 
-AVAILABLE IMAGE SLOTS: ${pageId}-main, ${pageId}-detail.`;
+AVAILABLE IMAGE SLOTS (use EXACTLY these ids, verbatim): ${slotsForPage(pageId, slots).join(", ")}.`;
 }
 
 // ── Generation service ──────────────────────────────────────────────────────
@@ -394,6 +397,14 @@ export async function generateCompleteSite(
     userPrompt: jsPrompt(input.blueprint) + repairBlock,
   });
 
+  // 7 (computed early). deterministic Image Plan (stable Image Slots) — the
+  // exact slot ids are enumerated in every page prompt so generated markup
+  // only ever references planned slots.
+  const imagePlan = deriveImagePlan(input.blueprint);
+  if (!Value.Check(ImagePlanSchema, imagePlan)) {
+    throw new Error("derived image plan failed its schema");
+  }
+
   // 3-6. one page at a time under the same fixed contracts.
   const pages: Partial<Record<PageId, string>> = {};
   const pageRuns: Array<{ pageId: PageId; run: { value: PageHtml; artifactR2Key: string } }> = [];
@@ -403,16 +414,10 @@ export async function generateCompleteSite(
       stage: "website-generator",
       schema: PageHtmlSchema,
       schemaVersion: `generated-source/page-${pageId}/1`,
-      userPrompt: pagePrompt({ pageId, blueprint: input.blueprint, contract: input.contract, facts }) + repairBlock,
+      userPrompt: pagePrompt({ pageId, blueprint: input.blueprint, contract: input.contract, facts, slots: imagePlan.slots }) + repairBlock,
     });
     pages[pageId] = run.value.html;
     pageRuns.push({ pageId, run: { value: run.value, artifactR2Key: run.artifactR2Key } });
-  }
-
-  // 7. deterministic Image Plan (stable Image Slots).
-  const imagePlan = deriveImagePlan(input.blueprint);
-  if (!Value.Check(ImagePlanSchema, imagePlan)) {
-    throw new Error("derived image plan failed its schema");
   }
 
   const source: AssembledSiteSource = {
