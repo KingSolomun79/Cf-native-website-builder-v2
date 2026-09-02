@@ -6,9 +6,9 @@
 
 ## Step 0 — Operator inputs (hard blockers, not automatable from this repository)
 
-1. **Email Service domain onboarding (dashboard):** Compute > Email Service > Email Sending > Onboard Domain. Recommend `wazibiz.com` (active zone in the account, Cloudflare DNS). Accept the auto-written `cf-bounce` MX/SPF/DKIM + DMARC records; start DMARC at `p=none`. Verify in Email Sending > Settings that records resolve.
-2. **Production sender mailbox (issue #32):** select/approve the outbound platform sender on the onboarded domain (e.g. `noreply@wazibiz.com`). It is set as the `WAZIBIZ_SENDER_EMAIL` production var in Step 2 — configuration, not a secret; until it is set, Form Service delivery fails closed with `WAZIBIZ_SENDER_EMAIL missing or malformed` in the ledger.
-3. **Secret values for the V2 Worker** (unreadable from V1 — secrets are write-only): `ZHIPU_API_KEY`, `OPENROUTER_API_KEY`, `KIE_API_KEY`, `CF_AIG_TOKEN`, `CF_DEPLOY_API_TOKEN`, and optionally `TURNSTILE_SECRET_KEY`.
+1. ~~**Email Service domain onboarding (dashboard):**~~ **DONE 2026-09-02 (guided #33 setup):** `wazibiz.ke` onboarded under Compute > Email Service > Email Sending — dashboard reports **Enabled / DNS records Configured**; public DNS confirms the `cf-bounce` MX is live and the pre-existing apex SPF and DMARC (`p=reject`) were preserved untouched (the domain's existing Cloudflare Email Routing inbound setup was not modified).
+2. ~~**Production sender mailbox (issue #32):**~~ **DECIDED 2026-09-02:** `notifications@wazibiz.ke`. Set as the `WAZIBIZ_SENDER_EMAIL` production var in Step 2 — configuration, not a secret. **Real-delivery proof already recorded on staging** (see the #33 evidence): Form Submission → Accepted → Email Delivery → Cloudflare Email Service → `delivered`, attempt 1.
+3. **Secret values for the V2 Worker** (unreadable from V1 — secrets are write-only): `ZHIPU_API_KEY`, `OPENROUTER_API_KEY`, `KIE_API_KEY`, `CF_AIG_TOKEN`, `CF_DEPLOY_API_TOKEN`, and optionally `TURNSTILE_SECRET_KEY`. *Last remaining operator input.*
 4. Confirm (or change) the proposed V2 production names: Worker `cf-website-factory-v2`, D1 `website_factory_v2`, R2 `website-factory-v2-assets`.
 
 ## Step 1 — Create V2 resources
@@ -29,7 +29,7 @@ In `wrangler.jsonc` (top level only; `env.staging` stays as-is):
 - D1: `database_name: website_factory_v2`, new `database_id`
 - R2: `bucket_name: website-factory-v2-assets`
 - `vars.PUBLIC_APP_URL`: `https://cf-website-factory-v2.wazibizwebsites.workers.dev`
-- `vars.WAZIBIZ_SENDER_EMAIL`: the operator-approved mailbox from Step 0.2 (issue #32; unset until approved — delivery then fails closed)
+- `vars.WAZIBIZ_SENDER_EMAIL`: `notifications@wazibiz.ke` (decided in Step 0.2 — the onboarded `wazibiz.ke` sending domain)
 
 This step is also the fix for the standing hazard where the V2 repo inherited the V1 Worker name.
 

@@ -171,3 +171,20 @@ dashboard domain onboarding. Remaining #33 items are operator-gated:
 sender-domain onboarding, production WAZIBIZ_SENDER_EMAIL approval, and
 provider secret provisioning at #27. Final state: 28 test files / 201
 tests, typecheck clean, dry-runs pass, tree clean.
+
+The guided #33 Email Service setup completed on 2026-09-02: the operator
+onboarded wazibiz.ke under Compute > Email Service > Email Sending
+(dashboard: Enabled, DNS records Configured — public DNS confirms the
+cf-bounce MX and that the pre-existing apex SPF and DMARC p=reject were
+preserved untouched alongside the domain's live Cloudflare Email Routing
+inbound setup) and selected notifications@wazibiz.ke as the platform
+sender. Staging WAZIBIZ_SENDER_EMAIL was repointed to the real mailbox
+(commit `f546a8a`; Worker cf-website-factory-staging version
+`e0234372-ec84-4a64-abc3-294cd7798ee2`), and the committed smoke path
+recorded the #33 success gate on the REAL Cloudflare Email Service:
+submission `70b5906e-50d1-41bd-b220-95c7f4c43338` → Accepted →
+**delivered** on attempt 1, with sender_identity =
+notifications@wazibiz.ke (exactly the env var), destination from Site
+Configuration, and the visitor address strictly as Reply-To. Production
+still defines no sender var until the #27 deploy; the one remaining #33
+operator input is the provider secret values at #27 time.
