@@ -423,7 +423,6 @@ export async function runBuildPipeline(
       }
       return { qaA: qaA.report, qaB: qaB.report, release };
       });
-      });
     };
 
     // ── First evaluation ───────────────────────────────────────────────────
