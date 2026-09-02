@@ -342,15 +342,18 @@ export async function runBuildPipeline(
       previewUrl: string,
       acceptedImageCount: number
     ): Promise<{ qaA: QaAReport; qaB: QaBReport; release: Awaited<ReturnType<typeof assignReleaseReady>> }> => {
-      return stepDo(`pipeline: QA evaluation (v${ctx.buildVersionNumber})`, async () => {
-      const evidenceBundle = await buildStandardEvidenceBundle(env, {
+      // The evidence capture (9 browser page loads) and the QA verdicts
+      // (QA-A/QA-B/release) run as SEPARATE steps: one combined step exceeds
+      // the isolate eviction window and gets killed mid-flight on retry.
+      const evidenceBundle = await stepDo(`pipeline: QA evidence (v${ctx.buildVersionNumber})`, () => buildStandardEvidenceBundle(env, {
         buildId: ctx.buildId,
         buildVersionId: ctx.buildVersionId,
         buildVersionNumber: ctx.buildVersionNumber,
         siteGenerationId: ctx.siteGenerationId,
         capture: deps.qaCapture ? deps.qaCapture(previewUrl) : createProductionQaCapture(env, previewUrl),
-      });
+      }));
 
+      return stepDo(`pipeline: QA verdicts (v${ctx.buildVersionNumber})`, async () => {
       // Geometry comparator: reference evidence regions vs the home desktop
       // candidate capture — same mapping both sides (PRD section 27).
       const homeDesktop = evidenceBundle.bundle.captures.find(
@@ -419,6 +422,7 @@ export async function runBuildPipeline(
         }
       }
       return { qaA: qaA.report, qaB: qaB.report, release };
+      });
       });
     };
 
