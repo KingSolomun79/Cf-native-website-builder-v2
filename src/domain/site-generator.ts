@@ -20,7 +20,7 @@ import type { Env } from "../env.d";
 import { runSchemaValidatedAiStage, type RawAiGenerate } from "./ai-boundary";
 import { appendBuildWorkflowEvent } from "./lifecycle";
 import { getEffectiveBusinessFacts } from "./revision";
-import { storeBuildStageArtifact, type StoredStageArtifact } from "./stage-artifacts";
+import { getBuildStageArtifact, storeBuildStageArtifact, type StoredStageArtifact } from "./stage-artifacts";
 import type { VisualBlueprint } from "./visual-blueprint";
 import type { ImplementationContract } from "./implementation-planner";
 import type { BusinessFacts } from "./lifecycle-schema";
@@ -381,21 +381,36 @@ export async function generateCompleteSite(
     temperature: 0.35,
   };
 
+  // Workflow-step retry safety: each generation subkey reuses its frozen
+  // artifact for this Build Version verbatim; only missing subkeys invoke the
+  // model (LLM output is nondeterministic — regeneration would collide with
+  // the artifact immutability boundary).
+  const runOrReuse = async <T extends { [key: string]: unknown }>(
+    kind: "generated_shared_source" | "generated_page",
+    subkey: string,
+    schema: ReturnType<typeof Type.Object> | ReturnType<typeof Type.String> extends never ? never : import("@sinclair/typebox").TSchema,
+    schemaVersion: string,
+    userPrompt: string
+  ): Promise<{ value: T; artifactR2Key: string }> => {
+    const existing = await getBuildStageArtifact<T>(env, input.buildVersionId, kind, subkey);
+    if (existing) return { value: existing.value, artifactR2Key: existing.artifactR2Key };
+    const run = await runSchemaValidatedAiStage<T>(env, {
+      ...stageInput,
+      stage: "website-generator",
+      schema: schema as Parameters<typeof runSchemaValidatedAiStage>[1]["schema"],
+      schemaVersion,
+      userPrompt,
+    });
+    await storeBuildStageArtifact(env, {
+      buildId: input.buildId, buildVersionId: input.buildVersionId, siteGenerationId: input.siteGenerationId,
+      kind, subkey, schemaVersion, value: run.value, provenance: run.provenance,
+    });
+    return { value: run.value, artifactR2Key: run.artifactR2Key };
+  };
+
   // 1. shared tokens/CSS  2. shared runtime JS — incremental steps.
-  const cssRun = await runSchemaValidatedAiStage<SharedCss>(env, {
-    ...stageInput,
-    stage: "website-generator",
-    schema: SharedCssSchema,
-    schemaVersion: "generated-source/site-css/1",
-    userPrompt: cssPrompt(input.blueprint, input.contract) + repairBlock,
-  });
-  const jsRun = await runSchemaValidatedAiStage<SharedJs>(env, {
-    ...stageInput,
-    stage: "website-generator",
-    schema: SharedJsSchema,
-    schemaVersion: "generated-source/site-js/1",
-    userPrompt: jsPrompt(input.blueprint) + repairBlock,
-  });
+  const cssRun = await runOrReuse<SharedCss>("generated_shared_source", "site.css", SharedCssSchema, "generated-source/site-css/1", cssPrompt(input.blueprint, input.contract) + repairBlock);
+  const jsRun = await runOrReuse<SharedJs>("generated_shared_source", "site.js", SharedJsSchema, "generated-source/site-js/1", jsPrompt(input.blueprint) + repairBlock);
 
   // 7 (computed early). deterministic Image Plan (stable Image Slots) — the
   // exact slot ids are enumerated in every page prompt so generated markup
@@ -409,13 +424,7 @@ export async function generateCompleteSite(
   const pages: Partial<Record<PageId, string>> = {};
   const pageRuns: Array<{ pageId: PageId; run: { value: PageHtml; artifactR2Key: string } }> = [];
   for (const pageId of PAGE_IDS) {
-    const run = await runSchemaValidatedAiStage<PageHtml>(env, {
-      ...stageInput,
-      stage: "website-generator",
-      schema: PageHtmlSchema,
-      schemaVersion: `generated-source/page-${pageId}/1`,
-      userPrompt: pagePrompt({ pageId, blueprint: input.blueprint, contract: input.contract, facts, slots: imagePlan.slots }) + repairBlock,
-    });
+    const run = await runOrReuse<PageHtml>("generated_page", pageId, PageHtmlSchema, `generated-source/page-${pageId}/1`, pagePrompt({ pageId, blueprint: input.blueprint, contract: input.contract, facts, slots: imagePlan.slots }) + repairBlock);
     pages[pageId] = run.value.html;
     pageRuns.push({ pageId, run: { value: run.value, artifactR2Key: run.artifactR2Key } });
   }
@@ -433,25 +442,13 @@ export async function generateCompleteSite(
     throw new SiteGenerationValidationError(validation.findings);
   }
 
-  // Persist the validated generated source immutably per Build Version.
-  const artifacts: GeneratedSite["artifacts"] = [];
-  await storeBuildStageArtifact(env, {
-    buildId: input.buildId, buildVersionId: input.buildVersionId, siteGenerationId: input.siteGenerationId,
-    kind: "generated_shared_source", subkey: "site.css", schemaVersion: "generated-source/site-css/1",
-    value: cssRun.value, provenance: cssRun.provenance,
-  }).then((stored) => artifacts.push({ kind: "generated_shared_source", subkey: "site.css", r2Key: stored.artifactR2Key }));
-  await storeBuildStageArtifact(env, {
-    buildId: input.buildId, buildVersionId: input.buildVersionId, siteGenerationId: input.siteGenerationId,
-    kind: "generated_shared_source", subkey: "site.js", schemaVersion: "generated-source/site-js/1",
-    value: jsRun.value, provenance: jsRun.provenance,
-  }).then((stored) => artifacts.push({ kind: "generated_shared_source", subkey: "site.js", r2Key: stored.artifactR2Key }));
-  for (const { pageId, run } of pageRuns) {
-    await storeBuildStageArtifact(env, {
-      buildId: input.buildId, buildVersionId: input.buildVersionId, siteGenerationId: input.siteGenerationId,
-      kind: "generated_page", subkey: pageId, schemaVersion: `generated-source/page-${pageId}/1`,
-      value: run.value, provenance: null,
-    }).then((stored) => artifacts.push({ kind: "generated_page", subkey: pageId, r2Key: stored.artifactR2Key }));
-  }
+  // Generated source artifacts were persisted per subkey as they were
+  // produced (runOrReuse) — immutability is enforced at that boundary.
+  const artifacts: GeneratedSite["artifacts"] = [
+    { kind: "generated_shared_source", subkey: "site.css", r2Key: cssRun.artifactR2Key },
+    { kind: "generated_shared_source", subkey: "site.js", r2Key: jsRun.artifactR2Key },
+    ...pageRuns.map(({ pageId, run }) => ({ kind: "generated_page" as const, subkey: pageId, r2Key: run.artifactR2Key })),
+  ];
   const imagePlanStored: StoredStageArtifact = await storeBuildStageArtifact(env, {
     buildId: input.buildId, buildVersionId: input.buildVersionId, siteGenerationId: input.siteGenerationId,
     kind: "image_plan", schemaVersion: IMAGE_PLAN_SCHEMA_VERSION, value: imagePlan,

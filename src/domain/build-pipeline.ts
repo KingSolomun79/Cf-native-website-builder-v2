@@ -37,6 +37,10 @@ import { buildStandardEvidenceBundle, compareGeometry, geometryFromRegions, type
 import { createProductionQaCapture } from "./qa-capture";
 import { runQaAStage, runQaBStage, type QaAReport, type QaBReport, type QaFinding } from "./qa-stages";
 import { assignReleaseReady, ReleaseGateError } from "./release";
+import { getBuildStageArtifact } from "./stage-artifacts";
+import type { ReferenceAnalysis } from "./reference-analysis";
+import type { VisualBlueprint } from "./visual-blueprint";
+import type { ImplementationContract } from "./implementation-planner";
 import { getEffectiveBusinessFacts } from "./revision";
 import {
   applyRepairBatch,
@@ -55,6 +59,11 @@ export interface BuildPipelineDeps {
   previewDeployer?: PreviewDeployer;
   /** Built per Preview deployment; defaults to the browser-backed capture. */
   qaCapture?: (previewUrl: string) => QaCaptureFn;
+  /** Durable step executor (the workflow's WorkflowStep). Each stage runs as
+   *  its own step so a mid-flight isolate eviction retries only that stage;
+   *  every stage is idempotent (artifact reuse / spend-resume) by design.
+   *  Tests use the passthrough default. */
+  step?: <T>(name: string, fn: () => Promise<T>) => Promise<T>;
 }
 
 export type PipelineTerminalStatus =
@@ -124,6 +133,7 @@ export async function runBuildPipeline(
   input: { siteGenerationId: string; buildId?: string; deps?: BuildPipelineDeps }
 ): Promise<BuildPipelineOutcome> {
   const deps = input.deps ?? {};
+  const stepDo = deps.step ?? (async <T>(_name: string, fn: () => Promise<T>) => fn());
   const buildId =
     input.buildId ?? (await createInitialBuild(env, { siteGenerationId: input.siteGenerationId })).buildId;
   const siteId = await loadSiteId(env, input.siteGenerationId);
@@ -186,8 +196,16 @@ export async function runBuildPipeline(
       };
     }
 
-    // ── Analysis -> Blueprint -> Contract ──────────────────────────────────
-    const analysis = await runReferenceAnalysisStage(env, {
+    // ── Analysis -> Blueprint -> Contract (each its own durable step) ─────
+    // Retry safety lives at THIS seam: a stage whose frozen artifact already
+    // exists for the Build Version is reused verbatim; the domain stages
+    // themselves stay strictly once-per-version.
+    const analysis = await stepDo("pipeline: reference analysis", async () => {
+      const existingAnalysis = await getBuildStageArtifact<ReferenceAnalysis>(env, version.buildVersionId, "reference_analysis");
+      if (existingAnalysis) {
+        return { analysis: existingAnalysis.value, artifactR2Key: existingAnalysis.artifactR2Key };
+      }
+      return runReferenceAnalysisStage(env, {
       siteGenerationId: input.siteGenerationId,
       buildId,
       buildVersionId: version.buildVersionId,
@@ -195,10 +213,16 @@ export async function runBuildPipeline(
       evidence: frozen.evidence,
       evidenceR2Key: frozen.evidenceR2Key,
       generate: deps.generate,
+      });
     });
 
     const facts = (await getEffectiveBusinessFacts(env, buildId)).facts;
-    const blueprint = await runVisualBlueprintStage(env, {
+    const blueprint = await stepDo("pipeline: visual blueprint", async () => {
+      const existingBlueprint = await getBuildStageArtifact<VisualBlueprint>(env, version.buildVersionId, "visual_blueprint");
+      if (existingBlueprint) {
+        return { blueprint: existingBlueprint.value, artifactR2Key: existingBlueprint.artifactR2Key };
+      }
+      return runVisualBlueprintStage(env, {
       siteGenerationId: input.siteGenerationId,
       buildId,
       buildVersionId: version.buildVersionId,
@@ -209,9 +233,15 @@ export async function runBuildPipeline(
       adaptationContract: frozen.adaptationContract ?? null,
       referenceUrl: frozen.evidence.referenceUrl,
       generate: deps.generate,
+      });
     });
 
-    const contract = await produceImplementationContract(env, {
+    const contract = await stepDo("pipeline: implementation contract", async () => {
+      const existingContract = await getBuildStageArtifact<ImplementationContract>(env, version.buildVersionId, "implementation_contract");
+      if (existingContract) {
+        return { contract: existingContract.value, artifactR2Key: existingContract.artifactR2Key };
+      }
+      return produceImplementationContract(env, {
       siteGenerationId: input.siteGenerationId,
       buildId,
       buildVersionId: version.buildVersionId,
@@ -219,6 +249,7 @@ export async function runBuildPipeline(
       blueprint: blueprint.blueprint,
       facts,
       formServiceBaseurl: env.PUBLIC_APP_URL,
+      });
     });
     if (contract.contract.blockers.length > 0) {
       await appendBuildWorkflowEvent(env, {
@@ -243,7 +274,7 @@ export async function runBuildPipeline(
       ctx: VersionContext,
       repairDirectives?: string
     ): Promise<{ candidate: AssembledCandidate; previewUrl: string; site: Awaited<ReturnType<typeof generateCompleteSite>> }> => {
-      const site = await generateCompleteSite(env, {
+      const site = await stepDo(`pipeline: generate site (v${ctx.buildVersionNumber})`, () => generateCompleteSite(env, {
         siteGenerationId: ctx.siteGenerationId,
         siteId: ctx.siteId,
         buildId: ctx.buildId,
@@ -255,7 +286,7 @@ export async function runBuildPipeline(
         contractR2Key: contract.artifactR2Key,
         generate: deps.generate,
         ...(repairDirectives ? { repairDirectives } : {}),
-      });
+      }));
 
       // Normal 12-Accepted-Image target with spend-resume idempotency: expand
       // to the target, then generate only slots without an acceptance for THIS
@@ -264,7 +295,7 @@ export async function runBuildPipeline(
       const accepted = await getAcceptedImageMap(env, ctx.buildVersionId);
       const unresolved = plannedSlots.filter((slot) => !accepted.has(slot.id));
       if (unresolved.length > 0) {
-        await runImageGeneration(env, {
+        await stepDo(`pipeline: image generation (v${ctx.buildVersionNumber})`, () => runImageGeneration(env, {
           siteGenerationId: ctx.siteGenerationId,
           buildId: ctx.buildId,
           buildVersionId: ctx.buildVersionId,
@@ -273,34 +304,37 @@ export async function runBuildPipeline(
           provider: deps.imageProvider ?? new KieV2ImageProvider(env),
           generate: deps.generate,
           expandToTarget: false,
-        });
+        }));
       }
 
       const acceptedImageEntries = await getAcceptedImageMap(env, ctx.buildVersionId);
       const acceptedImages = new Map([...acceptedImageEntries].map(([slotId, entry]) => [slotId, entry.r2Key] as const));
-      const candidate = await assembleBuildVersionCandidate(env, {
-        siteGenerationId: ctx.siteGenerationId,
-        buildId: ctx.buildId,
-        buildVersionId: ctx.buildVersionId,
-        buildVersionNumber: ctx.buildVersionNumber,
-        pages: site.pages,
-        sharedCss: site.sharedCss,
-        sharedJs: site.sharedJs,
-        imagePlanSlots: site.imagePlan.slots,
-        acceptedImages,
-        formServiceEndpoint: contract.contract.formContract.formServiceEndpoint,
-        expectedSiteFormId: contract.contract.formContract.siteFormId,
-      });
+      const candidate = await stepDo(`pipeline: assemble + preview (v${ctx.buildVersionNumber})`, async () => {
+        const assembled = await assembleBuildVersionCandidate(env, {
+          siteGenerationId: ctx.siteGenerationId,
+          buildId: ctx.buildId,
+          buildVersionId: ctx.buildVersionId,
+          buildVersionNumber: ctx.buildVersionNumber,
+          pages: site.pages,
+          sharedCss: site.sharedCss,
+          sharedJs: site.sharedJs,
+          imagePlanSlots: site.imagePlan.slots,
+          acceptedImages,
+          formServiceEndpoint: contract.contract.formContract.formServiceEndpoint,
+          expectedSiteFormId: contract.contract.formContract.siteFormId,
+        });
 
-      const preview = await deployPreview(env, {
-        buildId: ctx.buildId,
-        buildVersionId: ctx.buildVersionId,
-        buildVersionNumber: ctx.buildVersionNumber,
-        candidate,
-        ...(deps.previewDeployer ? { deployer: deps.previewDeployer } : {}),
-      });
+        const preview = await deployPreview(env, {
+          buildId: ctx.buildId,
+          buildVersionId: ctx.buildVersionId,
+          buildVersionNumber: ctx.buildVersionNumber,
+          candidate: assembled,
+          ...(deps.previewDeployer ? { deployer: deps.previewDeployer } : {}),
+        });
 
-      return { candidate, previewUrl: preview.previewUrl, site };
+        return { candidate: assembled, previewUrl: preview.previewUrl, site };
+      });
+      return candidate;
     };
 
     const evaluate = async (
@@ -308,6 +342,7 @@ export async function runBuildPipeline(
       previewUrl: string,
       acceptedImageCount: number
     ): Promise<{ qaA: QaAReport; qaB: QaBReport; release: Awaited<ReturnType<typeof assignReleaseReady>> }> => {
+      return stepDo(`pipeline: QA evaluation (v${ctx.buildVersionNumber})`, async () => {
       const evidenceBundle = await buildStandardEvidenceBundle(env, {
         buildId: ctx.buildId,
         buildVersionId: ctx.buildVersionId,
@@ -384,6 +419,7 @@ export async function runBuildPipeline(
         }
       }
       return { qaA: qaA.report, qaB: qaB.report, release };
+      });
     };
 
     // ── First evaluation ───────────────────────────────────────────────────

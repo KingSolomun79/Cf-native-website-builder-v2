@@ -228,18 +228,6 @@ export async function runVisualBlueprintStage(
   env: Env,
   input: RunVisualBlueprintInput
 ): Promise<VisualBlueprintProduced> {
-  // Workflow-step retry safety: reuse the frozen Blueprint artifact for this
-  // Build Version instead of regenerating (immutable collision otherwise).
-  const existing = await getBuildStageArtifact<VisualBlueprint>(env, input.buildVersionId, "visual_blueprint");
-  if (existing) {
-    return {
-      artifactId: existing.artifactId,
-      artifactR2Key: existing.artifactR2Key,
-      checksum: existing.checksum,
-      blueprint: existing.value,
-    };
-  }
-
   const run = await runSchemaValidatedAiStage<VisualBlueprint>(env, {
     stage: "visual-blueprint-generator",
     schema: VisualBlueprintSchema,

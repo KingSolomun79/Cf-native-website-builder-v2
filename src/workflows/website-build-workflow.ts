@@ -54,7 +54,13 @@ export class WebsiteBuildWorkflow extends WorkflowEntrypoint<Env, WebsiteBuildPa
         const result = await runBuildPipeline(this.env, {
           siteGenerationId,
           buildId: created.buildId,
-          ...(this.pipelineDeps ? { deps: this.pipelineDeps } : {}),
+          // Every pipeline stage executes as its own durable step: a mid-flight
+          // isolate eviction retries only that stage, and each stage is
+          // idempotent (frozen-artifact reuse / KIE spend-resume).
+          deps: {
+            ...(this.pipelineDeps ?? {}),
+            step: async <T,>(name: string, fn: () => Promise<T>) => (await step.do(name, () => fn() as never)) as T,
+          },
         });
         return {
           buildId: result.buildId,
