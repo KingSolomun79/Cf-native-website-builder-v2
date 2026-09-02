@@ -88,25 +88,22 @@
     "KIE_MODEL": "z-image",
     "ZHIPU_API_URL": "https://api.z.ai/api/coding/paas/v4",
     "ZHIPU_GATEWAY_PROVIDER": "custom-zhipu",
-    "ZHIPU_MODEL": "glm-5-turbo",
-    // LLM routing (operator decision 2026-09-02): ZAI primary for all text
-    // and vision calls; the Cloudflare AI Gateway (openai/gpt-4o via
-    // CF_AIG_TOKEN) is the working fallback. The OpenRouter leg stays coded
-    // but dormant without OPENROUTER_API_KEY — provider chains are
-    // key-driven (src/lib/ai-gateway.ts), so absence skips it, not fails.
+    // One canonical LLM model for ALL V2 textual and multimodal calls
+    // (operator decision, issue #30): glm-5.3-flash on every provider leg.
+    // Provider failover (ZAI primary -> Cloudflare AI Gateway fallback, via
+    // src/lib/ai-gateway.ts key-driven chains) must keep serving exactly
+    // this model; a fallback to a different model is a routing defect. The
+    // OpenRouter leg stays coded but dormant without OPENROUTER_API_KEY.
+    "LLM_MODEL": "glm-5.3-flash",
     "PRIMARY_PROVIDER": "zhipu",
-    "VISION_MODEL": "xiaomi/mimo-v2.5",
     "VISION_PRIMARY_PROVIDER": "zhipu",
-    "VISION_PRIMARY_MODEL": "glm-4v",
     "VISION_FALLBACK_PROVIDER": "ai-gateway",
-    "VISION_FALLBACK_MODEL": "openai/gpt-4o",
     "VISION_REQUEST_TIMEOUT_MS": "45000",
     "VISION_MAX_ATTEMPTS_PER_PROVIDER": "2",
     "VISION_RETRY_DELAY_MS": "500",
     "VISION_INPUT_MAX_BYTES": "4194304",
     "VISION_INPUT_MAX_WIDTH": "1920",
-    "VISION_INPUT_MAX_HEIGHT": "12000",
-    "FALLBACK_MODEL": "xiaomi/mimo-v2.5"
+    "VISION_INPUT_MAX_HEIGHT": "12000"
   },
 
   // Staging-equivalent deployment for controlled verification (issue #28).

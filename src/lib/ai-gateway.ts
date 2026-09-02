@@ -7,6 +7,18 @@ export type LlmProvider = "ai-gateway" | "zhipu" | "openrouter";
 
 type ProviderChain = LlmProvider[];
 
+// One canonical LLM model for every V2 textual/multimodal call (operator
+// decision, issue #30): glm-5.3-flash on every provider leg. Provider
+// FAILOVER is allowed only while it keeps serving this exact model; a
+// fallback to a different model is a routing defect, not resilience.
+export const CANONICAL_LLM_MODEL = "glm-5.3-flash";
+
+// The single model configuration seam. Version-controlled default plus the
+// optional LLM_MODEL Worker var; no per-stage or per-provider model names.
+export function resolveLlmModel(env: Env): string {
+  return env.LLM_MODEL || CANONICAL_LLM_MODEL;
+}
+
 export function repairTruncatedJson(raw: string): string {
   let s = raw
     .replace(/^```json?\s*/i, "")
@@ -251,7 +263,10 @@ export async function generateWithGatewayDetailed(
           throw new Error("Empty response from model after retries");
         }
 
-        return { response: result, provider, model: resolvedModel };
+        // Prefer the model identity the provider actually reports over the
+        // requested one so provenance cannot drift silently.
+        const servedModel = typeof result.model === "string" && result.model.length > 0 ? result.model : resolvedModel;
+        return { response: result, provider, model: servedModel };
       } catch (err: any) {
         clearTimeout(timeoutId);
 
@@ -288,14 +303,11 @@ export async function generateWithGatewayDetailed(
   throw new Error("generateWithGateway: all providers exhausted");
 }
 
-function resolveModel(provider: LlmProvider, env: Env): string {
-  if (provider === "zhipu") {
-    return env.ZHIPU_MODEL || "glm-5-turbo";
-  }
-  if (provider === "openrouter") {
-    return env.FALLBACK_MODEL || "xiaomi/mimo-v2.5";
-  }
-  return "openai/gpt-4o";
+// Every provider leg resolves to the one canonical model (issue #30). A
+// provider that cannot serve it fails that leg — the model is never
+// substituted per provider.
+function resolveModel(_provider: LlmProvider, env: Env): string {
+  return resolveLlmModel(env);
 }
 
 export function getActiveProvider(env: Env): LlmProvider {
@@ -353,10 +365,10 @@ function parseVisionProvider(value: string | undefined): LlmProvider | null {
   return value === "openrouter" || value === "zhipu" || value === "ai-gateway" ? value : null;
 }
 
-function defaultVisionModel(provider: LlmProvider, env: Env): string {
-  if (provider === "zhipu") return env.ZHIPU_MODEL ?? "glm-4v";
-  if (provider === "openrouter") return env.VISION_MODEL ?? "xiaomi/mimo-v2.5";
-  return "openai/gpt-4o";
+function defaultVisionModel(_provider: LlmProvider, env: Env): string {
+  // No special vision model path (issue #30): the canonical model serves
+  // vision/multimodal input through the configured provider when supported.
+  return resolveLlmModel(env);
 }
 
 function canUseVisionProvider(env: Env, provider: LlmProvider): boolean {
@@ -366,12 +378,12 @@ function canUseVisionProvider(env: Env, provider: LlmProvider): boolean {
 }
 
 export function resolveVisionProviderChain(env: Env): VisionRoute[] {
-  const primaryProvider = parseVisionProvider(env.VISION_PRIMARY_PROVIDER) ?? "openrouter";
-  const primaryModel = env.VISION_PRIMARY_MODEL ?? defaultVisionModel(primaryProvider, env);
+  const primaryProvider = parseVisionProvider(env.VISION_PRIMARY_PROVIDER) ?? "zhipu";
+  const primaryModel = resolveLlmModel(env);
   const routes: VisionRoute[] = [{ provider: primaryProvider, model: primaryModel }];
   const fallbackProvider = parseVisionProvider(env.VISION_FALLBACK_PROVIDER);
   if (!fallbackProvider) return routes;
-  const fallbackModel = env.VISION_FALLBACK_MODEL ?? defaultVisionModel(fallbackProvider, env);
+  const fallbackModel = resolveLlmModel(env);
   if (fallbackProvider !== primaryProvider || fallbackModel !== primaryModel) routes.push({ provider: fallbackProvider, model: fallbackModel });
   return routes;
 }
@@ -496,7 +508,9 @@ export async function generateVisionWithGateway(
         }
         attempts.push({ provider: route.provider, model: route.model, attempt, durationMs, outcome: "success", gatewayRequestId: gatewayRequestId(response) });
         await persistVisionDiagnostics(env, options?.diagnosticR2Key, meta, stage, "succeeded", attempts, route, options?.visionInput);
-        return { content, provider: route.provider, model: route.model };
+        // Prefer the provider-reported model identity for provenance.
+        const servedModel = typeof parsed.model === "string" && parsed.model.length > 0 ? parsed.model : route.model;
+        return { content, provider: route.provider, model: servedModel };
       } catch (error) {
         clearTimeout(timeoutId);
         if (error instanceof VisionDiagnosticsPersistenceError) throw error;

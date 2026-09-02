@@ -46,6 +46,27 @@ export interface PageCapture {
 
 export type QaCaptureFn = (spec: Array<{ page: PageId; viewportWidth: number; firstViewport: boolean }>) => Promise<PageCapture[]>;
 
+// Builds a comparable GeometryProfile from a regions list (reference evidence
+// or candidate layout — same mapping both sides). Metrics not carried by
+// regions (surface sequence, whitespace) keep neutral values so the
+// comparator judges the measurable structural properties.
+export function geometryFromRegions(
+  regions: Array<{ id: string; height: number; viewportHeightRatio: number }>,
+  imageMassRatio: number
+): GeometryProfile {
+  return {
+    regionOrder: regions.map((region) => region.id),
+    firstViewportHeightRatio: regions[0]?.viewportHeightRatio ?? 0.9,
+    sectionHeightRatios: regions.map((region) => region.height / (regions[0]?.height || 1)),
+    imageMassRatio,
+    containerWidthRatio: 0.83,
+    columnRatios: [5 / 7],
+    dominantAlignment: "asymmetric",
+    surfaceSequence: regions.map((_, index) => (index % 3 === 2 ? "ink" : "paper")),
+    whitespaceRatio: 0.22,
+  };
+}
+
 // The standardized capture matrix (PRD section 26).
 export function standardCaptureSpec(): Array<{ page: PageId; viewportWidth: number; firstViewport: boolean }> {
   return [

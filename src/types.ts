@@ -82,6 +82,9 @@ export interface ChatCompletionRequest {
 
 export interface ChatCompletionResponse {
   id: string;
+  /** Model identity the provider reports for this completion; recorded in
+   *  AI-stage provenance when present (issue #30 model-routing correctness). */
+  model?: string;
   choices: Array<{
     message: { role: string; content: string };
     finish_reason: string;

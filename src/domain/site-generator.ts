@@ -346,6 +346,11 @@ export interface GenerateCompleteSiteInput {
   contract: ImplementationContract;
   contractR2Key: string;
   generate?: RawAiGenerate;
+  /** Bounded Automated Repair directives (issue #14): realization-only fixes
+   *  appended to every generation prompt when regenerating a repaired Build
+   *  Version. Never carries Business Fact / Reference / Build Mode / Blueprint
+   *  changes (assertRepairPlanWithinBounds guards the plan itself). */
+  repairDirectives?: string;
 }
 
 export interface GeneratedSite extends AssembledSiteSource {
@@ -360,6 +365,9 @@ export async function generateCompleteSite(
 ): Promise<GeneratedSite> {
   const factsResult = await getEffectiveBusinessFacts(env, input.buildId);
   const facts = factsResult.facts;
+  const repairBlock = input.repairDirectives
+    ? `\n\nBOUNDED REPAIR DIRECTIVES (realization-only fixes from the Fix Coordinator; they may not contradict the fixed Blueprint/Contract/facts):\n${input.repairDirectives}`
+    : "";
   const stageInput = {
     buildId: input.buildId,
     siteGenerationId: input.siteGenerationId,
@@ -376,14 +384,14 @@ export async function generateCompleteSite(
     stage: "website-generator",
     schema: SharedCssSchema,
     schemaVersion: "generated-source/site-css/1",
-    userPrompt: cssPrompt(input.blueprint, input.contract),
+    userPrompt: cssPrompt(input.blueprint, input.contract) + repairBlock,
   });
   const jsRun = await runSchemaValidatedAiStage<SharedJs>(env, {
     ...stageInput,
     stage: "website-generator",
     schema: SharedJsSchema,
     schemaVersion: "generated-source/site-js/1",
-    userPrompt: jsPrompt(input.blueprint),
+    userPrompt: jsPrompt(input.blueprint) + repairBlock,
   });
 
   // 3-6. one page at a time under the same fixed contracts.
@@ -395,7 +403,7 @@ export async function generateCompleteSite(
       stage: "website-generator",
       schema: PageHtmlSchema,
       schemaVersion: `generated-source/page-${pageId}/1`,
-      userPrompt: pagePrompt({ pageId, blueprint: input.blueprint, contract: input.contract, facts }),
+      userPrompt: pagePrompt({ pageId, blueprint: input.blueprint, contract: input.contract, facts }) + repairBlock,
     });
     pages[pageId] = run.value.html;
     pageRuns.push({ pageId, run: { value: run.value, artifactR2Key: run.artifactR2Key } });

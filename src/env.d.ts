@@ -32,30 +32,35 @@ export interface Env {
   KIE_API_URL: string;
   KIE_API_KEY: string;
   KIE_MODEL: string;
+  // V2 image budget accounting (issue #10 production wiring): estimated USD
+  // cost debited per KIE task against the USD 3.00 hard site spend gate, and
+  // the bounded poll window for one task inside fetchResult.
+  KIE_TASK_COST_USD?: string;
+  KIE_POLL_TIMEOUT_MS?: string;
   WEBHOOK_SECRET: string;
 
   ZHIPU_API_KEY?: string;
   ZHIPU_API_URL?: string;
   ZHIPU_GATEWAY_PROVIDER?: string;
-  ZHIPU_MODEL?: string;
   PRIMARY_PROVIDER?: string;
+  // One canonical LLM model for every V2 textual/multimodal call (issue
+  // #30). Version-controlled default: src/lib/ai-gateway.ts
+  // CANONICAL_LLM_MODEL. Per-provider/per-stage model names are retired;
+  // provider failover must keep serving this exact model.
+  LLM_MODEL?: string;
 
   // OpenRouter leg (operator decision 2026-09-02): optional — ZAI is primary
   // and the Cloudflare AI Gateway is the working fallback; provider chains
   // are key-driven, so an absent key skips the OpenRouter leg without error.
   OPENROUTER_API_KEY?: string;
-  VISION_MODEL?: string;
   VISION_PRIMARY_PROVIDER?: string;
-  VISION_PRIMARY_MODEL?: string;
   VISION_FALLBACK_PROVIDER?: string;
-  VISION_FALLBACK_MODEL?: string;
   VISION_REQUEST_TIMEOUT_MS?: string;
   VISION_MAX_ATTEMPTS_PER_PROVIDER?: string;
   VISION_RETRY_DELAY_MS?: string;
   VISION_INPUT_MAX_BYTES?: string;
   VISION_INPUT_MAX_WIDTH?: string;
   VISION_INPUT_MAX_HEIGHT?: string;
-  FALLBACK_MODEL?: string;
 
   // Central WAZIBIZ Form Service (V2, issue #11). Outbound email goes
   // through the native Cloudflare Email Service `send_email` binding

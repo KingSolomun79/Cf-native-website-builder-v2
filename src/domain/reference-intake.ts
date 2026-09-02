@@ -315,7 +315,25 @@ export async function runReferenceIntake(
     screenshotMetadata,
     captures: captureArtifacts,
     regions: captureOutput?.regions ?? [],
-    measuredElements: captureOutput?.measuredElements ?? [],
+    measuredElements: [
+      ...(captureOutput?.measuredElements ?? []),
+      // The canonical Reference Screenshot itself is a measured artifact
+      // (dimensions recorded at freeze). Screenshot-only References carry no
+      // browser measurements, so without this anchor Reference Analysis
+      // could never lawfully anchor a signature trait to the screenshot that
+      // is authoritative for static composition.
+      {
+        selectorHint: "screenshot",
+        role: "canonical-reference-screenshot",
+        computed: {
+          pixelWidth: screenshotMetadata.pixelWidth ?? null,
+          pixelHeight: screenshotMetadata.pixelHeight ?? null,
+          likelyCssViewportWidth: screenshotMetadata.likelyCssViewportWidth ?? null,
+        },
+        confidence: "HIGH",
+        source: "SCREENSHOT",
+      },
+    ],
     responsiveObservations: captureOutput?.responsiveObservations ?? [],
     motionObservations: captureOutput?.motionObservations ?? [],
     discrepancies,

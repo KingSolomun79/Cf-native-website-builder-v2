@@ -15,6 +15,7 @@ import {
   LifecycleError,
 } from "../src/domain/lifecycle";
 import { generateId, hmacSha256 } from "../src/lib/crypto";
+import { createPipelineScripts, persistPipelineScreenshot } from "./helpers/pipeline-scripts";
 
 // Primary-seam tests for the V2 domain lifecycle backbone (issue #4):
 // Onboarding Submission -> Site Generation -> Build -> immutable Build Version.
@@ -82,10 +83,23 @@ async function postSubmission(
   });
 }
 
+// Screenshot-only submission with a persisted Reference PNG so the workflow's
+// full pipeline (issue #30 wiring) runs without live browser/provider calls.
+async function postScreenshotOnlySubmission(app: Hono<{ Bindings: Env }>, env: Env): Promise<string> {
+  const key = `references/lifecycle/${generateId()}.png`;
+  await persistPipelineScreenshot(env, key);
+  const response = await postSubmission(app, env, { reference: { screenshotR2Key: key } });
+  const body = (await response.json()) as { siteGenerationId: string };
+  return body.siteGenerationId;
+}
+
 // Executes the real WebsiteBuildWorkflow step bodies synchronously — the
 // workflow is the primary boundary, so the seam under test is its run() body.
+// Deterministic pipeline scripts stand in for the real providers (the
+// pipeline service itself is covered by tests/v2-build-pipeline.test.ts).
 async function runWebsiteBuildWorkflow(env: Env, siteGenerationId: string): Promise<{ buildId: string; buildVersionId: string }> {
   const workflow = Object.assign(Object.create(WebsiteBuildWorkflow.prototype), { env }) as WebsiteBuildWorkflow;
+  workflow.pipelineDeps = createPipelineScripts();
   const step = {
     do: async (_name: string, fn: () => Promise<unknown>) => await fn(),
   } as unknown as WorkflowStep;
@@ -151,15 +165,15 @@ describe("V2 domain lifecycle backbone", () => {
   });
 
   it("creates the first Build and initial immutable Build Version through the primary workflow boundary", async () => {
-    const submission = ((await (await postSubmission(app, env)).json()) as { siteGenerationId: string });
+    const siteGenerationId = await postScreenshotOnlySubmission(app, env);
 
-    const start = await postJson(app, env, `/api/v2/site-generations/${submission.siteGenerationId}/builds`, {});
+    const start = await postJson(app, env, `/api/v2/site-generations/${siteGenerationId}/builds`, {});
     expect(start.status).toBe(202);
     const startBody = (await start.json()) as { workflowInstanceId: string };
     expect(startBody.workflowInstanceId).toMatch(/^wf-/);
-    expect(createWorkflow).toHaveBeenCalledWith({ params: { siteGenerationId: submission.siteGenerationId } });
+    expect(createWorkflow).toHaveBeenCalledWith({ params: { siteGenerationId } });
 
-    const result = await runWebsiteBuildWorkflow(env, submission.siteGenerationId);
+    const result = await runWebsiteBuildWorkflow(env, siteGenerationId);
     expect(result.buildId).toBeTruthy();
     expect(result.buildVersionId).toBeTruthy();
 
@@ -171,15 +185,18 @@ describe("V2 domain lifecycle backbone", () => {
       workflowEvents: Array<{ toState: string; stage: string }>;
     };
     expect(buildView.build.kind).toBe("initial");
-    expect(buildView.build.state).toBe("INTAKE_READY");
-    expect(buildView.build.siteGenerationId).toBe(submission.siteGenerationId);
+    // The workflow now carries the Build through the full pipeline (issue #30
+    // wiring); with the deterministic scripts the terminal state is
+    // RELEASE_READY for exactly Build Version 1.
+    expect(buildView.build.state).toBe("RELEASE_READY");
+    expect(buildView.build.siteGenerationId).toBe(siteGenerationId);
     expect(buildView.versions).toEqual([expect.objectContaining({ versionNumber: 1 })]);
     expect(buildView.workflowEvents[0]).toEqual(
       expect.objectContaining({ toState: "INTAKE_READY", stage: "intake" })
     );
 
     const generationResponse = await app.request(
-      `https://test.example.com/api/v2/site-generations/${submission.siteGenerationId}`, {}, env
+      `https://test.example.com/api/v2/site-generations/${siteGenerationId}`, {}, env
     );
     const generationView = (await generationResponse.json()) as { builds: Array<{ kind: string; versions: Array<{ versionNumber: number }> }> };
     expect(generationView.builds).toHaveLength(1);
@@ -188,14 +205,14 @@ describe("V2 domain lifecycle backbone", () => {
   });
 
   it("rejects a second initial Build for the same Site Generation and reports 409 from the route", async () => {
-    const submission = ((await (await postSubmission(app, env)).json()) as { siteGenerationId: string });
-    await runWebsiteBuildWorkflow(env, submission.siteGenerationId);
+    const siteGenerationId = await postScreenshotOnlySubmission(app, env);
+    await runWebsiteBuildWorkflow(env, siteGenerationId);
 
-    await expect(createInitialBuild(env, { siteGenerationId: submission.siteGenerationId })).rejects.toMatchObject({
+    await expect(createInitialBuild(env, { siteGenerationId })).rejects.toMatchObject({
       code: "INITIAL_BUILD_ALREADY_EXISTS",
     });
 
-    const retry = await postJson(app, env, `/api/v2/site-generations/${submission.siteGenerationId}/builds`, {});
+    const retry = await postJson(app, env, `/api/v2/site-generations/${siteGenerationId}/builds`, {});
     expect(retry.status).toBe(409);
   });
 
@@ -216,8 +233,8 @@ describe("V2 domain lifecycle backbone", () => {
   });
 
   it("enforces Build Version immutability at the storage boundary", async () => {
-    const submission = ((await (await postSubmission(app, env)).json()) as { siteGenerationId: string });
-    const result = await runWebsiteBuildWorkflow(env, submission.siteGenerationId);
+    const siteGenerationId = await postScreenshotOnlySubmission(app, env);
+    const result = await runWebsiteBuildWorkflow(env, siteGenerationId);
 
     await expect(
       env.DB.prepare("UPDATE build_versions SET version_number = 99 WHERE id = ?")
@@ -245,8 +262,8 @@ describe("V2 domain lifecycle backbone", () => {
     });
 
     // A Build Version from one Build cannot be attached to another Build's events.
-    const first = await runWebsiteBuildWorkflow(env, ((await (await postSubmission(app, env)).json()) as { siteGenerationId: string }).siteGenerationId);
-    const second = await runWebsiteBuildWorkflow(env, ((await (await postSubmission(app, env)).json()) as { siteGenerationId: string }).siteGenerationId);
+    const first = await runWebsiteBuildWorkflow(env, await postScreenshotOnlySubmission(app, env));
+    const second = await runWebsiteBuildWorkflow(env, await postScreenshotOnlySubmission(app, env));
     await expect(
       appendBuildWorkflowEvent(env, {
         buildId: second.buildId,
@@ -283,11 +300,11 @@ describe("V2 domain lifecycle backbone", () => {
   });
 
   it("exposes only canonical V2 lifecycle vocabulary on the observable seams", async () => {
-    const submission = ((await (await postSubmission(app, env)).json()) as { siteGenerationId: string });
-    const build = await runWebsiteBuildWorkflow(env, submission.siteGenerationId);
+    const siteGenerationId = await postScreenshotOnlySubmission(app, env);
+    const build = await runWebsiteBuildWorkflow(env, siteGenerationId);
 
     const generationResponse = await app.request(
-      `https://test.example.com/api/v2/site-generations/${submission.siteGenerationId}`, {}, env
+      `https://test.example.com/api/v2/site-generations/${siteGenerationId}`, {}, env
     );
     const buildResponse = await app.request(`https://test.example.com/api/v2/builds/${build.buildId}`, {}, env);
     const observableJson = `${await generationResponse.text()}\n${await buildResponse.text()}`;

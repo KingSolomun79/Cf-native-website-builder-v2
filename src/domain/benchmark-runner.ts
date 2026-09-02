@@ -19,7 +19,7 @@ import { produceImplementationContract } from "./implementation-planner";
 import { generateCompleteSite } from "./site-generator";
 import { runImageGeneration, getAcceptedImageMap, getImageSpendReport, type ImageGenerationProvider } from "./image-pipeline";
 import { assembleBuildVersionCandidate, deployPreview, type AssembledCandidate, type PreviewDeployer } from "./assembly";
-import { buildStandardEvidenceBundle, compareGeometry, type GeometryProfile, type QaCaptureFn } from "./qa-evidence";
+import { buildStandardEvidenceBundle, compareGeometry, geometryFromRegions, type GeometryProfile, type QaCaptureFn } from "./qa-evidence";
 import { runQaAStage, runQaBStage } from "./qa-stages";
 import { assignReleaseReady } from "./release";
 import { getEffectiveBusinessFacts } from "./revision";
@@ -63,20 +63,6 @@ const STAGE_ROOT_CAUSES: Record<string, BenchmarkRootCause> = {
   qa: "QA_FALSE_POSITIVE",
   release: "PLATFORM_RUNTIME",
 };
-
-function geometryFromRegions(regions: Array<{ id: string; height: number; viewportHeightRatio: number }>, imageMassRatio: number): GeometryProfile {
-  return {
-    regionOrder: regions.map((region) => region.id),
-    firstViewportHeightRatio: regions[0]?.viewportHeightRatio ?? 0.9,
-    sectionHeightRatios: regions.map((region) => region.height / (regions[0]?.height || 1)),
-    imageMassRatio,
-    containerWidthRatio: 0.83,
-    columnRatios: [5 / 7],
-    dominantAlignment: "asymmetric",
-    surfaceSequence: regions.map((_, index) => (index % 3 === 2 ? "ink" : "paper")),
-    whitespaceRatio: 0.22,
-  };
-}
 
 async function labeled<T>(stageLabel: string, fn: () => Promise<T>): Promise<T> {
   try {
