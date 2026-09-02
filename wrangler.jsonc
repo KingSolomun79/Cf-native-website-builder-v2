@@ -1,6 +1,6 @@
 {
   "$schema": "./node_modules/wrangler/config-schema.json",
-  "name": "cf-website-factory",
+  "name": "cf-website-factory-v2",
   "main": "src/index.ts",
   "compatibility_date": "2026-08-04",
   "compatibility_flags": ["nodejs_compat"],
@@ -17,15 +17,15 @@
   "d1_databases": [
     {
       "binding": "DB",
-      "database_name": "website_factory_v1",
-      "database_id": "370051b4-9d25-41d4-979c-cfe63b6eb011"
+      "database_name": "website_factory_v2",
+      "database_id": "9e2597d1-9598-4c50-adcf-764c1b6319da"
     }
   ],
 
   "r2_buckets": [
     {
       "binding": "SITE_BUCKET",
-      "bucket_name": "website-factory-assets"
+      "bucket_name": "website-factory-v2-assets"
     }
   ],
 
@@ -79,16 +79,25 @@
   "vars": {
     "CF_ACCOUNT_ID": "c1c0f6b100d55a09ce6a7a3121a19224",
     "CF_AI_GATEWAY_ID": "website-factory",
-    "PUBLIC_APP_URL": "https://cf-website-factory.wazibizwebsites.workers.dev",
+    "PUBLIC_APP_URL": "https://cf-website-factory-v2.wazibizwebsites.workers.dev",
+    // Platform Sender Identity (issue #32/#33): the operator-approved mailbox
+    // on wazibiz.ke, the domain onboarded to Cloudflare Email Service Email
+    // Sending (Enabled, 2026-09-02). Configuration, not a secret.
+    "WAZIBIZ_SENDER_EMAIL": "notifications@wazibiz.ke",
     "KIE_API_URL": "https://api.kie.ai",
     "KIE_MODEL": "z-image",
     "ZHIPU_API_URL": "https://api.z.ai/api/coding/paas/v4",
     "ZHIPU_GATEWAY_PROVIDER": "custom-zhipu",
     "ZHIPU_MODEL": "glm-5-turbo",
-    "PRIMARY_PROVIDER": "openrouter",
+    // LLM routing (operator decision 2026-09-02): ZAI primary for all text
+    // and vision calls; the Cloudflare AI Gateway (openai/gpt-4o via
+    // CF_AIG_TOKEN) is the working fallback. The OpenRouter leg stays coded
+    // but dormant without OPENROUTER_API_KEY — provider chains are
+    // key-driven (src/lib/ai-gateway.ts), so absence skips it, not fails.
+    "PRIMARY_PROVIDER": "zhipu",
     "VISION_MODEL": "xiaomi/mimo-v2.5",
-    "VISION_PRIMARY_PROVIDER": "openrouter",
-    "VISION_PRIMARY_MODEL": "xiaomi/mimo-v2.5",
+    "VISION_PRIMARY_PROVIDER": "zhipu",
+    "VISION_PRIMARY_MODEL": "glm-4v",
     "VISION_FALLBACK_PROVIDER": "ai-gateway",
     "VISION_FALLBACK_MODEL": "openai/gpt-4o",
     "VISION_REQUEST_TIMEOUT_MS": "45000",

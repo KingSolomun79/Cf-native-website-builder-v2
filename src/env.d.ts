@@ -40,7 +40,10 @@ export interface Env {
   ZHIPU_MODEL?: string;
   PRIMARY_PROVIDER?: string;
 
-  OPENROUTER_API_KEY: string;
+  // OpenRouter leg (operator decision 2026-09-02): optional — ZAI is primary
+  // and the Cloudflare AI Gateway is the working fallback; provider chains
+  // are key-driven, so an absent key skips the OpenRouter leg without error.
+  OPENROUTER_API_KEY?: string;
   VISION_MODEL?: string;
   VISION_PRIMARY_PROVIDER?: string;
   VISION_PRIMARY_MODEL?: string;
