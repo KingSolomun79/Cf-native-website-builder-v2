@@ -78,7 +78,24 @@ export function parseModelJson(raw: string): { ok: true; value: unknown } | { ok
   try {
     return { ok: true, value: JSON.parse(text) };
   } catch {
-    // fall through to bounded truncation repair
+    // fall through to prose/markdown extraction
+  }
+  // Models frequently wrap the JSON object in headings or prose (a markdown
+  // title before the payload, "Here is the JSON:" around it, no code fence).
+  // Extract the outermost brace span before any truncation repair.
+  const firstBrace = text.indexOf("{");
+  const lastBrace = text.lastIndexOf("}");
+  if (firstBrace >= 0 && lastBrace > firstBrace) {
+    const span = text.slice(firstBrace, lastBrace + 1);
+    try {
+      return { ok: true, value: JSON.parse(span) };
+    } catch {
+      try {
+        return { ok: true, value: JSON.parse(repairTruncatedJson(span)) };
+      } catch {
+        // fall through to repairing the whole text
+      }
+    }
   }
   try {
     return { ok: true, value: JSON.parse(repairTruncatedJson(text)) };

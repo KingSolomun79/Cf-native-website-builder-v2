@@ -239,7 +239,10 @@ export async function generateWithGatewayDetailed(
       (body as ChatCompletionRequest & { thinking?: { type: "enabled" | "disabled" } }).thinking = { type: "disabled" };
     }
 
-    if (options?.jsonMode && provider !== "zhipu") {
+    // The ZAI endpoint is OpenAI-compatible and honors JSON mode; structured
+    // V2 stages rely on it (live evidence: without it the model wraps output
+    // in markdown prose, issue #30).
+    if (options?.jsonMode) {
       body.response_format = { type: "json_object" };
     }
 
