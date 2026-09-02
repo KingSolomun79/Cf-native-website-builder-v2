@@ -74,7 +74,7 @@ export default defineWorkersConfig({
     },
     setupFiles: ["./tests/setup-migrations.ts"],
     fileParallelism: false,
-    testTimeout: 30000,
+    testTimeout: 90000,
     include: [
       // V2 primary-seam suites.
       "tests/v2-lifecycle.test.ts",

@@ -9,7 +9,7 @@
 import type { Env } from "../env.d";
 import { nowIso } from "../lib/crypto";
 import { appendBuildWorkflowEvent } from "./lifecycle";
-import { storeBuildStageArtifact } from "./stage-artifacts";
+import { storeBuildStageArtifact, storeBuildStageArtifactIdempotent } from "./stage-artifacts";
 import {
   evaluateQaARelease,
   evaluateQaBRelease,
@@ -81,7 +81,7 @@ export async function assignReleaseReady(
 
   // Persist the combined QA report with exact findings and categorization —
   // pass or fail, the evidence is retained.
-  await storeBuildStageArtifact(env, {
+  await storeBuildStageArtifactIdempotent(env, {
     buildId: input.buildId,
     buildVersionId: input.buildVersionId,
     siteGenerationId: input.siteGenerationId,

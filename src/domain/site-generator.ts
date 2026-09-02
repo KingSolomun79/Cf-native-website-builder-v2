@@ -20,7 +20,7 @@ import type { Env } from "../env.d";
 import { runSchemaValidatedAiStage, type RawAiGenerate } from "./ai-boundary";
 import { appendBuildWorkflowEvent } from "./lifecycle";
 import { getEffectiveBusinessFacts } from "./revision";
-import { getBuildStageArtifact, storeBuildStageArtifact, type StoredStageArtifact } from "./stage-artifacts";
+import { getBuildStageArtifact, storeBuildStageArtifact, storeBuildStageArtifactIdempotent, type StoredStageArtifact } from "./stage-artifacts";
 import type { VisualBlueprint } from "./visual-blueprint";
 import type { ImplementationContract } from "./implementation-planner";
 import type { BusinessFacts } from "./lifecycle-schema";
@@ -449,7 +449,7 @@ export async function generateCompleteSite(
     { kind: "generated_shared_source", subkey: "site.js", r2Key: jsRun.artifactR2Key },
     ...pageRuns.map(({ pageId, run }) => ({ kind: "generated_page" as const, subkey: pageId, r2Key: run.artifactR2Key })),
   ];
-  const imagePlanStored: StoredStageArtifact = await storeBuildStageArtifact(env, {
+  const imagePlanStored: StoredStageArtifact = await storeBuildStageArtifactIdempotent(env, {
     buildId: input.buildId, buildVersionId: input.buildVersionId, siteGenerationId: input.siteGenerationId,
     kind: "image_plan", schemaVersion: IMAGE_PLAN_SCHEMA_VERSION, value: imagePlan,
   });

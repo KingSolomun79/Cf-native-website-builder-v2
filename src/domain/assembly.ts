@@ -14,7 +14,7 @@ import type { Env } from "../env.d";
 import { generateId, nowIso } from "../lib/crypto";
 import { getObject, putImmutableObject, putImmutableObjectTolerant } from "../lib/assets";
 import { appendBuildWorkflowEvent } from "./lifecycle";
-import { storeBuildStageArtifact } from "./stage-artifacts";
+import { storeBuildStageArtifact, storeBuildStageArtifactIdempotent } from "./stage-artifacts";
 import { buildVersionAssetKey, buildVersionManifestKey, buildVersionSourceKey } from "./artifact-keys";
 import { runTechnicalPreflight } from "./technical-preflight";
 import type { PreflightCheck } from "./technical-preflight";
@@ -153,7 +153,7 @@ export async function assembleBuildVersionCandidate(
     await putImmutableObjectTolerant(env, buildVersionAssetKey(input.buildId, input.buildVersionNumber, `images/${slotId}.webp`), new Uint8Array(await new Response(body).arrayBuffer()));
   }
   await putImmutableObjectTolerant(env, manifestR2Key, manifestJson, { httpMetadata: { contentType: "application/json" } });
-  await storeBuildStageArtifact(env, {
+  await storeBuildStageArtifactIdempotent(env, {
     buildId: input.buildId,
     buildVersionId: input.buildVersionId,
     siteGenerationId: input.siteGenerationId,

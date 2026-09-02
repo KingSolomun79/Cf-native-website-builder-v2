@@ -119,6 +119,32 @@ export async function storeBuildStageArtifact(
   return { artifactId, artifactR2Key, checksum };
 }
 
+// Workflow-retry safety for pipeline-driven artifacts: when the artifact row
+// already exists for this Build Version with the IDENTICAL checksum (the
+// deterministic re-run reproduced it), the store is an idempotent success.
+// Different content still rejects — immutability is not weakened.
+export async function storeBuildStageArtifactIdempotent(
+  env: Env,
+  input: StoreStageArtifactInput
+): Promise<StoredStageArtifact> {
+  try {
+    return await storeBuildStageArtifact(env, input);
+  } catch (error) {
+    if (error instanceof StageArtifactError && error.code === "ARTIFACT_ALREADY_EXISTS") {
+      const checksum = await sha256Hex(JSON.stringify(input.value));
+      const row = await env.DB.prepare(
+        "SELECT id, artifact_r2_key, checksum FROM build_stage_artifacts WHERE build_version_id = ? AND kind = ? AND subkey = ?"
+      )
+        .bind(input.buildVersionId, input.kind, input.subkey ?? "")
+        .first<{ id: string; artifact_r2_key: string; checksum: string }>();
+      if (row && row.checksum === checksum) {
+        return { artifactId: row.id, artifactR2Key: row.artifact_r2_key, checksum: row.checksum };
+      }
+    }
+    throw error;
+  }
+}
+
 export interface StageArtifactRecord<T = unknown> {
   artifactId: string;
   kind: StageArtifactKind;

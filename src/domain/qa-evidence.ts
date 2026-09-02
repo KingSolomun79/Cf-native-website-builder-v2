@@ -11,7 +11,7 @@
 import type { Env } from "../env.d";
 import { putImmutableObjectTolerant } from "../lib/assets";
 import { appendBuildWorkflowEvent } from "./lifecycle";
-import { storeBuildStageArtifact, type StoredStageArtifact } from "./stage-artifacts";
+import { storeBuildStageArtifactIdempotent, type StoredStageArtifact } from "./stage-artifacts";
 import { buildVersionEvidenceKey } from "./artifact-keys";
 import type { PageId } from "./site-generator";
 
@@ -142,7 +142,7 @@ export async function buildStandardEvidenceBundle(
     });
   }
 
-  const stored = await storeBuildStageArtifact(env, {
+  const stored = await storeBuildStageArtifactIdempotent(env, {
     buildId: input.buildId,
     buildVersionId: input.buildVersionId,
     siteGenerationId: input.siteGenerationId,
