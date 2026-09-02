@@ -283,7 +283,7 @@ export async function generateWithGatewayDetailed(
 
         if (attempt === maxRetries) {
           if (chain.indexOf(provider) < chain.length - 1) {
-            console.log(`[${provider}] exhausted retries, falling back to next provider`);
+            console.log(`[${provider}] non-retriable error (${(err as Error).message?.slice(0, 300)}), falling back to next provider`);
             break;
           }
           throw err;
