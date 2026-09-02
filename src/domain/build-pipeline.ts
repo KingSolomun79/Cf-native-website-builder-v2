@@ -32,7 +32,7 @@ import {
   expandSlotsToTarget,
   type ImageGenerationProvider,
 } from "./image-pipeline";
-import { assembleBuildVersionCandidate, deployPreview, type AssembledCandidate, type PreviewDeployer } from "./assembly";
+import { assembleBuildVersionCandidate, deployPreview, type PreviewDeployer } from "./assembly";
 import { buildStandardEvidenceBundle, compareGeometry, geometryFromRegions, type QaCaptureFn } from "./qa-evidence";
 import { createProductionQaCapture } from "./qa-capture";
 import { runQaAStage, runQaBStage, type QaAReport, type QaBReport, type QaFinding } from "./qa-stages";
@@ -270,10 +270,13 @@ export async function runBuildPipeline(
     }
 
     // ── Candidate production (generation -> images -> assembly -> preview) ─
+    // NOTE: step results are capped at 1MiB by the Workflows engine — the
+    // candidate's bundled image bytes must never cross a step boundary, only
+    // its manifest hash and Preview URL do.
     const produceCandidate = async (
       ctx: VersionContext,
       repairDirectives?: string
-    ): Promise<{ candidate: AssembledCandidate; previewUrl: string; site: Awaited<ReturnType<typeof generateCompleteSite>> }> => {
+    ): Promise<{ manifestHash: string; previewUrl: string }> => {
       const site = await stepDo(`pipeline: generate site (v${ctx.buildVersionNumber})`, () => generateCompleteSite(env, {
         siteGenerationId: ctx.siteGenerationId,
         siteId: ctx.siteId,
@@ -332,7 +335,7 @@ export async function runBuildPipeline(
           ...(deps.previewDeployer ? { deployer: deps.previewDeployer } : {}),
         });
 
-        return { candidate: assembled, previewUrl: preview.previewUrl, site };
+        return { manifestHash: assembled.artifactManifestHash, previewUrl: preview.previewUrl };
       });
       return candidate;
     };
@@ -442,7 +445,7 @@ export async function runBuildPipeline(
           reasons: [],
           siteGenerationId: input.siteGenerationId, siteId, buildId,
           releaseReadyBuildVersionId: version.buildVersionId,
-          artifactManifestHash: first.candidate.artifactManifestHash,
+          artifactManifestHash: first.manifestHash,
           previewUrl: first.previewUrl,
           qaA: firstQa.qaA,
           qaB: firstQa.qaB,
@@ -548,7 +551,7 @@ export async function runBuildPipeline(
           reasons: [],
           siteGenerationId: input.siteGenerationId, siteId, buildId,
           releaseReadyBuildVersionId: version.buildVersionId,
-          artifactManifestHash: regenerated.candidate.artifactManifestHash,
+          artifactManifestHash: regenerated.manifestHash,
           previewUrl: regenerated.previewUrl,
           qaA: confirmation.qaA,
           qaB: confirmation.qaB,
