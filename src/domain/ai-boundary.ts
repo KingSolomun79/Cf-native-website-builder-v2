@@ -175,21 +175,25 @@ export async function runSchemaValidatedAiStage<T>(
   const attempts: AiStageAttemptRecord[] = [];
   let accepted: { value: T; attempt: number; raw: RawAiGenerateResult } | null = null;
 
+  // The output shape is governed by the stage's versioned runtime schema; the
+  // boundary states it explicitly so the model's first answer already targets
+  // the right object shape (live evidence, issue #30: without it the model
+  // followed the legacy shape in the retained prompt body and needed the
+  // repair attempt on every stage).
+  const outputContract = `\n\n## Output contract\nReturn ONE JSON object that satisfies this JSON Schema exactly (no extra properties, every required property present, correct types). Do not wrap it in markdown or prose:\n${JSON.stringify(options.schema)}`;
+
   for (let attempt = 1; attempt <= 2 && !accepted; attempt++) {
     const userPrompt =
       attempt === 1
-        ? options.userPrompt
-        : `${options.userPrompt}
+        ? options.userPrompt + outputContract
+        : `${options.userPrompt}${outputContract}
 
 ## Targeted structural repair
 
 Your previous response failed runtime schema validation:
 ${attempts[attempt - 2]?.errorSummary ?? "schema validation failed"}
 
-The output must be ONE JSON object that satisfies this JSON Schema exactly (no extra properties, every required property present, correct types):
-${JSON.stringify(options.schema)}
-
-Return ONLY the corrected JSON object. Do not change the semantic content beyond what the schema violation requires. Do not wrap it in markdown or prose.`;
+Return ONLY the corrected JSON object. Do not change the semantic content beyond what the schema violation requires.`;
 
     const raw = await generate(composed.systemPrompt, userPrompt, attempt);
     const parsed = parseModelJson(raw.content);

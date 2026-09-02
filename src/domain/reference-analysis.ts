@@ -82,7 +82,11 @@ export function validateAnalysisAgainstEvidence(
   const dangling: string[] = [];
   for (const trait of analysis.signatureTraits) {
     for (const ref of trait.evidenceRefs) {
-      if (!anchors.has(ref)) dangling.push(`${trait.id} -> ${ref}`);
+      // Models qualify anchors with the field they came from
+      // ("selectorHint:screenshot"); strip that deterministic prefix before
+      // matching against the frozen anchor set.
+      const normalized = ref.replace(/^(selectorHint|role|region):/i, "");
+      if (!anchors.has(normalized)) dangling.push(`${trait.id} -> ${ref}`);
     }
   }
   return dangling.length === 0 ? { valid: true } : { valid: false, dangling };
