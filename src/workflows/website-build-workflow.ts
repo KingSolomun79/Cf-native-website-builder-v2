@@ -59,7 +59,15 @@ export class WebsiteBuildWorkflow extends WorkflowEntrypoint<Env, WebsiteBuildPa
           // idempotent (frozen-artifact reuse / KIE spend-resume).
           deps: {
             ...(this.pipelineDeps ?? {}),
-            step: async <T,>(name: string, fn: () => Promise<T>) => (await step.do(name, () => fn() as never)) as T,
+            // Transient platform faults (D1 "Durable Object no longer
+            // active", isolate evictions) heal via bounded engine retries;
+            // every step is idempotent (artifact reuse / spend-resume).
+            step: async <T,>(name: string, fn: () => Promise<T>) =>
+              (await step.do(
+                name,
+                { retries: { maxAttempts: 8, initialInterval: "10 seconds", maxInterval: "2 minutes", factor: 1.5 } } as never,
+                () => fn() as never
+              )) as T,
           },
         });
         return {
