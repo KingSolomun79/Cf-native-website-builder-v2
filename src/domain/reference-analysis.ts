@@ -97,7 +97,9 @@ export function validateAnalysisAgainstEvidence(
       // Models qualify anchors with the field they came from
       // ("selectorHint:screenshot"); strip that deterministic prefix before
       // matching against the frozen anchor set.
-      const normalized = ref.replace(/^(selectorHint|role|region):/i, "");
+      const normalized = ref
+        .replace(/^(selectorHint|role|region):/i, "")
+        .replace(/^measuredElements\[(selectorHint|role)=['"]([^'"]+)['"]\]$/i, "$2");
       if (!anchors.has(normalized)) dangling.push(`${trait.id} -> ${ref}`);
     }
   }
@@ -107,7 +109,11 @@ export function validateAnalysisAgainstEvidence(
 // Bounded evidence payload for the model: measurements and observations only,
 // never loose browser dumps or screenshot bytes.
 export function buildAnalysisUserPrompt(evidence: ReferenceEvidence): string {
-  return `Interpret the frozen versioned Reference Evidence below. Describe the visual system, hierarchy, signature traits, likely design intent, photographic grammar, responsive and motion behavior, and what carries visual identity. Anchor every signature trait to real evidence ids (region ids or measured-element selectorHints). Do NOT redesign, do NOT map Business content, do NOT invent observations.
+  const anchorIds = [
+    ...evidence.regions.map((region) => region.id),
+    ...evidence.measuredElements.map((element) => element.selectorHint ?? element.role ?? "").filter(Boolean),
+  ];
+  return `Interpret the frozen versioned Reference Evidence below. Describe the visual system, hierarchy, signature traits, likely design intent, photographic grammar, responsive and motion behavior, and what carries visual identity. Anchor every signature trait to real evidence ids. Use EXACTLY these anchor strings in evidenceRefs (no prefixes, no qualifiers, no other notation): ${JSON.stringify(anchorIds)}. Do NOT redesign, do NOT map Business content, do NOT invent observations.
 
 REFERENCE EVIDENCE (version ${evidence.version}):
 ${JSON.stringify(
