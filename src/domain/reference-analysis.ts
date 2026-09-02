@@ -79,6 +79,18 @@ export function validateAnalysisAgainstEvidence(
     ...evidence.regions.map((region) => region.id),
     ...evidence.measuredElements.map((element) => element.selectorHint ?? element.role ?? "").filter(Boolean),
   ]);
+  // Models also qualify an anchor by the measured value it points at
+  // ("computed.pixelWidth:1440"). Those forms are deterministic projections
+  // of the frozen evidence, so accept them verbatim.
+  for (const element of evidence.measuredElements) {
+    const identity = element.selectorHint ?? element.role ?? "";
+    if (!identity || !element.computed) continue;
+    for (const [key, value] of Object.entries(element.computed)) {
+      if (value === null || value === undefined) continue;
+      anchors.add(`computed.${key}:${value}`);
+      anchors.add(`${identity}.computed.${key}:${value}`);
+    }
+  }
   const dangling: string[] = [];
   for (const trait of analysis.signatureTraits) {
     for (const ref of trait.evidenceRefs) {
