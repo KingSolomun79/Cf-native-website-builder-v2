@@ -126,18 +126,20 @@ async function callZhipu(
   signal?: AbortSignal,
   extraHeaders?: Record<string, string>
 ): Promise<Response> {
+  // ZAI primary leg calls the provider's OpenAI-compatible endpoint DIRECTLY
+  // (issue #30 model correction): the Cloudflare AI Gateway proxy path rejects
+  // the canonical model name ("glm-5.3-flash" is not a valid identifier for
+  // it — it demands gateway-specific "<provider>/<model>" names, i.e. a
+  // different model label per leg, which the one-canonical-model policy
+  // forbids). The AI Gateway remains the fallback leg.
   const baseUrl = env.ZHIPU_API_URL || "https://api.z.ai/api/coding/paas/v4";
-  const upstreamPath = new URL(baseUrl).pathname.replace(/\/$/, "");
-  const provider = encodeURIComponent(env.ZHIPU_GATEWAY_PROVIDER || "custom-zhipu");
-  const url = `https://gateway.ai.cloudflare.com/v1/${env.CF_ACCOUNT_ID}/${env.CF_AI_GATEWAY_ID}/${provider}${upstreamPath}/chat/completions`;
+  const url = `${baseUrl.replace(/\/$/, "")}/chat/completions`;
 
   return fetch(url, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
       Authorization: `Bearer ${env.ZHIPU_API_KEY}`,
-      "cf-aig-authorization": `Bearer ${env.CF_AIG_TOKEN}`,
-      "cf-aig-metadata": JSON.stringify(meta),
       ...extraHeaders,
     },
     body: JSON.stringify(body),

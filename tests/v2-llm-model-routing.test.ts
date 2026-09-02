@@ -72,8 +72,8 @@ describe("gateway request routing", () => {
   it("sends glm-5.3-flash on the ZAI/zhipu leg and records the provider-reported model", async () => {
     const captured: Array<{ model?: string; authorization?: string }> = [];
     fetchMock
-      .get(GATEWAY_ORIGIN)
-      .intercept({ method: "POST", path: (path) => path.includes("custom-zhipu") })
+      .get("https://api.z.ai")
+      .intercept({ method: "POST", path: (path) => path.includes("chat/completions") })
       .reply((options) => {
         const body = typeof options.body === "string" ? JSON.parse(options.body) : {};
         captured.push({ model: body.model, authorization: options.headers?.authorization });
