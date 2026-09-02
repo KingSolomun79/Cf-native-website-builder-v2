@@ -272,6 +272,15 @@ export async function generateWithGatewayDetailed(
         }
 
         if (!content) {
+          // Empty content on a 200: record the response shape (finish reason,
+          // message keys, body head) so reasoning-token exhaustion and
+          // alternate content fields are diagnosable from the Build event.
+          const choice = result.choices[0] as Record<string, unknown> | undefined;
+          const message = choice?.message as Record<string, unknown> | undefined;
+          recordProviderError(
+            provider,
+            `HTTP 200 empty content: finish_reason=${String(choice?.finish_reason)} messageKeys=${message ? Object.keys(message).join(",") : "none"} body=${JSON.stringify(result).slice(0, 200)}`
+          );
           throw new Error("Empty response from model after retries");
         }
 
