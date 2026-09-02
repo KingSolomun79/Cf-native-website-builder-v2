@@ -186,7 +186,10 @@ export async function runSchemaValidatedAiStage<T>(
 Your previous response failed runtime schema validation:
 ${attempts[attempt - 2]?.errorSummary ?? "schema validation failed"}
 
-Return ONLY a corrected JSON object that satisfies the schema exactly. Do not change the semantic content beyond what the schema violation requires.`;
+The output must be ONE JSON object that satisfies this JSON Schema exactly (no extra properties, every required property present, correct types):
+${JSON.stringify(options.schema)}
+
+Return ONLY the corrected JSON object. Do not change the semantic content beyond what the schema violation requires. Do not wrap it in markdown or prose.`;
 
     const raw = await generate(composed.systemPrompt, userPrompt, attempt);
     const parsed = parseModelJson(raw.content);
