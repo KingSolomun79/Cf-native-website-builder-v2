@@ -289,7 +289,7 @@ export async function generateWithGatewayDetailed(
             break;
           }
           recordProviderError(provider, "timed out after 5 minutes (final provider)");
-          throw new Error(`[${provider}] timed out and no more providers available; failures: ${providerErrors.join(" || ")}`);
+          throw new Error(`LLM provider failures: ${providerErrors.join(" || ").slice(0, 600)}`);
         }
 
         if (attempt === maxRetries) {
@@ -299,7 +299,7 @@ export async function generateWithGatewayDetailed(
             break;
           }
           recordProviderError(provider, (err as Error).message ?? "unknown error");
-          throw new Error(`${(err as Error).message}; failures: ${providerErrors.join(" || ")}`);
+          throw new Error(`LLM provider failures: ${providerErrors.join(" || ").slice(0, 600)} | last: ${(err as Error).message.slice(0, 150)}`);
         }
         if (err.message?.includes("Empty response") || (err.message?.includes("error") && !err.message?.includes("SPEC_VALIDATION"))) {
           const delay = baseDelay * Math.pow(2, attempt);
