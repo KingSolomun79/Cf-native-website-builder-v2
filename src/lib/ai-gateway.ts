@@ -200,6 +200,15 @@ export async function generateWithGatewayDetailed(
   const chain = resolveProviderChain(env);
   const maxRetries = 3;
   const baseDelay = 1000;
+  // Per-provider failure summaries so the terminal error (and therefore the
+  // Build event detail) names every leg that failed, not just the last one.
+  const providerErrors: string[] = [];
+  const recordProviderError = (provider: string, error: string) => {
+    const summary = error.replace(/\s+/g, " ").slice(0, 240);
+    if (!providerErrors.some((entry) => entry.startsWith(`[${provider}]`))) {
+      providerErrors.push(`[${provider}] ${summary}`);
+    }
+  };
 
   const messages: ChatCompletionRequest["messages"] = [
     { role: "system", content: systemPrompt },
@@ -249,6 +258,7 @@ export async function generateWithGatewayDetailed(
             continue;
           }
 
+          recordProviderError(provider, `HTTP ${response.status}: ${errorText}`);
           throw new Error(`${provider} error ${response.status}: ${errorText}`);
         }
 
@@ -278,15 +288,18 @@ export async function generateWithGatewayDetailed(
             console.log(`[${provider}] falling back to next provider due to timeout`);
             break;
           }
-          throw new Error(`[${provider}] timed out and no more providers available`);
+          recordProviderError(provider, "timed out after 5 minutes (final provider)");
+          throw new Error(`[${provider}] timed out and no more providers available; failures: ${providerErrors.join(" || ")}`);
         }
 
         if (attempt === maxRetries) {
           if (chain.indexOf(provider) < chain.length - 1) {
             console.log(`[${provider}] non-retriable error (${(err as Error).message?.slice(0, 300)}), falling back to next provider`);
+            recordProviderError(provider, (err as Error).message ?? "unknown error");
             break;
           }
-          throw err;
+          recordProviderError(provider, (err as Error).message ?? "unknown error");
+          throw new Error(`${(err as Error).message}; failures: ${providerErrors.join(" || ")}`);
         }
         if (err.message?.includes("Empty response") || (err.message?.includes("error") && !err.message?.includes("SPEC_VALIDATION"))) {
           const delay = baseDelay * Math.pow(2, attempt);
@@ -302,7 +315,7 @@ export async function generateWithGatewayDetailed(
     }
   }
 
-  throw new Error("generateWithGateway: all providers exhausted");
+  throw new Error(`generateWithGateway: all providers exhausted; failures: ${providerErrors.join(" || ")}`);
 }
 
 // Every provider leg resolves to the one canonical model (issue #30). A
