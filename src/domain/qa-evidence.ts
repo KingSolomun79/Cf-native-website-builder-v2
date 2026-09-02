@@ -11,7 +11,7 @@
 import type { Env } from "../env.d";
 import { putImmutableObjectTolerant } from "../lib/assets";
 import { appendBuildWorkflowEvent } from "./lifecycle";
-import { storeBuildStageArtifactIdempotent, type StoredStageArtifact } from "./stage-artifacts";
+import { getBuildStageArtifact, storeBuildStageArtifactIdempotent, type StoredStageArtifact } from "./stage-artifacts";
 import { buildVersionEvidenceKey } from "./artifact-keys";
 import type { PageId } from "./site-generator";
 
@@ -106,6 +106,19 @@ export async function buildStandardEvidenceBundle(
     capture: QaCaptureFn;
   }
 ): Promise<StoredStageArtifact & { bundle: QaEvidenceBundle }> {
+  // Workflow-step retry safety: the bundle carries a createdAt timestamp, so
+  // a retried capture never reproduces the frozen checksum. The frozen bundle
+  // for this Build Version IS the evidence — reuse it instead of recapturing.
+  const existing = await getBuildStageArtifact<QaEvidenceBundle>(env, input.buildVersionId, "qa_evidence_bundle");
+  if (existing) {
+    return {
+      artifactId: existing.artifactId,
+      artifactR2Key: existing.artifactR2Key,
+      checksum: existing.checksum,
+      bundle: existing.value,
+    };
+  }
+
   const spec = standardCaptureSpec();
   const captures = await input.capture(spec);
 

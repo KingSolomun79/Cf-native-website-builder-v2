@@ -53,6 +53,21 @@ export async function assignReleaseReady(
   env: Env,
   input: AssignReleaseReadyInput
 ): Promise<ReleaseReadyResult> {
+  // A retried evaluation after the record was pinned short-circuits
+  // immediately: the frozen qa_report artifact cannot be re-stored (fresh LLM
+  // verdicts never reproduce its checksum), so check the record first.
+  const pinned = await env.DB.prepare(
+    "SELECT build_version_id FROM build_release_records WHERE build_version_id = ?"
+  )
+    .bind(input.buildVersionId)
+    .first<{ build_version_id: string }>();
+  if (pinned) {
+    throw new ReleaseGateError(
+      "RELEASE_ALREADY_ASSIGNED",
+      `Build Version ${input.buildVersionId} already has a Release Ready record`
+    );
+  }
+
   // QA reports must belong to the exact Build Version being evaluated.
   if (input.qaBuildVersionId !== input.buildVersionId) {
     throw new ReleaseGateError(
