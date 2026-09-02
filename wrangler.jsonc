@@ -128,12 +128,14 @@
       },
       "vars": {
         "PUBLIC_APP_URL": "https://cf-website-factory-staging.wazibizwebsites.workers.dev",
-        // Platform Sender Identity (issue #32): explicit staging example on
-        // the candidate platform domain — replace with the operator-approved
-        // mailbox when the sender domain is onboarded (#33/#27). The
-        // production environment intentionally does NOT define this var
-        // until then: outbound delivery fails closed without it.
-        "WAZIBIZ_SENDER_EMAIL": "noreply@staging.wazibiz.example"
+        // Platform Sender Identity (issue #32): the operator-approved
+        // mailbox on wazibiz.ke — the domain onboarded to Cloudflare Email
+        // Service / Email Sending on 2026-09-02 (guided #33 setup). The
+        // sender address is configuration, not a secret. The production
+        // environment deliberately does NOT define this var until the #27
+        // deploy re-points the top-level config: delivery fails closed
+        // without it.
+        "WAZIBIZ_SENDER_EMAIL": "notifications@wazibiz.ke"
       }
     }
   }
