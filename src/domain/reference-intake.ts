@@ -16,7 +16,7 @@
 import type { Env } from "../env.d";
 import { Value } from "@sinclair/typebox/value";
 import { generateId, nowIso } from "../lib/crypto";
-import { getObject, putImmutableObject } from "../lib/assets";
+import { getObject, putImmutableObject, putImmutableObjectTolerant } from "../lib/assets";
 import { validateScreenshot } from "../lib/reference-input";
 import { appendBuildWorkflowEvent } from "./lifecycle";
 import type { OnboardingSubmissionRow } from "./lifecycle";
@@ -372,15 +372,15 @@ export async function runReferenceIntake(
   const frozenAt = nowIso();
   const packageId = generateId();
 
-  await putImmutableObject(env, canonicalScreenshotR2Key, canonicalBytes, {
+  await putImmutableObjectTolerant(env, canonicalScreenshotR2Key, canonicalBytes, {
     httpMetadata: { contentType: canonicalMime },
   });
   for (const write of captureWrites) {
-    await putImmutableObject(env, write.key, write.content, {
+    await putImmutableObjectTolerant(env, write.key, write.content, {
       httpMetadata: { contentType: write.mimeType },
     });
   }
-  await putImmutableObject(env, evidenceR2Key, evidenceJson, {
+  await putImmutableObjectTolerant(env, evidenceR2Key, evidenceJson, {
     httpMetadata: { contentType: "application/json" },
   });
 

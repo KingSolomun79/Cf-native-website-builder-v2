@@ -9,7 +9,7 @@
 // standalone verdict.
 
 import type { Env } from "../env.d";
-import { putImmutableObject } from "../lib/assets";
+import { putImmutableObjectTolerant } from "../lib/assets";
 import { appendBuildWorkflowEvent } from "./lifecycle";
 import { storeBuildStageArtifact, type StoredStageArtifact } from "./stage-artifacts";
 import { buildVersionEvidenceKey } from "./artifact-keys";
@@ -122,9 +122,9 @@ export async function buildStandardEvidenceBundle(
       input.buildVersionNumber,
       `qa/${capture.page}-${capture.viewportWidth}-${index}.png`
     );
-    await putImmutableObject(env, key, capture.fullPageScreenshot, { httpMetadata: { contentType: "image/png" } });
+    await putImmutableObjectTolerant(env, key, capture.fullPageScreenshot, { httpMetadata: { contentType: "image/png" } });
     if (capture.firstViewportScreenshot) {
-      await putImmutableObject(
+      await putImmutableObjectTolerant(
         env,
         buildVersionEvidenceKey(input.buildId, input.buildVersionNumber, `qa/${capture.page}-${capture.viewportWidth}-first.png`),
         capture.firstViewportScreenshot,

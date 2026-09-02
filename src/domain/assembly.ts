@@ -12,7 +12,7 @@
 
 import type { Env } from "../env.d";
 import { generateId, nowIso } from "../lib/crypto";
-import { getObject, putImmutableObject } from "../lib/assets";
+import { getObject, putImmutableObject, putImmutableObjectTolerant } from "../lib/assets";
 import { appendBuildWorkflowEvent } from "./lifecycle";
 import { storeBuildStageArtifact } from "./stage-artifacts";
 import { buildVersionAssetKey, buildVersionManifestKey, buildVersionSourceKey } from "./artifact-keys";
@@ -141,17 +141,18 @@ export async function assembleBuildVersionCandidate(
     throw new AssemblyPreflightError(preflight.blockers);
   }
 
-  // Freeze the passing candidate under the canonical artifact scheme.
+  // Freeze the passing candidate under the canonical artifact scheme
+  // (tolerant re-freeze: a retried workflow step finds its own writes).
   for (const [path, bytes] of files) {
-    await putImmutableObject(env, buildVersionSourceKey(input.buildId, input.buildVersionNumber, path), bytes);
+    await putImmutableObjectTolerant(env, buildVersionSourceKey(input.buildId, input.buildVersionNumber, path), bytes);
   }
   for (const [slotId, publicPath] of publicPathBySlot) {
     const r2Key = input.acceptedImages.get(slotId) ?? acceptedByRole.get(roleBySlot.get(slotId)!)!;
     const body = await getObject(env, r2Key);
     if (!body) continue;
-    await putImmutableObject(env, buildVersionAssetKey(input.buildId, input.buildVersionNumber, `images/${slotId}.webp`), new Uint8Array(await new Response(body).arrayBuffer()));
+    await putImmutableObjectTolerant(env, buildVersionAssetKey(input.buildId, input.buildVersionNumber, `images/${slotId}.webp`), new Uint8Array(await new Response(body).arrayBuffer()));
   }
-  await putImmutableObject(env, manifestR2Key, manifestJson, { httpMetadata: { contentType: "application/json" } });
+  await putImmutableObjectTolerant(env, manifestR2Key, manifestJson, { httpMetadata: { contentType: "application/json" } });
   await storeBuildStageArtifact(env, {
     buildId: input.buildId,
     buildVersionId: input.buildVersionId,

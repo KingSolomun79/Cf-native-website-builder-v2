@@ -9,6 +9,28 @@ export async function putObject(
   await env.SITE_BUCKET.put(key, value, options);
 }
 
+// Workflow-step retry safety: deterministic artifact keys are re-frozen when
+// the engine retries a completed-but-uncommitted step. If the object already
+// exists, treat the freeze as satisfied instead of colliding (content
+// integrity for release artifacts remains guarded by the manifest-hash
+// equality checks at the publication boundary).
+export async function putImmutableObjectTolerant(
+  env: Env,
+  key: string,
+  value: ArrayBuffer | ArrayBufferView | ReadableStream | string,
+  options?: Omit<R2PutOptions, "onlyIf">
+): Promise<void> {
+  try {
+    await putImmutableObject(env, key, value, options);
+  } catch (error) {
+    if (error instanceof Error && error.message.includes("already exists")) {
+      const head = await env.SITE_BUCKET.head(key);
+      if (head) return;
+    }
+    throw error;
+  }
+}
+
 export async function putImmutableObject(
   env: Env,
   key: string,
