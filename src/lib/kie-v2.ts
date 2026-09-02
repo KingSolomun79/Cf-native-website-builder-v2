@@ -19,8 +19,13 @@ import type {
 } from "../domain/image-pipeline";
 
 export const KIE_TASK_COST_USD_DEFAULT = 0.05;
-const POLL_INTERVAL_MS = 3000;
+const POLL_INTERVAL_MS = 5000;
 const POLL_TIMEOUT_MS_DEFAULT = 150_000;
+// KIE rejects prompts beyond its text-length limit (live evidence, issue
+// #30: code 500 "The text length cannot exceed the maximum limit"). Cap the
+// assembled prompt well under it.
+const MAX_PROMPT_CHARS = 1400;
+const CREATE_MAX_ATTEMPTS = 3;
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -51,37 +56,52 @@ export class KieV2ImageProvider implements ImageGenerationProvider {
   }
 
   async createTask(task: ResolvedSlotTask): Promise<{ taskId: string; costUsd: number }> {
+    const brief = task.promptText.length > 900 ? `${task.promptText.slice(0, 900)}...` : task.promptText;
     const assembledPrompt = [
-      "Create one natural editorial photograph intended to be placed inside a website, grounded in the supplied slot brief and accepted design blueprint.",
-      `Slot: ${task.slotId}.`,
+      "Create one natural editorial photograph intended to be placed inside a website, grounded in the supplied slot brief.",
       `Aspect ratio: ${task.aspectRatio}.`,
-      task.promptText,
-      "Output only the photographic scene: no website, browser, application interface, screen, device frame, UI layout, wireframe, poster, infographic, collage, or mockup.",
-      "Do not add text, letters, logos, navigation, buttons, badges, statistics, testimonials, awards, or unsupported factual claims.",
-    ].join(" ");
+      brief,
+      "Output only the photographic scene: no website, UI, screen, poster, infographic or mockup; no text, letters, logos or badges.",
+    ].join(" ").slice(0, MAX_PROMPT_CHARS);
 
-    const response = await fetch(`${this.env.KIE_API_URL}/api/v1/jobs/createTask`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${this.env.KIE_API_KEY}`,
-      },
-      body: JSON.stringify({
-        model: this.env.KIE_MODEL,
-        callBackUrl: `${this.env.PUBLIC_APP_URL}/api/internal/kie-callback`,
-        input: {
-          prompt: assembledPrompt,
-          aspect_ratio: task.aspectRatio,
-          nsfw_checker: true,
-        },
-      }),
-    });
-
-    const result = (await response.json()) as { code: number; msg?: string; data?: { taskId?: string } };
-    if (result.code !== 200 || !result.data?.taskId) {
-      throw new Error(`KIE task creation failed: ${JSON.stringify(result).slice(0, 300)}`);
+    // KIE rate-limits bursts (live evidence, issue #30: 429 "call frequency
+    // too high"); back off and retry the same creation.
+    let lastError = "unknown";
+    for (let attempt = 1; attempt <= CREATE_MAX_ATTEMPTS; attempt++) {
+      let result: { code: number; msg?: string; data?: { taskId?: string } };
+      try {
+        const response = await fetch(`${this.env.KIE_API_URL}/api/v1/jobs/createTask`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${this.env.KIE_API_KEY}`,
+          },
+          body: JSON.stringify({
+            model: this.env.KIE_MODEL,
+            callBackUrl: `${this.env.PUBLIC_APP_URL}/api/internal/kie-callback`,
+            input: {
+              prompt: assembledPrompt,
+              aspect_ratio: task.aspectRatio,
+              nsfw_checker: true,
+            },
+          }),
+        });
+        result = (await response.json()) as { code: number; msg?: string; data?: { taskId?: string } };
+      } catch (error) {
+        lastError = (error as Error).message;
+        result = { code: 0 };
+      }
+      if (result.code === 200 && result.data?.taskId) {
+        return { taskId: result.data.taskId, costUsd: this.costUsd };
+      }
+      lastError = JSON.stringify(result).slice(0, 300);
+      if (result.code === 429 && attempt < CREATE_MAX_ATTEMPTS) {
+        await sleep(8000 * attempt);
+        continue;
+      }
+      break;
     }
-    return { taskId: result.data.taskId, costUsd: this.costUsd };
+    throw new Error(`KIE task creation failed: ${lastError}`);
   }
 
   private async recordInfo(taskId: string): Promise<KieTaskRecord> {
