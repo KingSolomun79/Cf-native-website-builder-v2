@@ -27,19 +27,20 @@ const { values } = parseArgs({
 // Required by the V2 runtime (src/env.d.ts + route/domain usage). Each name
 // is audited against actual source references — no stale doc names.
 const REQUIRED = [
-  "ZHIPU_API_KEY",            // Z.ai / Zhipu LLM provider (primary text provider leg)
-  "OPENROUTER_API_KEY",       // OpenRouter LLM provider (incl. vision fallback leg)
+  "ZHIPU_API_KEY",            // Z.ai / Zhipu LLM provider (primary text + vision provider leg)
   "KIE_API_KEY",              // KIE.ai image generation
-  "CF_AIG_TOKEN",             // Cloudflare AI Gateway auth
+  "CF_AIG_TOKEN",             // Cloudflare AI Gateway auth (the working fallback leg)
   "CF_DEPLOY_API_TOKEN",      // Cloudflare Workers/static-assets deploy API
   "OPERATOR_CAPABILITY_SECRET", // Operator capability HMAC (approve/publish/rollback)
   "WEBHOOK_SECRET",           // Intake route HMAC (onboarding/build/revision)
 ];
 
-// Optional: only required once any Site Configuration sets
-// turnstile_required = 1 (PRD 39); absent is valid while all Sites run
-// turnstile-off.
-const OPTIONAL = ["TURNSTILE_SECRET_KEY"];
+// Optional: coded paths that activate only when the credential exists.
+// OPENROUTER_API_KEY: operator decision 2026-09-02 — ZAI is primary and the
+// AI Gateway is the working fallback; provider chains are key-driven, so an
+// absent key skips the OpenRouter leg without error. TURNSTILE_SECRET_KEY:
+// only required once any Site Configuration sets turnstile_required = 1.
+const OPTIONAL = ["OPENROUTER_API_KEY", "TURNSTILE_SECRET_KEY"];
 
 // Retired V1/interim integrations that must never exist on the V2 Worker
 // (issue #33; corrected #28 removed the email-router architecture).

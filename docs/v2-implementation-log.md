@@ -188,3 +188,32 @@ notifications@wazibiz.ke (exactly the env var), destination from Site
 Configuration, and the visitor address strictly as Reply-To. Production
 still defines no sender var until the #27 deploy; the one remaining #33
 operator input is the provider secret values at #27 time.
+
+Issue #27 executed 2026-09-02 as a fresh V2 production deployment (guided
+operator runbook). Config re-point commit `32f65a3` fixed the inherited V1
+deployment identity: Worker cf-website-factory-v2, D1 website_factory_v2
+(`9e2597d1-9598-4c50-adcf-764c1b6319da`, created fresh), R2
+website-factory-v2-assets (created fresh), PUBLIC_APP_URL v2, production
+var WAZIBIZ_SENDER_EMAIL=notifications@wazibiz.ke, and the ZAI-primary
+LLM plan (text glm-5-turbo, vision glm-4v, AI Gateway fallback;
+OPENROUTER_API_KEY optional by operator decision). Migrations applied
+30/30 to the clean database — all V2 tables present, zero V1-era tables
+(0030's IF EXISTS guards). Deployed from clean tree `32f65a3` (first
+version `852dacda-2e23-47b4-add8-14fa5983ddf8`; handlers fetch+scheduled;
+cron */10; workflow website-build-workflow). Operator provisioned all
+seven secrets via hidden prompts with explicit --name guardrails
+(ZHIPU_API_KEY, KIE_API_KEY, CF_AIG_TOKEN, CF_DEPLOY_API_TOKEN,
+OPERATOR_CAPABILITY_SECRET fresh >=32B, WEBHOOK_SECRET fresh >=32B,
+TURNSTILE_SECRET_KEY) — live version after secret changes
+`e741c1a6-5e65-4752-98e0-4082700ad409`. Secret-name hygiene gate clean:
+required present, all six retired V1/interim names absent,
+scripts/verify-v2-secrets.mjs updated to classify OPENROUTER_API_KEY as
+optional per the operator decision. Health probes: GET / 404 (alive),
+D1-backed route answers JSON, approval and publication routes deny 401
+CAPABILITY_REQUIRED (capability gating live in production), form route
+enforces the browser payload contract (400). V1 untouched proof against
+the before-inventory: Worker live version still dc99fb34 (2026-08-19
+rollback), D1/R2 unchanged, 10 V1 secret names unchanged. Gates: 28
+files / 201 tests, typecheck clean, dry-run passes. CSO for the
+deployment boundary: SECURITY OK FOR CURRENT SCOPE
+(docs/security/2026-09-02-v2-issue-27-phase7-cso.md).
