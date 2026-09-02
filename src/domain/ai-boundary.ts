@@ -104,6 +104,23 @@ export function parseModelJson(raw: string): { ok: true; value: unknown } | { ok
   }
 }
 
+// Models render absent optional properties as explicit nulls; the V2 stage
+// schemas express absence through Optional (not nullable) properties. Strip
+// nulls from parsed model output before validation so the common pattern
+// validates instead of tripping "Expected string" on null.
+function stripNulls(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(stripNulls);
+  if (value !== null && typeof value === "object") {
+    const out: Record<string, unknown> = {};
+    for (const [key, entry] of Object.entries(value as Record<string, unknown>)) {
+      if (entry === null) continue;
+      out[key] = stripNulls(entry);
+    }
+    return out;
+  }
+  return value;
+}
+
 export function schemaErrorSummary(schema: TSchema, value: unknown): string {
   const issues: string[] = [];
   for (const error of Value.Errors(schema, value)) {
@@ -205,12 +222,15 @@ Return ONLY the corrected JSON object. Do not change the semantic content beyond
     if (!parsed.ok) {
       outcome = "invalid";
       errorSummary = parsed.error;
-    } else if (!Value.Check(options.schema, parsed.value)) {
-      outcome = "invalid";
-      errorSummary = schemaErrorSummary(options.schema, parsed.value);
     } else {
-      value = parsed.value as T;
-      outcome = attempt === 1 ? "valid" : "repaired";
+      const candidate = stripNulls(parsed.value);
+      if (!Value.Check(options.schema, candidate)) {
+        outcome = "invalid";
+        errorSummary = schemaErrorSummary(options.schema, candidate);
+      } else {
+        value = candidate as T;
+        outcome = attempt === 1 ? "valid" : "repaired";
+      }
     }
 
     attempts.push({ attempt, outcome, errorSummary });
