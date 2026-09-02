@@ -253,6 +253,7 @@ async function sha256Hex(data: Uint8Array): Promise<string> {
 export async function runImageWave(env: Env, input: RunImageWaveInput): Promise<SlotGenerationOutcome[]> {
   const waveSlots = orderSlotsByPriority(input.slots.filter((slot) => waveForSlot(slot) === input.wave));
   const outcomes: SlotGenerationOutcome[] = [];
+  let lastProviderError: string | null = null;
 
   for (const slot of waveSlots) {
     const record = input.promptRecords.get(slot.id);
@@ -283,7 +284,8 @@ export async function runImageWave(env: Env, input: RunImageWaveInput): Promise<
           promptText: record.promptText,
           aspectRatio: slot.orientation === "portrait" ? "9:16" : slot.orientation === "square" ? "1:1" : "16:9",
         });
-      } catch {
+      } catch (error) {
+        lastProviderError = (error as Error).message;
         await env.DB.prepare(
           `INSERT INTO image_attempts (id, build_id, build_version_id, slot_id, wave, attempt_number, status, cost_usd, created_at)
            VALUES (?, ?, ?, ?, ?, ?, 'failed', 0, ?)`
@@ -371,7 +373,7 @@ export async function runImageWave(env: Env, input: RunImageWaveInput): Promise<
     fromState: input.wave === 1 ? "SITE_VALIDATION" : "IMAGE_WAVE_1",
     toState: input.wave === 1 ? "IMAGE_WAVE_1" : "IMAGE_WAVE_2",
     stage: input.wave === 1 ? "image_wave_1" : "image_wave_2",
-    detail: `Wave ${input.wave}: ${outcomes.filter((outcome) => outcome.status === "accepted").length}/${waveSlots.length} slots accepted`,
+    detail: `Wave ${input.wave}: ${outcomes.filter((outcome) => outcome.status === "accepted").length}/${waveSlots.length} slots accepted${lastProviderError ? `; last provider error: ${lastProviderError.replace(/\s+/g, " ").slice(0, 240)}` : ""}`,
   });
 
   return outcomes;
