@@ -225,13 +225,18 @@ export async function generateWithGatewayDetailed(
       max_tokens: options?.maxTokens ?? 4096,
     };
 
-    // The canonical glm-5.3-flash is a REASONING model on the ZAI leg:
-    // reasoning_content draws from the same max_tokens budget, so a 4096 cap
-    // exhausts on thinking and returns empty content with finish_reason
-    // "length" (live production evidence, issue #30). Give the leg a generous
-    // floor so reasoning plus the JSON answer both fit.
+    // ZAI-leg serving shape for the canonical glm-5.3-flash (live production
+    // evidence, issue #30):
+    //  - it is a REASONING model: reasoning_content draws from the same
+    //    max_tokens budget, so a 4096 cap returns empty content with
+    //    finish_reason "length";
+    //  - with thinking enabled, big stage prompts exceed the provider edge's
+    //    ~100s origin window (Cloudflare 524).
+    // Schema-bound V2 stages need direct structured output, so the leg
+    // disables thinking and raises the token floor.
     if (provider === "zhipu") {
       body.max_tokens = Math.max(body.max_tokens ?? 0, 16384);
+      (body as ChatCompletionRequest & { thinking?: { type: "enabled" | "disabled" } }).thinking = { type: "disabled" };
     }
 
     if (options?.jsonMode && provider !== "zhipu") {
