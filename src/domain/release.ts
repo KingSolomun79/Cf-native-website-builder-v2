@@ -9,7 +9,7 @@
 import type { Env } from "../env.d";
 import { nowIso } from "../lib/crypto";
 import { appendBuildWorkflowEvent } from "./lifecycle";
-import { storeBuildStageArtifact, storeBuildStageArtifactIdempotent } from "./stage-artifacts";
+import { StageArtifactError, storeBuildStageArtifact, storeBuildStageArtifactIdempotent } from "./stage-artifacts";
 import {
   evaluateQaARelease,
   evaluateQaBRelease,
@@ -95,7 +95,10 @@ export async function assignReleaseReady(
   const polish = [...verdictA.polish, ...verdictB.polish];
 
   // Persist the combined QA report with exact findings and categorization —
-  // pass or fail, the evidence is retained.
+  // pass or fail, the evidence is retained. A retried evaluation after the
+  // report was frozen (fresh LLM verdicts never reproduce its checksum)
+  // surfaces as RELEASE_ALREADY_ASSIGNED when the record is pinned.
+  try {
   await storeBuildStageArtifactIdempotent(env, {
     buildId: input.buildId,
     buildVersionId: input.buildVersionId,
@@ -114,6 +117,22 @@ export async function assignReleaseReady(
       reasons,
     },
   });
+  } catch (error) {
+    if (reasons.length === 0 && error instanceof StageArtifactError && error.code === "ARTIFACT_ALREADY_EXISTS") {
+      const pinned = await env.DB.prepare(
+        "SELECT build_version_id FROM build_release_records WHERE build_version_id = ?"
+      )
+        .bind(input.buildVersionId)
+        .first<{ build_version_id: string }>();
+      if (pinned) {
+        throw new ReleaseGateError(
+          "RELEASE_ALREADY_ASSIGNED",
+          `Build Version ${input.buildVersionId} already has a Release Ready record`
+        );
+      }
+    }
+    throw error;
+  }
 
   await appendBuildWorkflowEvent(env, {
     buildId: input.buildId,
