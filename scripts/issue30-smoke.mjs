@@ -132,6 +132,23 @@ if (command === "png") {
   const started = await post(`/api/v2/site-generations/${siteGenerationId}/builds`, {}, secrets.WEBHOOK_SECRET);
   if (started.status !== 202) process.exit(1);
   console.log("WORKFLOW_INSTANCE_ID=" + started.body.workflowInstanceId);
+} else if (command === "revision") {
+  const parentBuildId = process.argv[3];
+  const description = process.argv[4] ?? "Internal WAZIBIZ platform verification business (issue #30 revision for rollback window verification). Not a real client.";
+  const result = await post(`/api/v2/builds/${parentBuildId}/revision-requests`, {
+    revisionRequest: {
+      changes: { facts: { businessDescription: description } },
+      requestNote: "Issue #30 second publication for rollback verification",
+    },
+  }, secrets.WEBHOOK_SECRET);
+  if (result.status !== 201) process.exit(1);
+  console.log("NEW_BUILD_ID=" + result.body.buildId);
+  console.log("NEW_BUILD_VERSION_ID=" + result.body.buildVersionId);
+} else if (command === "pipeline") {
+  const buildId = process.argv[3];
+  const result = await post(`/api/v2/builds/${buildId}/pipeline`, {}, secrets.WEBHOOK_SECRET);
+  if (result.status !== 202) process.exit(1);
+  console.log("WORKFLOW_INSTANCE_ID=" + result.body.workflowInstanceId);
 } else if (command === "status") {
   const buildId = process.argv[3];
   const response = await fetch(`${BASE}/api/v2/builds/${buildId}`);

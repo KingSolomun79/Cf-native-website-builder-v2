@@ -19,6 +19,7 @@
 // platform's own PUBLIC_APP_URL so generated Contact forms post to the real
 // central Form Service — never the placeholder default.
 
+import { generateId, nowIso } from "../lib/crypto";
 import type { Env } from "../env.d";
 import { appendBuildWorkflowEvent, createInitialBuild } from "./lifecycle";
 import { runReferenceIntake, getFrozenReferenceEvidence } from "./reference-intake";
@@ -515,15 +516,21 @@ export async function runBuildPipeline(
       priorVersionId = version.buildVersionId;
       version = { buildVersionId: applied.newBuildVersionId, buildVersionNumber: applied.newBuildVersionNumber };
       await reuseAcceptedImages(env, priorVersionId, version.buildVersionId);
+      // The repaired candidate REUSES the source version's validated
+      // generation artifacts verbatim (the recorded Fix Plan is the repair
+      // provenance). Fresh LLM regeneration of already-validated pages is
+      // exactly where repairs have regressed structure (live evidence:
+      // footer-less/invented-slot regenerations), and Automated Repair may
+      // only modify realization details — never the validated design.
+      await copyGenerationArtifacts(env, buildId, priorVersionId, version.buildVersionId);
 
-      // Material repair creates a NEW immutable Build Version: regenerate the
-      // realization under the same fixed Blueprint/Contract with the repair
-      // directives, then confirmation QA evaluates the NEW version only.
+      // Material repair creates a NEW immutable Build Version; confirmation
+      // QA evaluates the NEW version only.
       const repairedCtx: VersionContext = {
         siteGenerationId: input.siteGenerationId, siteId, buildId,
         buildVersionId: version.buildVersionId, buildVersionNumber: version.buildVersionNumber,
       };
-      const regenerated = await produceCandidate(repairedCtx, repairDirectivesFromPlan(plan));
+      const regenerated = await produceCandidate(repairedCtx);
       currentPreviewUrl = regenerated.previewUrl;
 
       const confirmation = await runConfirmationQa(env, {
