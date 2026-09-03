@@ -17,7 +17,7 @@ import { Type, type Static } from "@sinclair/typebox";
 import { Value } from "@sinclair/typebox/value";
 import type { Env } from "../env.d";
 import { generateId, nowIso } from "../lib/crypto";
-import { getObject, putImmutableObject } from "../lib/assets";
+import { getObject, putImmutableObjectTolerant } from "../lib/assets";
 import { appendBuildWorkflowEvent } from "./lifecycle";
 import { buildVersionAssetKey } from "./artifact-keys";
 import { runSchemaValidatedAiStage, type RawAiGenerate } from "./ai-boundary";
@@ -340,7 +340,9 @@ export async function runImageWave(env: Env, input: RunImageWaveInput): Promise<
         input.buildVersionNumber,
         `images/${slot.id}-a${attemptNumber}.webp`
       );
-      await putImmutableObject(env, r2Key, result.bytes, { httpMetadata: { contentType: "image/webp" } });
+      // Tolerant re-freeze: a retried wave re-attempts unaccepted slots under
+      // the same deterministic attempt key.
+      await putImmutableObjectTolerant(env, r2Key, result.bytes, { httpMetadata: { contentType: "image/webp" } });
       const checksum = await sha256Hex(result.bytes);
 
       await env.DB.prepare(

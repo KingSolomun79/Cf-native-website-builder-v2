@@ -304,7 +304,7 @@ function pagePrompt(input: {
 
   if (pageId === "home") {
     return `${base}
-- The page structure MUST realize the Blueprint homepage topology in order: each region rendered as a section carrying data-region="{regionId}" with the region's purpose.
+- The page structure MUST realize the Blueprint homepage topology in order: each region rendered as a <section data-region="{regionId}"> using EXACTLY these region ids, in order, verbatim (no other ids, no renames): ${blueprint.homepageRegions.map((region) => region.id).join(", ")}. Each section carries its region's purpose.
 - First viewport must match the Blueprint first-viewport description.
 - Anti-fallback rules are binding: ${JSON.stringify(blueprint.antiFallbackRules)}.
 
