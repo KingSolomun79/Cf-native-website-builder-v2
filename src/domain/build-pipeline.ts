@@ -125,6 +125,21 @@ async function reuseAcceptedImages(env: Env, fromBuildVersionId: string, toBuild
     .run();
 }
 
+// Copies the source Build Version's validated generation artifacts (css/js/
+// pages/image plan) onto the repaired Build Version. R2 objects are shared
+// read-only (same immutable content, same keys); each version gets its own
+// artifact rows so per-version immutability and provenance stay truthful.
+async function copyGenerationArtifacts(env: Env, buildId: string, fromBuildVersionId: string, toBuildVersionId: string): Promise<void> {
+  await env.DB.prepare(
+    `INSERT OR IGNORE INTO build_stage_artifacts (id, build_id, build_version_id, site_generation_id, kind, subkey, schema_version, artifact_r2_key, provenance_json, checksum, created_at)
+     SELECT ?, ?, ?, site_generation_id, kind, subkey, schema_version, artifact_r2_key, provenance_json, checksum, ?
+     FROM build_stage_artifacts
+     WHERE build_version_id = ? AND kind IN ('generated_shared_source', 'generated_page', 'image_plan')`
+  )
+    .bind(generateId(), buildId, toBuildVersionId, nowIso(), fromBuildVersionId)
+    .run();
+}
+
 function repairDirectivesFromPlan(plan: FixPlan): string {
   return plan.repairs.map((repair) => `- target=${repair.target} strategy=${repair.strategy}${repair.slotId ? ` slot=${repair.slotId}` : ""}: ${repair.description}`).join("\n");
 }
