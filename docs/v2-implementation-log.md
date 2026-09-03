@@ -217,3 +217,64 @@ rollback), D1/R2 unchanged, 10 V1 secret names unchanged. Gates: 28
 files / 201 tests, typecheck clean, dry-run passes. CSO for the
 deployment boundary: SECURITY OK FOR CURRENT SCOPE
 (docs/security/2026-09-02-v2-issue-27-phase7-cso.md).
+
+Issue #30 executed 2026-09-02/03 as the full production release verification
+plus the canonical model correction.
+
+**Model correction (Parts 0-5):** one canonical LLM model — glm-5.3-flash on
+every V2 textual/multimodal call — replaced the per-provider/per-stage model
+vars (ZHIPU_MODEL glm-5-turbo, VISION_PRIMARY_MODEL glm-4v, FALLBACK/
+VISION_FALLBACK models retired) with a single LLM_MODEL seam
+(src/lib/ai-gateway.ts CANONICAL_LLM_MODEL; provider failover keeps the exact
+same model, never a substitution). Serving-shape corrections discovered live:
+the AI Gateway proxy legs reject the plain canonical name (HTTP 400 code 2019,
+"<provider>/<model>" demanded) so the ZAI primary leg calls the provider's
+OpenAI-compatible endpoint directly; glm-5.3-flash is a reasoning model whose
+thinking consumed the 4096-token budget (empty content, finish_reason=length)
+and exceeded the provider's ~100s edge window (524), so the ZAI leg disables
+thinking and floors max_tokens at 16384; the boundary states the stage's JSON
+Schema on every first attempt, strips null-valued optional properties,
+extracts JSON from markdown/prose, and records provider-reported model
+identity in provenance. scripts/verify-llm-model-routing.mjs (wired into
+`npm test`) fails the build on any legacy model literal in executable
+routing. Production provenance for the Release Ready build: every
+ai_stage_runs row records provider=zhipu model=glm-5.3-flash.
+
+**Production pipeline wiring:** WebsiteBuildWorkflow now drives the full
+REFERENCE_BOUND lifecycle through src/domain/build-pipeline.ts with every
+stage as its own durable step (bounded engine retries); new KIE v2 adapter
+(lib/kie-v2.ts, 1000-char z-image prompt cap, 429 backoff, USD-gated);
+browser-backed QA capture (domain/qa-capture.ts); HMAC-gated
+POST /api/v2/builds/:buildId/pipeline for Revision-Request Builds; generated
+Contact forms post to PUBLIC_APP_URL (the placeholder form-service default is
+gone); screenshot-only References get a canonical-screenshot evidence anchor.
+Retry-safety hardened across ten live-diagnosed failure modes (frozen-artifact
+reuse at the orchestration seam, per-subkey generation reuse, tolerant
+deterministic re-freezes, KIE spend-resume, ≤1MiB step outputs, repair-time
+artifact reuse, repair-plan wording rule, qa_report retry window).
+
+**Live production results:** controlled REFERENCE_BOUND generation reached
+Release Ready through a real bounded repair (v1 QA fail -> Fix Coordinator ->
+immutable v2 -> confirmation pass; QA-A visual 93 / content 94 / QA-B 94;
+12 accepted images; KIE spend $0.60; manifest 7faf8a69…d9bce). Approval
+recorded under a minted capability with exact hash binding (negatives: no
+token 401, wrong action/binding 403, expired 401); Publication deployed the
+exact approved artifact with no regeneration (https://pub-dddd8e0d86-v2.
+wazibizwebsites.workers.dev; four pages, shared assets, no provider URLs).
+A controlled contact submission through the published site's browser contract
+reached **delivered** on attempt 1 via the native Cloudflare Email Service
+with From=notifications@wazibiz.ke, Reply-To=visitor only, To=the configured
+Form Destination — #28's production criterion. Retired V1 routes 404 on the
+V2 worker; the preserved V1 Worker still serves dc99fb34, untouched.
+Rollback was correctly refused while no prior Published Version existed.
+
+**Remaining gap (#30 stays open):** the second publication for the rollback
+window did not reach Release Ready in six Revision-Request attempts — each
+terminated in a correct bounded state (FAILED on stochastic generation
+validation drift, HUMAN_REVIEW_REQUIRED when confirmation QA kept valid
+blockers) after the accumulated fixes eliminated the systematic causes
+(attempt-key collisions, repair regeneration regressions, boundary-regex
+false positives, transient D1/DO step faults). The rollback execution and
+stale-capability checks therefore remain unexercised in production;
+CSO: docs/security/2026-09-02-v2-issue30-release-cso.md (SECURITY OK FOR
+CURRENT SCOPE, watch items recorded).
