@@ -9,6 +9,14 @@
 // QA-B owns browser/runtime/source/DOM/network/accessibility/SEO/form-
 // contract verification: technical >= 90, P0=0, P1=0 and all mandatory
 // gates.
+//
+// Confirmation seam (issue #38): the confirmation reports re-evaluate a
+// repaired Build Version against the PREVIOUS blockers and must distinguish
+// an ACTIVE finding (defect still present) from a RESOLVED finding (the
+// prior defect verifiably fixed — a resolution record carrying its original
+// severity). Resolved findings are never active Release Blockers. Fresh
+// QA-A/QA-B report schemas do not allow `status`, so fresh blocker
+// semantics are unchanged; absent status fails closed as active.
 
 import { Type, type Static } from "@sinclair/typebox";
 import type { Env } from "../env.d";
@@ -17,6 +25,10 @@ import type { GeometryComparison } from "./qa-evidence";
 
 export const QA_A_SCHEMA_VERSION = "qa-a/1";
 export const QA_B_SCHEMA_VERSION = "qa-b/1";
+// Confirmation reports carry the explicit ACTIVE/RESOLVED finding status, so
+// they version separately from the fresh-QA report schemas (issue #38).
+export const QA_A_CONFIRMATION_SCHEMA_VERSION = "qa-a-confirmation/2";
+export const QA_B_CONFIRMATION_SCHEMA_VERSION = "qa-b-confirmation/2";
 
 export const QA_A_HARD_GATE_IDS = [
   "FIRST_VIEWPORT_MATERIALLY_CORRECT",
@@ -62,6 +74,27 @@ export const FindingSchema = Type.Object(
 );
 export type QaFinding = Static<typeof FindingSchema>;
 
+// Explicit resolution state on CONFIRMATION findings (issue #38). Required:
+// confirmation output that cannot say whether a defect is active or resolved
+// is schema-invalid and takes the existing repair/fail path — it can never
+// silently pass as either state.
+export const ConfirmationFindingSchema = Type.Object(
+  {
+    severity: SeveritySchema,
+    domain: Type.String({ minLength: 1, maxLength: 200 }),
+    description: Type.String({ minLength: 1, maxLength: 2000 }),
+    evidenceRef: Type.String({ minLength: 1, maxLength: 500 }),
+    status: Type.Union([Type.Literal("ACTIVE"), Type.Literal("RESOLVED")]),
+  },
+  { additionalProperties: false }
+);
+export type QaConfirmationFinding = Static<typeof ConfirmationFindingSchema>;
+
+// A finding as the release evaluators see it: fresh findings carry no
+// status (absent = ACTIVE — fail closed on ambiguity, issue #38).
+export type EvaluableQaFinding = QaFinding & { status?: FindingStatus };
+export type FindingStatus = QaConfirmationFinding["status"];
+
 export const QaAReportSchema = Type.Object(
   {
     version: Type.String({ minLength: 1 }),
@@ -86,27 +119,62 @@ export const QaBReportSchema = Type.Object(
 );
 export type QaBReport = Static<typeof QaBReportSchema>;
 
+export const QaAConfirmationReportSchema = Type.Object(
+  {
+    version: Type.String({ minLength: 1 }),
+    visualScore: ScoreSchema,
+    contentScore: ScoreSchema,
+    fabrication: Type.Boolean(),
+    hardGates: Type.Array(GateSchema, { minItems: 1 }),
+    findings: Type.Array(ConfirmationFindingSchema),
+  },
+  { additionalProperties: false }
+);
+export type QaAConfirmationReport = Static<typeof QaAConfirmationReportSchema>;
+
+export const QaBConfirmationReportSchema = Type.Object(
+  {
+    version: Type.String({ minLength: 1 }),
+    technicalScore: ScoreSchema,
+    gates: Type.Array(GateSchema, { minItems: 1 }),
+    findings: Type.Array(ConfirmationFindingSchema),
+  },
+  { additionalProperties: false }
+);
+export type QaBConfirmationReport = Static<typeof QaBConfirmationReportSchema>;
+
 // ── Release evaluation (pure) ───────────────────────────────────────────────
 
 export interface ReleaseGateVerdict {
   releaseReady: boolean;
   reasons: string[];
-  blockers: QaFinding[];
-  polish: QaFinding[];
+  blockers: EvaluableQaFinding[];
+  polish: EvaluableQaFinding[];
+  /** Confirmation seam only (issue #38): findings structurally re-verified
+   *  as fixed on the repaired Build Version. Resolution records — retained
+   *  as evidence, never active Release Blockers. */
+  resolved: EvaluableQaFinding[];
 }
 
-export function isReleaseBlocker(finding: QaFinding): boolean {
-  return finding.severity === "P0" || finding.severity === "P1";
+export function isReleaseBlocker(finding: EvaluableQaFinding): boolean {
+  // issue #38: severity classifies a defect only while it is ACTIVE. A
+  // finding structurally marked RESOLVED is a confirmation record of a
+  // fixed prior defect, never an active blocker. Absent status (fresh QA,
+  // or ambiguous confirmation output) fails closed as ACTIVE.
+  return (finding.severity === "P0" || finding.severity === "P1") && finding.status !== "RESOLVED";
 }
 
 // QA-A release condition. Hard-gate failures are separate conjuncts: no
-// aggregate score can average them away.
-export function evaluateQaARelease(report: QaAReport): ReleaseGateVerdict {
+// aggregate score can average them away. Findings marked RESOLVED (possible
+// only in confirmation reports) are excluded from the blocker reasons.
+export function evaluateQaARelease(report: QaAReport | QaAConfirmationReport): ReleaseGateVerdict {
+  const findings = report.findings as EvaluableQaFinding[];
   const reasons: string[] = [];
   if (report.visualScore < 90) reasons.push(`visual fidelity ${report.visualScore} < 90`);
   if (report.contentScore < 90) reasons.push(`content quality ${report.contentScore} < 90`);
-  const p0 = report.findings.filter((finding) => finding.severity === "P0");
-  const p1 = report.findings.filter((finding) => finding.severity === "P1");
+  const active = findings.filter((finding) => finding.status !== "RESOLVED");
+  const p0 = active.filter((finding) => finding.severity === "P0");
+  const p1 = active.filter((finding) => finding.severity === "P1");
   if (p0.length > 0) reasons.push(`${p0.length} P0 finding(s)`);
   if (p1.length > 0) reasons.push(`${p1.length} P1 finding(s)`);
   if (report.fabrication) reasons.push("fabricated Business Facts detected");
@@ -116,15 +184,18 @@ export function evaluateQaARelease(report: QaAReport): ReleaseGateVerdict {
     releaseReady: reasons.length === 0,
     reasons,
     blockers: [...p0, ...p1],
-    polish: report.findings.filter((finding) => !isReleaseBlocker(finding)),
+    polish: active.filter((finding) => !isReleaseBlocker(finding)),
+    resolved: findings.filter((finding) => finding.status === "RESOLVED"),
   };
 }
 
-export function evaluateQaBRelease(report: QaBReport): ReleaseGateVerdict {
+export function evaluateQaBRelease(report: QaBReport | QaBConfirmationReport): ReleaseGateVerdict {
+  const findings = report.findings as EvaluableQaFinding[];
   const reasons: string[] = [];
   if (report.technicalScore < 90) reasons.push(`technical ${report.technicalScore} < 90`);
-  const p0 = report.findings.filter((finding) => finding.severity === "P0");
-  const p1 = report.findings.filter((finding) => finding.severity === "P1");
+  const active = findings.filter((finding) => finding.status !== "RESOLVED");
+  const p0 = active.filter((finding) => finding.severity === "P0");
+  const p1 = active.filter((finding) => finding.severity === "P1");
   if (p0.length > 0) reasons.push(`${p0.length} P0 finding(s)`);
   if (p1.length > 0) reasons.push(`${p1.length} P1 finding(s)`);
   const failedGates = report.gates.filter((gate) => !gate.passed);
@@ -133,7 +204,8 @@ export function evaluateQaBRelease(report: QaBReport): ReleaseGateVerdict {
     releaseReady: reasons.length === 0,
     reasons,
     blockers: [...p0, ...p1],
-    polish: report.findings.filter((finding) => !isReleaseBlocker(finding)),
+    polish: active.filter((finding) => !isReleaseBlocker(finding)),
+    resolved: findings.filter((finding) => finding.status === "RESOLVED"),
   };
 }
 

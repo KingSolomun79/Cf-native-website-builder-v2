@@ -103,4 +103,38 @@ describe("production build pipeline (issue #30 wiring)", () => {
     ).bind(versions.results[0].id).first<{ n: number }>();
     expect(attempts?.n).toBe(firstVersionAccepted?.n);
   });
+
+  it("confirmation resolution notes are not counted as active Release Blockers (issue #38)", async () => {
+    // Production defect (build bbe8c8f9 v3): the repaired candidate was clean,
+    // but confirmation QA re-reported the fixed P1 — original severity
+    // retained — and the resolver counted the resolution note as an active
+    // blocker, driving a factually clean candidate to HUMAN_REVIEW_REQUIRED.
+    const siteGenerationId = await startGeneration("references/pipeline/resolved-note.png");
+    const outcome = await runBuildPipeline(env, {
+      siteGenerationId,
+      deps: createPipelineScripts({ firstQaAFails: true, confirmationQaEmitsResolvedNote: true }),
+    });
+
+    // The RESOLVED note must not consume the Release Blocker Fix budget.
+    expect(outcome.terminal).toBe("RELEASE_READY");
+    expect(outcome.reasons).toEqual([]);
+    expect(outcome.repairApplied).toBe(true);
+
+    const versions = await env.DB.prepare(
+      "SELECT id, version_number FROM build_versions WHERE build_id = ? ORDER BY version_number"
+    ).bind(outcome.buildId).all<{ id: string; version_number: number }>();
+    expect(versions.results.map((version) => version.version_number)).toEqual([1, 2]);
+    expect(outcome.releaseReadyBuildVersionId).toBe(versions.results[1].id);
+
+    // Exactly one Fix Coordinator batch — no Release Blocker Fix was burned
+    // on a resolution note, and the Release Ready record pins the repaired v2.
+    const batches = await env.DB.prepare(
+      "SELECT kind FROM repair_batches WHERE build_id = ?"
+    ).bind(outcome.buildId).all<{ kind: string }>();
+    expect(batches.results).toEqual([{ kind: "fix_coordinator" }]);
+    const release = await env.DB.prepare(
+      "SELECT build_version_id FROM build_release_records WHERE build_version_id = ?"
+    ).bind(outcome.releaseReadyBuildVersionId!).first();
+    expect(release).not.toBeNull();
+  });
 });

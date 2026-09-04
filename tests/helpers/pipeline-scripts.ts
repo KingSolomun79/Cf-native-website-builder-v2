@@ -130,9 +130,48 @@ const failingQaA: QaAReport = {
   hardGates: QA_A_HARD_GATE_IDS.map((id) => ({ id, passed: true })),
   findings: [{ severity: "P1", domain: "visual-fidelity", description: "hero heading contrast too weak in first viewport", evidenceRef: "qa/home-1440-first.png" }],
 };
+// Confirmation-seam variant (issue #38): the same still-present defect must
+// be reported with the explicit ACTIVE status.
+const failingConfirmationQaA = {
+  version: "1", visualScore: 86, contentScore: 93, fabrication: false,
+  hardGates: QA_A_HARD_GATE_IDS.map((id) => ({ id, passed: true })),
+  findings: [{ severity: "P1", domain: "visual-fidelity", description: "hero heading contrast too weak in first viewport", evidenceRef: "qa/home-1440-first.png", status: "ACTIVE" as const }],
+};
 const passingQaB: QaBReport = {
   version: "1", technicalScore: 95,
   gates: QA_B_MANDATORY_GATE_IDS.map((id) => ({ id, passed: true })), findings: [],
+};
+
+// Issue #38 production defect shape: the confirmation reviewer re-reports a
+// PREVIOUSLY IDENTIFIED blocker as fixed, keeping its original severity.
+// The structured `status: "RESOLVED"` field is the confirmation seam's
+// explicit resolution state (the variable indirection keeps the object
+// assignable to the fresh-QaA finding type before the fix lands too).
+const resolvedFirstViewportNoteA = {
+  severity: "P1" as const,
+  domain: "FIRST_VIEWPORT",
+  description:
+    "Previously identified first-viewport height ratio defect is resolved on the new Build Version. Hero region now completes within one viewport at ratio ~0.93 (reference 0.9, tolerance 0.15).",
+  evidenceRef: "qa/home-1440-first.png",
+  status: "RESOLVED" as const,
+};
+const resolvedFirstViewportNoteB = {
+  severity: "P1" as const,
+  domain: "FIRST_VIEWPORT",
+  description:
+    "Previously identified P1 re-verified after repair: hero now completes within one viewport at ratio ~0.93.",
+  evidenceRef: "qa/home-390.png",
+  status: "RESOLVED" as const,
+};
+const resolvedNoteConfirmationQaA: QaAReport = {
+  version: "1", visualScore: 93, contentScore: 92, fabrication: false,
+  hardGates: QA_A_HARD_GATE_IDS.map((id) => ({ id, passed: true })),
+  findings: [resolvedFirstViewportNoteA],
+};
+const resolvedNoteConfirmationQaB: QaBReport = {
+  version: "1", technicalScore: 93,
+  gates: QA_B_MANDATORY_GATE_IDS.map((id) => ({ id, passed: true })),
+  findings: [resolvedFirstViewportNoteB],
 };
 
 function contactHtml(endpoint: string, siteFormId: string): string {
@@ -152,6 +191,9 @@ export function createPipelineScripts(
     allQaAFails?: boolean;
     /** Post-repair confirmation QA-A fails (second-batch scenarios). */
     confirmationQaAFails?: boolean;
+    /** Post-repair confirmation re-emits the prior P1 as a RESOLVED note
+     *  with its original severity (issue #38 regression scenario). */
+    confirmationQaEmitsResolvedNote?: boolean;
     /** Fix Coordinator plan trips the text-boundary heuristic once (then the
      *  re-worded plan complies) or always (violator scenarios). */
     fixCoordinatorPlanTrips?: "once" | "always";
@@ -220,8 +262,14 @@ export function createPipelineScripts(
         blueprintReviewRequired: false,
       });
     }
-    if (user.includes("QA-A Confirmation")) return respond(options.confirmationQaAFails ? failingQaA : passingQaA);
-    if (user.includes("QA-B Confirmation")) return respond(passingQaB);
+    if (user.includes("QA-A Confirmation")) {
+      if (options.confirmationQaEmitsResolvedNote) return respond(resolvedNoteConfirmationQaA);
+      return respond(options.confirmationQaAFails ? failingConfirmationQaA : passingQaA);
+    }
+    if (user.includes("QA-B Confirmation")) {
+      if (options.confirmationQaEmitsResolvedNote) return respond(resolvedNoteConfirmationQaB);
+      return respond(passingQaB);
+    }
     if (user.includes("Plan at most ONE narrow final Automated Repair batch")) {
       return respond({
         version: "1",

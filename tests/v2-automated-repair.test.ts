@@ -14,10 +14,10 @@ import {
   AutomatedRepairError,
   type FixPlan,
 } from "../src/domain/automated-repair";
-import { QA_A_HARD_GATE_IDS, QA_B_MANDATORY_GATE_IDS, type QaAReport, type QaBReport, type QaFinding } from "../src/domain/qa-stages";
+import { QA_A_HARD_GATE_IDS, QA_B_MANDATORY_GATE_IDS, type QaAReport, type QaBReport, type QaFinding, type QaAConfirmationReport, type QaBConfirmationReport } from "../src/domain/qa-stages";
 import { getReleaseRecord } from "../src/domain/release";
 import { generateId } from "../src/lib/crypto";
-import type { RawAiGenerate } from "../src/domain/ai-boundary";
+import { AiStageSchemaInvalidError, type RawAiGenerate } from "../src/domain/ai-boundary";
 
 // Primary-seam tests for the bounded Automated Repair lifecycle (issue #14).
 
@@ -77,7 +77,7 @@ async function newBuildContext(): Promise<{ siteGenerationId: string; buildId: s
   return { siteGenerationId: started.siteGenerationId, buildId: created.buildId, buildVersionId: created.buildVersionId };
 }
 
-function generateFor(plans: { main?: FixPlan; blockerFix?: FixPlan; confirmA: QaAReport; confirmB: QaBReport }): RawAiGenerate {
+function generateFor(plans: { main?: FixPlan; blockerFix?: FixPlan; confirmA: QaAConfirmationReport; confirmB: QaBConfirmationReport }): RawAiGenerate {
   return async (_system, user) => {
     if (user.includes("Plan ONE coordinated main Automated Repair batch")) {
       return { content: JSON.stringify(plans.main ?? fixPlan()), provider: "test", model: "test-model-f" };
@@ -92,7 +92,7 @@ function generateFor(plans: { main?: FixPlan; blockerFix?: FixPlan; confirmA: Qa
   };
 }
 
-const PASS_A: QaAReport = {
+const PASS_CONFIRM_A: QaAConfirmationReport = {
   version: "1",
   visualScore: 94,
   contentScore: 93,
@@ -100,11 +100,23 @@ const PASS_A: QaAReport = {
   hardGates: QA_A_HARD_GATE_IDS.map((id) => ({ id, passed: true })),
   findings: [],
 };
-const PASS_B: QaBReport = {
+const PASS_CONFIRM_B: QaBConfirmationReport = {
   version: "1",
   technicalScore: 95,
   gates: QA_B_MANDATORY_GATE_IDS.map((id) => ({ id, passed: true })),
   findings: [],
+};
+
+// A prior blocker the confirmation still finds present (status ACTIVE).
+const STILL_ACTIVE_A: QaAConfirmationReport = {
+  version: "1",
+  visualScore: 88,
+  contentScore: 92,
+  fabrication: false,
+  hardGates: QA_A_HARD_GATE_IDS.map((id) => ({ id, passed: true })),
+  findings: [
+    { severity: "P1", domain: "visual", description: "hero collapses to centered stack on mobile", evidenceRef: "qa/home-390.png", status: "ACTIVE" },
+  ],
 };
 
 describe("Automated Repair boundaries", () => {
@@ -144,7 +156,7 @@ describe("bounded repair lifecycle", () => {
       buildVersionNumber: 1,
       qaA: qaA(),
       qaB: qaB(),
-      generate: generateFor({ confirmA: PASS_A, confirmB: PASS_B }),
+      generate: generateFor({ confirmA: PASS_CONFIRM_A, confirmB: PASS_CONFIRM_B }),
     });
     const applied = await applyRepairBatch(env, {
       ...context,
@@ -208,7 +220,7 @@ describe("bounded repair lifecycle", () => {
       buildVersionId: applied.newBuildVersionId,
       buildVersionNumber: applied.newBuildVersionNumber,
       previousBlockers: qaA().findings,
-      generate: generateFor({ confirmA: PASS_A, confirmB: PASS_B }),
+      generate: generateFor({ confirmA: PASS_CONFIRM_A, confirmB: PASS_CONFIRM_B }),
     });
 
     // Confirmation ran against the NEW version id — never the old one.
@@ -249,7 +261,7 @@ describe("bounded repair lifecycle", () => {
       buildVersionId: main.newBuildVersionId,
       buildVersionNumber: main.newBuildVersionNumber,
       previousBlockers: qaA().findings,
-      generate: generateFor({ confirmA: qaA(), confirmB: PASS_B }),
+      generate: generateFor({ confirmA: STILL_ACTIVE_A, confirmB: PASS_CONFIRM_B }),
     });
 
     const afterConfirmation = await resolveAfterConfirmation(env, {
@@ -270,7 +282,7 @@ describe("bounded repair lifecycle", () => {
       qaA: stillBlocked.qaA,
       qaB: stillBlocked.qaB,
       remainingBlockers: afterConfirmation.blockers,
-      generate: generateFor({ confirmA: qaA(), confirmB: PASS_B }),
+      generate: generateFor({ confirmA: STILL_ACTIVE_A, confirmB: PASS_CONFIRM_B }),
     });
     const blockerFix = await applyRepairBatch(env, {
       siteGenerationId: context.siteGenerationId,
@@ -301,7 +313,7 @@ describe("bounded repair lifecycle", () => {
       buildVersionId: blockerFix.newBuildVersionId,
       buildVersionNumber: blockerFix.newBuildVersionNumber,
       previousBlockers: afterConfirmation.blockers,
-      generate: generateFor({ confirmA: qaA(), confirmB: PASS_B }),
+      generate: generateFor({ confirmA: STILL_ACTIVE_A, confirmB: PASS_CONFIRM_B }),
     });
     const terminal = await resolveAfterConfirmation(env, {
       siteGenerationId: context.siteGenerationId,
@@ -403,5 +415,196 @@ describe("bounded repair lifecycle", () => {
     });
     expect(seenPrompt).toContain("contact form posts cross-origin");
     expect(seenPrompt).toContain("mobile identity lost");
+  });
+});
+
+// Issue #38: confirmation resolution semantics. Confirmation QA is evaluating
+// whether the PREVIOUS blockers remain active after repair — a finding that
+// verifiably re-reports a fixed prior defect (original severity retained,
+// status RESOLVED) is a resolution record, not an active Release Blocker.
+describe("confirmation resolution semantics (issue #38)", () => {
+  function resolvedPriorP1A(): QaAConfirmationReport {
+    return {
+      version: "1",
+      visualScore: 93,
+      contentScore: 92,
+      fabrication: false,
+      hardGates: QA_A_HARD_GATE_IDS.map((id) => ({ id, passed: true })),
+      findings: [
+        {
+          severity: "P1",
+          domain: "FIRST_VIEWPORT",
+          description:
+            "Previously identified first-viewport height ratio defect is resolved on the new Build Version. Hero region now completes within one viewport at ratio ~0.93 (reference 0.9, tolerance 0.15).",
+          evidenceRef: "qa/home-1440-first.png",
+          status: "RESOLVED",
+        },
+      ],
+    };
+  }
+
+  function resolvedPriorP0B(): QaBConfirmationReport {
+    return {
+      version: "1",
+      technicalScore: 93,
+      gates: QA_B_MANDATORY_GATE_IDS.map((id) => ({ id, passed: true })),
+      findings: [
+        {
+          severity: "P0",
+          domain: "form",
+          description: "Previously identified form contract defect is fixed: the contact form now posts to the central Form Service endpoint.",
+          evidenceRef: "qa/contact-390.png",
+          status: "RESOLVED",
+        },
+      ],
+    };
+  }
+
+  // Consumes BOTH repair batches (the production terminal state of the #30
+  // revision) so the final confirmation is the last automation step.
+  async function consumeFullRepairBudget(context: { siteGenerationId: string; buildId: string; buildVersionId: string }) {
+    const main = await applyRepairBatch(env, {
+      ...context,
+      sourceBuildVersionId: context.buildVersionId,
+      kind: "fix_coordinator",
+      plan: fixPlan(),
+    });
+    if (main.status !== "REPAIR_APPLIED") throw new Error("expected main repair applied");
+    const blockerPlan = await runReleaseBlockerFixStage(env, {
+      siteGenerationId: context.siteGenerationId,
+      buildId: context.buildId,
+      buildVersionId: main.newBuildVersionId,
+      buildVersionNumber: main.newBuildVersionNumber,
+      qaA: qaA(),
+      qaB: qaB(),
+      remainingBlockers: qaA().findings,
+      generate: async () => ({ content: JSON.stringify(fixPlan()), provider: "test", model: "test-model-f" }),
+    });
+    const blockerFix = await applyRepairBatch(env, {
+      siteGenerationId: context.siteGenerationId,
+      buildId: context.buildId,
+      sourceBuildVersionId: main.newBuildVersionId,
+      kind: "release_blocker_fix",
+      plan: blockerPlan.plan,
+    });
+    if (blockerFix.status !== "REPAIR_APPLIED") throw new Error("expected blocker fix applied");
+    return blockerFix;
+  }
+
+  it("resolved prior P0/P1 notes with original severity reach Release Ready (production regression)", async () => {
+    const context = await newBuildContext();
+    const blockerFix = await consumeFullRepairBudget(context);
+
+    const confirmation = await runConfirmationQa(env, {
+      siteGenerationId: context.siteGenerationId,
+      buildId: context.buildId,
+      buildVersionId: blockerFix.newBuildVersionId,
+      buildVersionNumber: blockerFix.newBuildVersionNumber,
+      previousBlockers: qaA().findings,
+      generate: generateFor({ confirmA: resolvedPriorP1A(), confirmB: resolvedPriorP0B() }),
+    });
+    const resolution = await resolveAfterConfirmation(env, {
+      siteGenerationId: context.siteGenerationId,
+      buildId: context.buildId,
+      buildVersionId: blockerFix.newBuildVersionId,
+      confirmation,
+    });
+
+    expect(resolution.status).toBe("RELEASE_READY");
+    expect(resolution.reasons).toEqual([]);
+    expect(resolution.blockers).toHaveLength(0);
+    expect(resolution.resolved).toHaveLength(2);
+    expect(await getReleaseRecord(env, blockerFix.newBuildVersionId)).not.toBeNull();
+    expect(await getReleaseRecord(env, context.buildVersionId)).toBeNull();
+  });
+
+  it("still-active prior blockers and new P0/P1 findings remain blockers", async () => {
+    const context = await newBuildContext();
+    const main = await applyRepairBatch(env, {
+      ...context,
+      sourceBuildVersionId: context.buildVersionId,
+      kind: "fix_coordinator",
+      plan: fixPlan(),
+    });
+    if (main.status !== "REPAIR_APPLIED") throw new Error("expected repair applied");
+
+    // QA-A: the prior P1 is still present; QA-B: a NEW P0 discovered during
+    // confirmation — both ACTIVE, both must block.
+    const confirmation = await runConfirmationQa(env, {
+      siteGenerationId: context.siteGenerationId,
+      buildId: context.buildId,
+      buildVersionId: main.newBuildVersionId,
+      buildVersionNumber: main.newBuildVersionNumber,
+      previousBlockers: qaA().findings,
+      generate: generateFor({
+        confirmA: STILL_ACTIVE_A,
+        confirmB: {
+          version: "1",
+          technicalScore: 91,
+          gates: QA_B_MANDATORY_GATE_IDS.map((id) => ({ id, passed: true })),
+          findings: [
+            { severity: "P0", domain: "form", description: "new cross-origin form post introduced by the repair", evidenceRef: "qa/contact-390.png", status: "ACTIVE" },
+          ],
+        },
+      }),
+    });
+    const resolution = await resolveAfterConfirmation(env, {
+      siteGenerationId: context.siteGenerationId,
+      buildId: context.buildId,
+      buildVersionId: main.newBuildVersionId,
+      confirmation,
+    });
+
+    expect(resolution.status).toBe("RELEASE_BLOCKER_FIX_ALLOWED");
+    expect(resolution.blockers).toHaveLength(2);
+    expect(resolution.resolved).toHaveLength(0);
+    expect(resolution.reasons).toContain("1 P0 finding(s)");
+    expect(resolution.reasons).toContain("1 P1 finding(s)");
+    expect(await getReleaseRecord(env, main.newBuildVersionId)).toBeNull();
+  });
+
+  it("ambiguous confirmation output without resolution status fails closed", async () => {
+    const context = await newBuildContext();
+    const main = await applyRepairBatch(env, {
+      ...context,
+      sourceBuildVersionId: context.buildVersionId,
+      kind: "fix_coordinator",
+      plan: fixPlan(),
+    });
+    if (main.status !== "REPAIR_APPLIED") throw new Error("expected repair applied");
+
+    // Legacy production shape: a P1 resolution note with NO structured
+    // status. This is schema-invalid for confirmation reports; after the one
+    // structural repair attempt it must fail the stage — never silently
+    // become a Release Ready.
+    const legacyShape = {
+      version: "1",
+      visualScore: 94,
+      contentScore: 93,
+      fabrication: false,
+      hardGates: QA_A_HARD_GATE_IDS.map((id) => ({ id, passed: true })),
+      findings: [
+        { severity: "P1", domain: "FIRST_VIEWPORT", description: "Previously identified defect is resolved", evidenceRef: "qa/home-1440-first.png" },
+      ],
+    };
+    let confirmationCalls = 0;
+    await expect(
+      runConfirmationQa(env, {
+        siteGenerationId: context.siteGenerationId,
+        buildId: context.buildId,
+        buildVersionId: main.newBuildVersionId,
+        buildVersionNumber: main.newBuildVersionNumber,
+        previousBlockers: qaA().findings,
+        generate: async (_system, user) => {
+          if (user.includes("QA-A Confirmation")) {
+            confirmationCalls += 1;
+            return { content: JSON.stringify(legacyShape), provider: "test", model: "test-model-f" };
+          }
+          return { content: JSON.stringify(PASS_CONFIRM_B), provider: "test", model: "test-model-f" };
+        },
+      })
+    ).rejects.toBeInstanceOf(AiStageSchemaInvalidError);
+    expect(confirmationCalls).toBe(2);
+    expect(await getReleaseRecord(env, main.newBuildVersionId)).toBeNull();
   });
 });

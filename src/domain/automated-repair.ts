@@ -8,7 +8,10 @@
 //     -> material repair creates a NEW immutable Build Version = new
 //        Release Candidate
 //     -> QA-A Confirmation + QA-B Confirmation evaluate that NEW version
-//        (never mutating or inheriting the prior verdict)
+//        (never mutating or inheriting the prior verdict); every finding
+//        carries an explicit ACTIVE/RESOLVED status — RESOLVED findings are
+//        resolution records of fixed prior blockers, never active blockers
+//        (issue #38)
 //     -> if valid P0/P1 remain: at most ONE narrow Release Blocker Fix
 //        -> confirmation reruns for the changed domains
 //     -> terminal outcome: Release Ready, BLUEPRINT_REVIEW_REQUIRED (which
@@ -28,11 +31,16 @@ import { runSchemaValidatedAiStage, type RawAiGenerate } from "./ai-boundary";
 import {
   evaluateQaARelease,
   evaluateQaBRelease,
-  QaAReportSchema,
-  QaBReportSchema,
+  QA_A_CONFIRMATION_SCHEMA_VERSION,
+  QA_B_CONFIRMATION_SCHEMA_VERSION,
+  QaAConfirmationReportSchema,
+  QaBConfirmationReportSchema,
   type QaAReport,
   type QaBReport,
   type QaFinding,
+  type QaAConfirmationReport,
+  type QaBConfirmationReport,
+  type EvaluableQaFinding,
 } from "./qa-stages";
 import { assignReleaseReady } from "./release";
 
@@ -313,10 +321,18 @@ export async function applyRepairBatch(
 }
 
 // ── Confirmation (evaluates the NEW Build Version) ──────────────────────────
+//
+// Issue #38: confirmation is evaluating whether the previously identified
+// blockers remain active after repair — not producing a fresh blocker list.
+// Every confirmation finding therefore carries an explicit structured
+// `status`: RESOLVED (a prior defect verifiably fixed — a resolution record
+// with its ORIGINAL severity, never an active blocker) or ACTIVE (unfixed /
+// partially fixed prior blocker, or a NEW defect). Missing or ambiguous
+// status fails schema validation and takes the existing repair/fail path.
 
 export interface ConfirmationQaResult {
-  qaA: QaAReport;
-  qaB: QaBReport;
+  qaA: QaAConfirmationReport;
+  qaB: QaBConfirmationReport;
 }
 
 export async function runConfirmationQa(
@@ -332,17 +348,18 @@ export async function runConfirmationQa(
     generate?: RawAiGenerate;
   }
 ): Promise<ConfirmationQaResult> {
-  const promptContext = {
-    previousBlockers: input.previousBlockers,
-    focus:
-      "Re-evaluate THIS new Build Version produced by repair. Focus on the previous/changed blocker domains; any plausibly affected domain must also rerun. This is a NEW immutable Build Version — never treat the repaired candidate as the same version or inherit the prior verdict.",
-  };
+  const focus =
+    "Re-evaluate THIS new Build Version produced by repair. Focus on the previous/changed blocker domains; any plausibly affected domain must also rerun. This is a NEW immutable Build Version — never treat the repaired candidate as the same version or inherit the prior verdict.";
+  const resolutionContract = `You are evaluating whether the PREVIOUSLY IDENTIFIED blockers remain active after the repair — not producing a fresh blocker list without context. For EVERY finding you emit you must set its structured status field:
+- "RESOLVED": the evidence shows a previously identified defect is fixed on THIS Build Version. Report it with its ORIGINAL severity (a fixed P1 stays severity "P1") and status "RESOLVED" — it is a resolution record, NOT an active blocker, and must never by itself fail the release.
+- "ACTIVE": the defect is currently present on THIS Build Version — a previous blocker that is unfixed or only partially fixed, or a NEW defect discovered during this confirmation. Only ACTIVE P0/P1 findings count as Release Blockers.
+Do not mark RESOLVED if the evidence still shows the defect, and never report a resolved previous blocker without the explicit RESOLVED status.`;
 
-  const runA = await runSchemaValidatedAiStage<QaAReport>(env, {
+  const runA = await runSchemaValidatedAiStage<QaAConfirmationReport>(env, {
     stage: "qa-a-confirmation",
-    schema: QaAReportSchema,
-    schemaVersion: "qa-a/1",
-    userPrompt: `QA-A Confirmation. ${promptContext.focus}\n\nPREVIOUS BLOCKERS:\n${JSON.stringify(input.previousBlockers, null, 2)}`,
+    schema: QaAConfirmationReportSchema,
+    schemaVersion: QA_A_CONFIRMATION_SCHEMA_VERSION,
+    userPrompt: `QA-A Confirmation. ${focus}\n\n${resolutionContract}\n\nPREVIOUS BLOCKERS:\n${JSON.stringify(input.previousBlockers, null, 2)}`,
     buildId: input.buildId,
     siteGenerationId: input.siteGenerationId,
     buildVersionId: input.buildVersionId,
@@ -351,11 +368,11 @@ export async function runConfirmationQa(
     temperature: 0.2,
     generate: input.generate,
   });
-  const runB = await runSchemaValidatedAiStage<QaBReport>(env, {
+  const runB = await runSchemaValidatedAiStage<QaBConfirmationReport>(env, {
     stage: "qa-b-confirmation",
-    schema: QaBReportSchema,
-    schemaVersion: "qa-b/1",
-    userPrompt: `QA-B Confirmation. ${promptContext.focus}\n\nPREVIOUS BLOCKERS:\n${JSON.stringify(input.previousBlockers, null, 2)}`,
+    schema: QaBConfirmationReportSchema,
+    schemaVersion: QA_B_CONFIRMATION_SCHEMA_VERSION,
+    userPrompt: `QA-B Confirmation. ${focus}\n\n${resolutionContract}\n\nPREVIOUS BLOCKERS:\n${JSON.stringify(input.previousBlockers, null, 2)}`,
     buildId: input.buildId,
     siteGenerationId: input.siteGenerationId,
     buildVersionId: input.buildVersionId,
@@ -414,6 +431,9 @@ export interface ResolveAfterConfirmationResult {
   reasons: string[];
   blockers: QaFinding[];
   polish: QaFinding[];
+  /** Resolution records: prior blockers the confirmation verifiably
+   *  re-confirmed as fixed (issue #38) — never part of `blockers`. */
+  resolved: EvaluableQaFinding[];
   releaseReadyRecordId?: string;
 }
 
@@ -421,11 +441,15 @@ export async function resolveAfterConfirmation(
   env: Env,
   input: ResolveAfterConfirmationInput
 ): Promise<ResolveAfterConfirmationResult> {
+  // The release evaluators count only ACTIVE P0/P1 findings as blockers;
+  // RESOLVED confirmation findings are returned as `resolved` records and
+  // never produce a release reason (issue #38).
   const verdictA = evaluateQaARelease(input.confirmation.qaA);
   const verdictB = evaluateQaBRelease(input.confirmation.qaB);
   const reasons = [...verdictA.reasons, ...verdictB.reasons];
   const blockers = [...verdictA.blockers, ...verdictB.blockers];
   const polish = [...verdictA.polish, ...verdictB.polish];
+  const resolved = [...verdictA.resolved, ...verdictB.resolved];
 
   if (reasons.length === 0) {
     // Terminal success: Release Ready for the exact repaired Build Version.
@@ -438,7 +462,7 @@ export async function resolveAfterConfirmation(
       qaBuildVersionId: input.buildVersionId,
       evidenceR2Keys: input.evidenceR2Keys ?? [],
     });
-    return { status: "RELEASE_READY", reasons: [], blockers, polish, releaseReadyRecordId: released.recordId };
+    return { status: "RELEASE_READY", reasons: [], blockers, polish, resolved, releaseReadyRecordId: released.recordId };
   }
 
   const blockerFixUsed = await env.DB.prepare(
@@ -448,7 +472,7 @@ export async function resolveAfterConfirmation(
     .first<{ id: string }>();
 
   if (!blockerFixUsed) {
-    return { status: "RELEASE_BLOCKER_FIX_ALLOWED", reasons, blockers, polish };
+    return { status: "RELEASE_BLOCKER_FIX_ALLOWED", reasons, blockers, polish, resolved };
   }
 
   // Repair budget consumed and valid blockers remain: stop automation.
@@ -460,7 +484,7 @@ export async function resolveAfterConfirmation(
     stage: "human_review",
     detail: `HUMAN_REVIEW_REQUIRED: ${blockers.length} valid Release Blocker(s) remain after the bounded repair budget (one Fix Coordinator batch + one Release Blocker Fix): ${reasons.slice(0, 5).join("; ")}`,
   });
-  return { status: "HUMAN_REVIEW_REQUIRED", reasons, blockers, polish };
+  return { status: "HUMAN_REVIEW_REQUIRED", reasons, blockers, polish, resolved };
 }
 
 // Degraded vs Failed (PRD section 31): Degraded means a genuinely useful

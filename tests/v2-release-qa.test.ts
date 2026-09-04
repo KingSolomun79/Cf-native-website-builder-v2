@@ -17,9 +17,15 @@ import {
   runQaBStage,
   QA_A_HARD_GATE_IDS,
   QA_B_MANDATORY_GATE_IDS,
+  QaAConfirmationReportSchema,
+  QaBConfirmationReportSchema,
+  QaAReportSchema,
   type QaAReport,
   type QaBReport,
+  type QaAConfirmationReport,
+  type QaBConfirmationReport,
 } from "../src/domain/qa-stages";
+import { Value } from "@sinclair/typebox/value";
 import { assignReleaseReady, getReleaseRecord, ReleaseGateError } from "../src/domain/release";
 import { getBuildStageArtifact } from "../src/domain/stage-artifacts";
 import type { RawAiGenerate } from "../src/domain/ai-boundary";
@@ -246,6 +252,135 @@ describe("QA-A / QA-B release evaluation", () => {
     });
     expect(qaB.provenance.promptId).toBe("qa-b-browser-technical");
     expect(qaB.provenance.promptVersion).toBe("v3");
+  });
+});
+
+// Issue #38 regression matrix: confirmation findings carry an explicit
+// ACTIVE/RESOLVED status. Only ACTIVE P0/P1 findings are Release Blockers;
+// a RESOLVED note keeps its ORIGINAL severity but is a resolution record.
+describe("confirmation resolution status semantics (issue #38)", () => {
+  const passingGatesA = QA_A_HARD_GATE_IDS.map((id) => ({ id, passed: true }));
+  const passingGatesB = QA_B_MANDATORY_GATE_IDS.map((id) => ({ id, passed: true }));
+
+  function confirmA(overrides: Partial<QaAConfirmationReport> = {}): QaAConfirmationReport {
+    return {
+      version: "1", visualScore: 93, contentScore: 92, fabrication: false,
+      hardGates: passingGatesA, findings: [], ...overrides,
+    };
+  }
+  function confirmB(overrides: Partial<QaBConfirmationReport> = {}): QaBConfirmationReport {
+    return { version: "1", technicalScore: 93, gates: passingGatesB, findings: [], ...overrides };
+  }
+  function finding(severity: "P0" | "P1", status: "ACTIVE" | "RESOLVED", description: string) {
+    return { severity, domain: "FIRST_VIEWPORT", description, evidenceRef: "qa/home-1440-first.png", status };
+  }
+
+  it("A+B: resolved historical P0/P1 notes with original severity are not blockers", () => {
+    const verdictA = evaluateQaARelease(
+      confirmA({ findings: [finding("P1", "RESOLVED", "prior first-viewport defect")] })
+    );
+    expect(verdictA.releaseReady).toBe(true);
+    expect(verdictA.blockers).toHaveLength(0);
+    expect(verdictA.resolved).toHaveLength(1);
+    expect(verdictA.polish).toHaveLength(0);
+
+    const verdictB = evaluateQaBRelease(
+      confirmB({ findings: [finding("P0", "RESOLVED", "prior form contract defect")] })
+    );
+    expect(verdictB.releaseReady).toBe(true);
+    expect(verdictB.blockers).toHaveLength(0);
+    expect(verdictB.resolved).toHaveLength(1);
+  });
+
+  it("C+D: still-active P0/P1 remain blockers", () => {
+    const verdictA = evaluateQaARelease(
+      confirmA({ findings: [finding("P1", "ACTIVE", "prior first-viewport defect still present")] })
+    );
+    expect(verdictA.releaseReady).toBe(false);
+    expect(verdictA.blockers).toHaveLength(1);
+    expect(verdictA.reasons).toContain("1 P1 finding(s)");
+
+    const verdictB = evaluateQaBRelease(
+      confirmB({ findings: [finding("P0", "ACTIVE", "prior form contract defect still present")] })
+    );
+    expect(verdictB.releaseReady).toBe(false);
+    expect(verdictB.blockers).toHaveLength(1);
+    expect(verdictB.reasons).toContain("1 P0 finding(s)");
+  });
+
+  it("E+F: new P0/P1 defects discovered during confirmation are active blockers", () => {
+    const verdictA = evaluateQaARelease(
+      confirmA({ findings: [finding("P1", "ACTIVE", "new defect discovered during confirmation")] })
+    );
+    expect(verdictA.releaseReady).toBe(false);
+    expect(verdictA.blockers).toHaveLength(1);
+
+    const verdictB = evaluateQaBRelease(
+      confirmB({ findings: [finding("P0", "ACTIVE", "new defect discovered during confirmation")] })
+    );
+    expect(verdictB.releaseReady).toBe(false);
+    expect(verdictB.blockers).toHaveLength(1);
+  });
+
+  it("G: the exact production resolution note (original P1 severity retained) is not counted", () => {
+    const verdict = evaluateQaARelease(
+      confirmA({
+        findings: [
+          finding(
+            "P1",
+            "RESOLVED",
+            "Previously identified first-viewport height ratio defect is resolved on the new Build Version. Hero region now completes within one viewport at ratio ~0.93 (reference 0.9, tolerance 0.15)."
+          ),
+        ],
+      })
+    );
+    expect(verdict.releaseReady).toBe(true);
+    expect(verdict.blockers).toHaveLength(0);
+    expect(verdict.resolved).toHaveLength(1);
+  });
+
+  it("fresh QA semantics are unchanged: findings without status still block as before", () => {
+    const freshP1: QaAReport = {
+      version: "1", visualScore: 93, contentScore: 92, fabrication: false,
+      hardGates: passingGatesA,
+      findings: [{ severity: "P1", domain: "visual", description: "active defect", evidenceRef: "qa/home-390.png" }],
+    };
+    const verdict = evaluateQaARelease(freshP1);
+    expect(verdict.releaseReady).toBe(false);
+    expect(verdict.blockers).toHaveLength(1);
+    expect(verdict.resolved).toHaveLength(0);
+    expect(verdict.polish).toHaveLength(0);
+  });
+
+  it("ambiguous or missing resolution state fails closed at the schema boundary", () => {
+    const legacyNote = {
+      severity: "P1" as const, domain: "FIRST_VIEWPORT",
+      description: "Previously identified defect is resolved", evidenceRef: "qa/home-1440-first.png",
+    };
+    // Confirmation findings REQUIRE the structured status: a legacy-shape
+    // note without status (exactly what production emitted) is schema-invalid
+    // and takes the repair/fail path — never silently treated as resolved.
+    expect(
+      Value.Check(QaAConfirmationReportSchema, {
+        version: "1", visualScore: 93, contentScore: 92, fabrication: false,
+        hardGates: passingGatesA, findings: [legacyNote],
+      })
+    ).toBe(false);
+    // An unknown status value is equally invalid (no natural-language parsing).
+    expect(
+      Value.Check(QaBConfirmationReportSchema, {
+        version: "1", technicalScore: 93, gates: passingGatesB,
+        findings: [{ ...legacyNote, status: "resolved" }],
+      })
+    ).toBe(false);
+    // The fresh QA-A schema still forbids the status field entirely.
+    expect(
+      Value.Check(QaAReportSchema, {
+        version: "1", visualScore: 93, contentScore: 92, fabrication: false,
+        hardGates: passingGatesA,
+        findings: [{ ...legacyNote, status: "RESOLVED" }],
+      })
+    ).toBe(false);
   });
 });
 
