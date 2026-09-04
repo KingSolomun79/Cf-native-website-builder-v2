@@ -329,9 +329,18 @@ This is P1 regardless of card polish.
 4. HOMEPAGE REGION REVIEW
 ======================================================================
 
-Use:
+CANONICAL REGION AUTHORITY: the canonical Visual Blueprint region topology
+(supplied in the stage context as the ordered canonical region list and the
+blueprint first-viewport region ids) is the BINDING comparison target for
+region order, region identity and first-viewport composition. The raw
+Reference Evidence segmentation is observational: raw evidence measurements
+remain the authority for measured fidelity (proportions, mass, viewport
+ratios), but the raw segment list never forms a second region topology the
+generated page must match. Harmless internal wrappers inside one canonical
+region are not region-order violations; a missing, renamed, reordered or
+substituted canonical region is.
 
-${visualBlueprint?.homepage?.regions}
+Use the canonical region topology from the stage context.
 
 Evaluate every region.
 

@@ -290,7 +290,7 @@ function pagePrompt(input: {
   contract: ImplementationContract;
   facts: BusinessFacts;
   slots: ImageSlot[];
-  referenceGeometry?: Array<{ regionId: string; viewportHeightRatio: number }>;
+  compositionTargets?: Array<{ regionId: string; viewportHeightRatio: number; evidenceSegmentCount: number }>;
 }): string {
   const { pageId, blueprint, contract, facts, slots } = input;
   const slotsForPage = (page: PageId, all: ImageSlot[]) => all.filter((slot) => slot.page === page).map((slot) => slot.id);
@@ -304,15 +304,15 @@ function pagePrompt(input: {
 - Derived marketing copy may interpret these facts safely but must not invent unsupported facts.`;
 
   if (pageId === "home") {
-    const geometryTargets = (input.referenceGeometry ?? []).length
-      ? `\n- COMPOSITION TARGETS from the frozen Reference Evidence (QA hard-gates these numbers on the rendered page): render EXACTLY ${input.referenceGeometry!.length} top-level home sections, in this exact order, with each section's rendered height approximately ${input.referenceGeometry!.map((region) => `${region.regionId} ≈ ${region.viewportHeightRatio.toFixed(2)} viewport-heights`).join(", ")}. The FIRST viewport ends at the boundary of the first region(s) totaling ≈ 1.0 viewport-height — do not make the first region trivially short or the page one long uniform stack.`
+    const compositionTargets = (input.compositionTargets ?? []).length
+      ? `\n- MEASURED COMPOSITION TARGETS (frozen Reference Evidence measurements aggregated per canonical Blueprint region; QA validates the canonical topology against the Blueprint AND these measured proportions on the rendered page): keep each canonical region's rendered height near its target — ${input.compositionTargets!.map((region) => `${region.regionId} ≈ ${region.viewportHeightRatio.toFixed(2)} viewport-heights (aggregated from ${region.evidenceSegmentCount} measured evidence segment${region.evidenceSegmentCount === 1 ? "" : "s"})`).join(", ")}. The FIRST viewport ends at the boundary of the first-viewport region(s) totaling ≈ 1.0 viewport-height — do not make the first region trivially short or the page one long uniform stack. Each canonical region is realized as ONE top-level <section data-region>; internal wrappers inside a canonical region are allowed, but never split one canonical region into several top-level data-region sections.`
       : "";
     return `${base}
-- The page structure MUST realize the Blueprint homepage topology in order: each region rendered as a <section data-region="{regionId}"> using EXACTLY these region ids, in order, verbatim (no other ids, no renames): ${blueprint.homepageRegions.map((region) => region.id).join(", ")}. Each section carries its region's purpose.
-- First viewport must match the Blueprint first-viewport description.${geometryTargets}
+- The page structure MUST realize the Blueprint homepage topology in order: each canonical region rendered as exactly one top-level <section data-region="{regionId}"> using EXACTLY these region ids, in order, verbatim (no other ids, no renames): ${blueprint.homepageRegions.map((region) => region.id).join(", ")}. Each section carries its region's purpose.
+- First viewport must match the Blueprint first-viewport description.${compositionTargets}
 - Anti-fallback rules are binding: ${JSON.stringify(blueprint.antiFallbackRules)}.
 
-HOMEPAGE REGIONS (ordered): ${JSON.stringify(blueprint.homepageRegions)}
+HOMEPAGE REGIONS (ordered canonical topology): ${JSON.stringify(blueprint.homepageRegions)}
 FIRST VIEWPORT: ${JSON.stringify(blueprint.homepageFirstViewport)}
 SIGNATURE TRAITS (must be visually expressed through structure/classes): ${JSON.stringify(blueprint.signatureTraits)}
 AVAILABLE IMAGE SLOTS (use EXACTLY these ids, verbatim): ${slotsForPage("home", slots).join(", ")}.`;
@@ -358,11 +358,11 @@ export interface GenerateCompleteSiteInput {
    *  Version. Never carries Business Fact / Reference / Build Mode / Blueprint
    *  changes (assertRepairPlanWithinBounds guards the plan itself). */
   repairDirectives?: string;
-  /** Measured Reference composition (frozen evidence): the numeric region
-   *  proportions the Reference controls and QA-A hard-gates. Generation
-   *  receives them as composition targets — without them the generator only
-   *  sees qualitative region purposes while QA measures the numbers. */
-  referenceGeometry?: Array<{ regionId: string; viewportHeightRatio: number }>;
+  /** Measured Reference composition aggregated per canonical Blueprint region
+   *  through provenance (issue #37): the numeric proportions QA hard-gates.
+   *  The Blueprint topology stays the only binding structure; these numbers
+   *  are contextual measured evidence for each canonical region. */
+  compositionTargets?: Array<{ regionId: string; viewportHeightRatio: number; evidenceSegmentCount: number }>;
 }
 
 export interface GeneratedSite extends AssembledSiteSource {
@@ -433,7 +433,7 @@ export async function generateCompleteSite(
   const pages: Partial<Record<PageId, string>> = {};
   const pageRuns: Array<{ pageId: PageId; run: { value: PageHtml; artifactR2Key: string } }> = [];
   for (const pageId of PAGE_IDS) {
-    const run = await runOrReuse<PageHtml>("generated_page", pageId, PageHtmlSchema, `generated-source/page-${pageId}/1`, pagePrompt({ pageId, blueprint: input.blueprint, contract: input.contract, facts, slots: imagePlan.slots, referenceGeometry: input.referenceGeometry }) + repairBlock);
+    const run = await runOrReuse<PageHtml>("generated_page", pageId, PageHtmlSchema, `generated-source/page-${pageId}/1`, pagePrompt({ pageId, blueprint: input.blueprint, contract: input.contract, facts, slots: imagePlan.slots, compositionTargets: input.compositionTargets }) + repairBlock);
     pages[pageId] = run.value.html;
     pageRuns.push({ pageId, run: { value: run.value, artifactR2Key: run.artifactR2Key } });
   }

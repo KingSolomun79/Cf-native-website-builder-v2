@@ -32,9 +32,28 @@ function viewportName(width: number): ViewportName {
   return "desktop";
 }
 
-// Same landmark-section mapping as the reference capture adapter
-// (src/domain/reference-intake.ts) so both geometry profiles are comparable.
-function regionsFromLayout(layout: RawLayout, viewportHeight: number): Array<{ id: string; height: number; viewportHeightRatio: number }> {
+// Canonical region segmentation (issue #37): generated home pages expose the
+// Blueprint topology via <section data-region> attributes — those canonical
+// ids are the comparable region identity, NOT positional landmarks. Nested or
+// repeated landmark sections inside one canonical region collapse into it
+// (max height, first-occurrence document order), so harmless internal
+// segmentation never fabricates extra canonical regions. Pages without
+// data-region (inner pages, external references on QA captures) keep the
+// positional landmark mapping so their geometry profiles stay populated.
+export function regionsFromLayout(layout: RawLayout, viewportHeight: number): Array<{ id: string; height: number; viewportHeightRatio: number }> {
+  const canonicalHeights = new Map<string, number>();
+  for (const section of layout.sections) {
+    if (!section.dataRegion) continue;
+    const existing = canonicalHeights.get(section.dataRegion);
+    canonicalHeights.set(section.dataRegion, Math.max(existing ?? 0, section.bounds.height));
+  }
+  if (canonicalHeights.size > 0) {
+    return [...canonicalHeights.entries()].map(([id, height]) => ({
+      id,
+      height,
+      viewportHeightRatio: Number((height / viewportHeight).toFixed(3)),
+    }));
+  }
   return layout.sections.map((section, index) => ({
     id: `region-${index + 1}`,
     height: section.bounds.height,

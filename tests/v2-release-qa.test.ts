@@ -219,13 +219,18 @@ describe("QA-A / QA-B release evaluation", () => {
         geometryComparison: compareGeometry(geometry(), geometry()),
         evidenceSummary: "9 standardized captures",
         signatureTraitIds: ["bp-serif", "bp-asymmetric", "bp-surfaces"],
+        canonicalRegions: [
+          { order: 1, id: "hero", purpose: "thesis + editorial image" },
+          { order: 2, id: "intro", purpose: "introduction" },
+        ],
+        firstViewportRegionIds: ["hero"],
         adaptationContractQaExceptions: [],
       },
       evidenceR2Key: "evidence/qa-bundle.json",
       generate,
     });
     expect(qaA.provenance.promptId).toBe("qa-a-visual-content");
-    expect(qaA.provenance.promptVersion).toBe("v3");
+    expect(qaA.provenance.promptVersion).toBe("v4");
 
     const qaB = await runQaBStage(env, {
       ...context,

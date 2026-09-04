@@ -14,7 +14,7 @@ import type { Env } from "../env.d";
 import { startSiteGeneration, createInitialBuild } from "./lifecycle";
 import { runReferenceIntake, getFrozenReferenceEvidence } from "./reference-intake";
 import { runReferenceAnalysisStage } from "./reference-analysis";
-import { runVisualBlueprintStage } from "./visual-blueprint";
+import { runVisualBlueprintStage, canonicalRegionComposition } from "./visual-blueprint";
 import { produceImplementationContract } from "./implementation-planner";
 import { generateCompleteSite } from "./site-generator";
 import { runImageGeneration, getAcceptedImageMap, getImageSpendReport, type ImageGenerationProvider } from "./image-pipeline";
@@ -153,10 +153,29 @@ export async function runBenchmarkCase(
         analysisR2Key: analysis.artifactR2Key,
         facts,
         adaptationContract: caseDefinition.adaptationContract,
+        evidenceRegions: frozen.evidence.regions.map((region) => ({
+          id: region.id,
+          ...(typeof region.viewportHeightRatio === "number" ? { viewportHeightRatio: region.viewportHeightRatio } : {}),
+        })),
         referenceUrl: caseDefinition.referenceUrl,
         generate: input.deps.generate,
       })
     );
+
+    // Canonical region composition (issue #37): same aggregation rule as the
+    // production pipeline — Blueprint topology binding, evidence measurements
+    // aggregated per canonical region through provenance.
+    const canonicalComposition = canonicalRegionComposition(blueprint.blueprint, frozen.evidence.regions);
+    const compositionFullyMeasured =
+      canonicalComposition.length > 0 &&
+      canonicalComposition.every((region) => region.viewportHeightRatio !== null);
+    const compositionTargets = compositionFullyMeasured
+      ? canonicalComposition.map((region) => ({
+          regionId: region.regionId,
+          viewportHeightRatio: region.viewportHeightRatio!,
+          evidenceSegmentCount: region.sourceEvidenceRegionIds.length,
+        }))
+      : undefined;
 
     const siteIdRow = await env.DB.prepare("SELECT site_id FROM site_generations WHERE id = ?")
       .bind(context.siteGenerationId)
@@ -179,6 +198,7 @@ export async function runBenchmarkCase(
         blueprintR2Key: blueprint.artifactR2Key,
         contract: contract.contract,
         contractR2Key: contract.artifactR2Key,
+        compositionTargets,
         generate: input.deps.generate,
       })
     );
@@ -229,10 +249,17 @@ export async function runBenchmarkCase(
     );
 
     const imageMass = input.imageMassRatio ?? 0.38;
-    const geometryComparison = compareGeometry(
-      geometryFromRegions(caseDefinition.evidence.regions, imageMass),
-      geometryFromRegions(caseDefinition.evidence.regions, imageMass)
-    );
+    const referenceProfile = compositionFullyMeasured
+      ? geometryFromRegions(
+          canonicalComposition.map((region) => ({
+            id: region.regionId,
+            height: region.heightPx ?? 0,
+            viewportHeightRatio: region.viewportHeightRatio!,
+          })),
+          imageMass
+        )
+      : geometryFromRegions(caseDefinition.evidence.regions, imageMass);
+    const geometryComparison = compareGeometry(referenceProfile, referenceProfile);
 
     const qaA = await labeled("qa", () =>
       runQaAStage(env, {
@@ -243,6 +270,12 @@ export async function runBenchmarkCase(
           geometryComparison,
           evidenceSummary: `${evidenceBundle.bundle.captures.length} standardized captures`,
           signatureTraitIds: blueprint.blueprint.signatureTraits.map((trait) => trait.id),
+          canonicalRegions: canonicalComposition.map((region) => ({
+            order: region.order,
+            id: region.regionId,
+            purpose: region.purpose,
+          })),
+          firstViewportRegionIds: [...blueprint.blueprint.homepageFirstViewport.regionIds],
           adaptationContractQaExceptions: caseDefinition.adaptationContract?.qaExceptions ?? [],
         },
         evidenceR2Key: evidenceBundle.artifactR2Key,

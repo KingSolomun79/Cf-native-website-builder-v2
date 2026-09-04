@@ -67,6 +67,14 @@ export const VisualBlueprintSchema = Type.Object(
         id: Type.String({ minLength: 1, maxLength: 120 }),
         purpose: Type.String({ minLength: 1, maxLength: 1000 }),
         imageRoleId: Type.Optional(Type.String({ minLength: 1, maxLength: 120 })),
+        // The frozen Reference Evidence segments (verbatim ids) aggregated
+        // into this canonical region. Raw evidence segmentation is
+        // observational; the ordered canonical region list is the binding
+        // topology for implementation and QA (issue #37). Provenance is what
+        // lets QA aggregate measured evidence geometry per canonical region.
+        sourceEvidenceRegionIds: Type.Optional(
+          Type.Array(Type.String({ minLength: 1, maxLength: 120 }), { minItems: 1 })
+        ),
       }),
       { minItems: 2 }
     ),
@@ -172,6 +180,9 @@ export function validateBlueprintConsistency(
 ): { valid: true } | { valid: false; problems: string[] } {
   const problems: string[] = [];
   const regionIds = blueprint.homepageRegions.map((region) => region.id);
+  if (new Set(regionIds).size !== regionIds.length) {
+    problems.push("homepage region ids are not unique");
+  }
   const firstViewport = blueprint.homepageFirstViewport.regionIds;
   if (firstViewport.length > regionIds.length || !firstViewport.every((id, index) => regionIds[index] === id)) {
     problems.push("homepageFirstViewport.regionIds is not an ordered prefix of homepageRegions");
@@ -189,12 +200,96 @@ export function validateBlueprintConsistency(
   return problems.length === 0 ? { valid: true } : { valid: false, problems };
 }
 
+// Canonical region provenance (issue #37): aggregation of raw evidence
+// segments into canonical regions must be explainable. Every canonical region
+// must claim real frozen evidence segment ids — never invented ones — each
+// segment may feed at most one canonical region, and when a non-empty
+// evidence segmentation exists every canonical region must carry provenance
+// so measured QA aggregation is total.
+export function validateBlueprintRegionProvenance(
+  blueprint: VisualBlueprint,
+  evidenceRegions: Array<{ id: string }>
+): { valid: true } | { valid: false; problems: string[] } {
+  const problems: string[] = [];
+  if (evidenceRegions.length === 0) return { valid: true };
+  const evidenceIds = new Set(evidenceRegions.map((region) => region.id));
+  const claimed = new Map<string, string>();
+  for (const region of blueprint.homepageRegions) {
+    const sources = region.sourceEvidenceRegionIds ?? [];
+    if (sources.length === 0) {
+      problems.push(`canonical region '${region.id}' has no sourceEvidenceRegionIds provenance`);
+      continue;
+    }
+    for (const sourceId of sources) {
+      if (!evidenceIds.has(sourceId)) {
+        problems.push(`canonical region '${region.id}' claims unknown evidence segment '${sourceId}'`);
+        continue;
+      }
+      const owner = claimed.get(sourceId);
+      if (owner && owner !== region.id) {
+        problems.push(`evidence segment '${sourceId}' is claimed by both '${owner}' and '${region.id}'`);
+      }
+      claimed.set(sourceId, region.id);
+    }
+  }
+  return problems.length === 0 ? { valid: true } : { valid: false, problems };
+}
+
+// Aggregated canonical composition (issue #37): the Blueprint region order is
+// the binding topology; the frozen evidence measurements of the contributing
+// segments are summed per canonical region so generation receives numeric
+// per-region targets and QA compares measured geometry against the SAME
+// canonical regions. Regions without measurements (provenance absent or
+// yielding no measurable segment) carry null and exclude themselves from
+// numeric composition targets.
+export interface CanonicalRegionComposition {
+  regionId: string;
+  order: number;
+  purpose: string;
+  sourceEvidenceRegionIds: string[];
+  heightPx: number | null;
+  viewportHeightRatio: number | null;
+}
+
+export function canonicalRegionComposition(
+  blueprint: VisualBlueprint,
+  evidenceRegions: Array<{ id: string; height?: number; viewportHeightRatio?: number }>
+): CanonicalRegionComposition[] {
+  const byId = new Map(evidenceRegions.map((region) => [region.id, region]));
+  return blueprint.homepageRegions.map((region, index) => {
+    let heightPx = 0;
+    let ratio = 0;
+    let measured = false;
+    for (const sourceId of region.sourceEvidenceRegionIds ?? []) {
+      const segment = byId.get(sourceId);
+      if (!segment) continue;
+      measured = true;
+      heightPx += segment.height ?? 0;
+      ratio += segment.viewportHeightRatio ?? 0;
+    }
+    return {
+      regionId: region.id,
+      order: index + 1,
+      purpose: region.purpose,
+      sourceEvidenceRegionIds: [...(region.sourceEvidenceRegionIds ?? [])],
+      heightPx: measured ? heightPx : null,
+      viewportHeightRatio: measured ? Number(ratio.toFixed(3)) : null,
+    };
+  });
+}
+
 export function buildBlueprintUserPrompt(input: {
   analysis: ReferenceAnalysis;
   facts: BusinessFacts;
   adaptationContract: AdaptationContract | null;
+  evidenceRegions: Array<{ id: string; viewportHeightRatio?: number }>;
 }): string {
   return `Produce the binding Visual Blueprint for THIS Business from the Reference Analysis below. Preserve the Reference's identity-defining structure and signature traits while replacing its branding, content and assets with the Business's own. Every signature trait must trace to an analysis trait via sourceTraitId — use EXACTLY these analysis trait ids (verbatim, no other notation): " + JSON.stringify(input.analysis.signatureTraits.map((trait) => trait.id)) + ". Do NOT copy Reference copy, logos, trademarks, photography or proprietary assets. Define: visual thesis, 3-8 signature traits, fidelity priorities, tokens, global grid/container logic, spacing rhythm, typography roles, color roles, surface/depth language, header/navigation language, homepage first viewport, ordered homepage regions, image system with prioritized image roles, motion grammar, responsive contract, inner-page vocabulary, anti-fallback rules, accessibility adaptations and declared limitations. In homepageRegions, OMIT imageRoleId entirely for text-only regions — never write 'none', 'null', 'n/a' or an empty string; when present it must be an exact id from imageSystem.imageRoles.
+
+CANONICAL REGION RULES: The Reference Evidence segmentation listed below is OBSERVATIONAL — measured raw visual segments, not a binding topology. You MAY aggregate adjacent raw segments into ONE canonical homepageRegions entry when they form a single compositional unit (e.g. header + hero image + hero copy + hero CTA = one hero region). Every homepageRegions entry MUST carry sourceEvidenceRegionIds: the verbatim contributing segment ids from the evidence inventory (never invented ids, never empty). Claim each evidence segment in at most one canonical region. The ordered homepageRegions list is the binding canonical region topology for implementation and QA.
+
+REFERENCE EVIDENCE REGION INVENTORY (raw observed/measured segmentation, verbatim ids):
+${JSON.stringify(input.evidenceRegions)}
 
 BUSINESS FACTS (supported content only):
 ${JSON.stringify(input.facts, null, 2)}
@@ -216,6 +311,9 @@ export interface RunVisualBlueprintInput {
   analysisR2Key: string;
   facts: BusinessFacts;
   adaptationContract: AdaptationContract | null;
+  /** Raw frozen Reference Evidence segmentation — observational inventory for
+   *  canonical region aggregation provenance (issue #37). */
+  evidenceRegions: Array<{ id: string; viewportHeightRatio?: number }>;
   referenceUrl?: string;
   generate?: RawAiGenerate;
 }
@@ -236,6 +334,7 @@ export async function runVisualBlueprintStage(
       analysis: input.analysis,
       facts: input.facts,
       adaptationContract: input.adaptationContract,
+      evidenceRegions: input.evidenceRegions,
     }),
     buildId: input.buildId,
     siteGenerationId: input.siteGenerationId,
@@ -257,6 +356,10 @@ export async function runVisualBlueprintStage(
   const consistency = validateBlueprintConsistency(run.value);
   if (!consistency.valid) {
     throw new VisualBlueprintError("BLUEPRINT_INCONSISTENT", consistency.problems.join("; "));
+  }
+  const provenance = validateBlueprintRegionProvenance(run.value, input.evidenceRegions);
+  if (!provenance.valid) {
+    throw new VisualBlueprintError("BLUEPRINT_INCONSISTENT", provenance.problems.join("; "));
   }
 
   const stored = await storeBuildStageArtifact(env, {

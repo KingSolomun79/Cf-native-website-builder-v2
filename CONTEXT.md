@@ -79,14 +79,14 @@ _Avoid_: post-hoc suitability excuse.
 **Adaptation Contract**: The concrete set of accepted approximations fixed before generation for a `SUPPORTED_WITH_LIMITATIONS` Reference. QA treats these declared differences as intentional, but the contract cannot legalize removal of identity-defining features.
 _Avoid_: vague limitation, post-hoc QA exemption.
 
-**Reference Evidence**: The descriptive record of observed or measured Reference facts, captures and behaviors before interpretation. It records what exists without inferring importance or design intent and is never rewritten to fit later analysis.
-_Avoid_: inferred intent presented as evidence.
+**Reference Evidence**: The descriptive record of observed or measured Reference facts, captures and behaviors before interpretation. It records what exists without inferring importance or design intent and is never rewritten to fit later analysis. Its segmentation is observational: raw visual segments are measured evidence, never a binding region topology.
+_Avoid_: inferred intent presented as evidence, treating raw segments as the binding topology.
 
 **Reference Analysis**: The structured interpretation of Reference Evidence that identifies hierarchy, relationships, signature traits, likely design intent and identity-defining characteristics. It may interpret Evidence but cannot overwrite or fabricate it.
 _Avoid_: raw measurement, invented observation.
 
-**Visual Blueprint**: The binding design contract translating the chosen design origin into the intended Site for the Business. Automated Repair may correct implementation against it but cannot silently redefine it.
-_Avoid_: Implementation Contract, generated source, mutable repair target.
+**Visual Blueprint**: The binding design contract translating the chosen design origin into the intended Site for the Business. Its ordered canonical region list is the authoritative region topology: Reference Analysis may aggregate raw evidence segments into canonical regions (provenance-preserving), and generation and QA hard composition gates are judged against that canonical topology while measured fidelity still comes from raw Reference Evidence. Automated Repair may correct implementation against it but cannot silently redefine it.
+_Avoid_: Implementation Contract, generated source, mutable repair target, comparing QA topology against raw evidence segmentation.
 
 **Blueprint Review Required**: `BLUEPRINT_REVIEW_REQUIRED` is the specific escalation signal that the Visual Blueprint itself is materially wrong, contradictory, impossible or inconsistent with the design-origin contract. It leads to human review rather than implementation-only repair.
 _Avoid_: normal implementation defect, automatic Blueprint mutation.

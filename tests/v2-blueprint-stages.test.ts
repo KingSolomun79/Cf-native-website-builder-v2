@@ -40,6 +40,7 @@ function captureOutput(): ReferenceCaptureOutput {
       { id: "region-1", startY: 0, endY: 720, height: 720, viewportHeightRatio: 0.8 },
       { id: "region-2", startY: 720, endY: 1600, height: 880, viewportHeightRatio: 0.98 },
       { id: "region-3", startY: 1600, endY: 2400, height: 800, viewportHeightRatio: 0.89 },
+      { id: "region-4", startY: 2400, endY: 3000, height: 600, viewportHeightRatio: 0.67 },
     ],
     measuredElements: [
       { selectorHint: "header nav", role: "navigation", boundingBox: { x: 0, y: 0, width: 1440, height: 80 }, confidence: "HIGH", source: "DOM" },
@@ -99,10 +100,10 @@ const BLUEPRINT_JSON: VisualBlueprint = {
   headerNavigation: "Minimal sticky header, wordmark left, plain links right",
   homepageFirstViewport: { summary: "Asymmetric split: left serif statement over paper, right full-height editorial image", regionIds: ["hero"] },
   homepageRegions: [
-    { id: "hero", purpose: "Business thesis statement with editorial image", imageRoleId: "role-hero" },
-    { id: "intro", purpose: "Business introduction and supported facts" },
-    { id: "services-overview", purpose: "Service teasers", imageRoleId: "role-detail" },
-    { id: "contact-cta", purpose: "Call to action into contact page" },
+    { id: "hero", purpose: "Business thesis statement with editorial image", imageRoleId: "role-hero", sourceEvidenceRegionIds: ["region-1"] },
+    { id: "intro", purpose: "Business introduction and supported facts", sourceEvidenceRegionIds: ["region-2"] },
+    { id: "services-overview", purpose: "Service teasers", imageRoleId: "role-detail", sourceEvidenceRegionIds: ["region-3"] },
+    { id: "contact-cta", purpose: "Call to action into contact page", sourceEvidenceRegionIds: ["region-4"] },
   ],
   imageSystem: {
     photographyGrammar: "Editorial documentary photography, natural light, people at work",
@@ -181,6 +182,10 @@ async function runAnalysis(p: Awaited<ReturnType<typeof newPipeline>>): Promise<
   return { analysis: produced.analysis, r2Key: produced.artifactR2Key };
 }
 
+async function evidenceRegionsOf(p: Awaited<ReturnType<typeof newPipeline>>) {
+  return (await getFrozenReferenceEvidence(env, p.siteGenerationId))!.evidence.regions;
+}
+
 describe("Reference Analysis stage", () => {
   it("interprets frozen evidence, persists a versioned artifact with provenance, and leaves evidence untouched", async () => {
     const pipeline = await newPipeline();
@@ -240,13 +245,14 @@ describe("Visual Blueprint stage", () => {
       analysisR2Key: r2Key,
       facts: FACTS,
       adaptationContract: null,
+      evidenceRegions: await evidenceRegionsOf(pipeline),
       generate: generateReturning(() => JSON.stringify(BLUEPRINT_JSON)),
     });
     expect(produced.blueprint.homepageRegions).toHaveLength(4);
 
     const stored = await getBuildStageArtifact<VisualBlueprint>(env, pipeline.buildVersionId, "visual_blueprint");
     expect(stored!.provenance?.promptId).toBe("visual-blueprint-generator");
-    expect(stored!.provenance?.promptVersion).toBe("v3");
+    expect(stored!.provenance?.promptVersion).toBe("v4");
 
     const events = await env.DB.prepare("SELECT to_state FROM build_workflow_events WHERE build_id = ? ORDER BY created_at")
       .bind(pipeline.buildId)
@@ -380,6 +386,7 @@ describe("Implementation Contract planner", () => {
       analysisR2Key: r2Key,
       facts: FACTS,
       adaptationContract: null,
+      evidenceRegions: await evidenceRegionsOf(pipeline),
       generate: generateReturning(() => JSON.stringify(BLUEPRINT_JSON)),
     });
 

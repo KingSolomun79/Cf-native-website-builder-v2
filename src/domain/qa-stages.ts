@@ -144,12 +144,18 @@ export function buildQaAUserPrompt(input: {
   geometryComparison: GeometryComparison;
   evidenceSummary: string;
   signatureTraitIds: string[];
+  canonicalRegions: Array<{ order: number; id: string; purpose: string }>;
+  firstViewportRegionIds: string[];
   adaptationContractQaExceptions: string[];
 }): string {
   return `Evaluate this Release Candidate against the Reference and the Visual Blueprint. Judge rendered visual fidelity and content quality, verify every hard composition gate, and list exact findings with severity (P0/P1/P2/P3) and evidence references. Treat declared Adaptation Contract QA exceptions as intentional; a high score may never compensate a failed hard gate.
 
+CANONICAL REGION AUTHORITY (issue #37 semantics): the CANONICAL BLUEPRINT REGION TOPOLOGY below is the binding comparison target for PAGE_SILHOUETTE_REGION_ORDER and FIRST_VIEWPORT_MATERIALLY_CORRECT — judge the generated canonical region sequence, identity and first-viewport composition against THIS topology. The raw Reference Evidence segmentation is observational; raw evidence measurements remain the authority for measured fidelity (proportions, mass, viewport ratios) but never define a second region topology the generated page must match. Harmless internal wrappers inside one canonical region are not region-order violations; a missing, renamed, reordered or substituted canonical region is.
+
 BUSINESS: ${input.businessName}
 SIGNATURE TRAITS THAT MUST BE PRESERVED: ${JSON.stringify(input.signatureTraitIds)}
+CANONICAL BLUEPRINT REGION TOPOLOGY (ordered, binding): ${JSON.stringify(input.canonicalRegions)}
+BLUEPRINT FIRST-VIEWPORT REGION IDS (ordered prefix, binding): ${JSON.stringify(input.firstViewportRegionIds)}
 GEOMETRY COMPARATOR EVIDENCE (structural, not pixels): ${JSON.stringify(input.geometryComparison.metrics)}
 EVIDENCE SUMMARY: ${input.evidenceSummary}
 ADAPTATION CONTRACT QA EXCEPTIONS: ${JSON.stringify(input.adaptationContractQaExceptions)}`;

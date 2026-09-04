@@ -82,6 +82,7 @@ export default defineWorkersConfig({
       "tests/v2-prompt-contract.test.ts",
       "tests/v2-reference-intake.test.ts",
       "tests/v2-blueprint-stages.test.ts",
+      "tests/v2-region-semantics.test.ts",
       "tests/v2-site-generator.test.ts",
       "tests/v2-image-pipeline.test.ts",
       "tests/v2-form-service.test.ts",

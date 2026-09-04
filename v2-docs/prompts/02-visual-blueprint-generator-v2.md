@@ -257,11 +257,21 @@ Do not assume every dimension is equally important.
 
 Translate the forensic homepage region map into a prescriptive ordered region contract.
 
+CANONICAL REGION AGGREGATION (binding semantics):
+
+- The forensic homepage region map / raw evidence segmentation is OBSERVATIONAL — measured raw visual segments, not the binding topology.
+- You MAY aggregate adjacent raw visual segments into ONE canonical region when they form a single compositional unit (example: header + hero image + hero copy + hero CTA = one hero region).
+- Every canonical region must preserve references to its contributing evidence segments via `sourceEvidenceRegionIds` (verbatim segment ids; never invented; never empty).
+- Claim each evidence segment in at most one canonical region.
+- The ordered canonical region list is BINDING for implementation and QA; the raw segment list is never a second topology.
+
 For each region define:
 
 ID
 
 ORDER
+
+SOURCE EVIDENCE SEGMENTS (sourceEvidenceRegionIds)
 
 VISUAL ROLE
 
@@ -1693,6 +1703,7 @@ OUTPUT SCHEMA
       {
         "id": "region_01",
         "order": 1,
+        "sourceEvidenceRegionIds": [],
         "visual_role": "",
         "height_strategy": "",
         "reference_proportion": "",

@@ -13,11 +13,11 @@ The domain contract is prepended at runtime and is authoritative over contradict
 | Stage | Reconciled prompt id/version | Detailed body |
 |---|---|---|
 | Reference Analyzer | `reference-analyzer/v3` | `01-reference-analyzer-v2.md` |
-| Visual Blueprint Generator | `visual-blueprint-generator/v3` | `02-visual-blueprint-generator-v2.md` |
+| Visual Blueprint Generator | `visual-blueprint-generator/v4` | `02-visual-blueprint-generator-v2.md` |
 | Original Design Blueprint Generator | `original-design-blueprint-generator/v3` | `03-original-design-blueprint-generator-v2.md` |
 | Website Generator | `website-generator/v4` | `04-website-generator-v3.md` |
 | KIE Image Prompt Generator | `kie-image-prompt-generator/v2` | `05-kie-image-prompt-generator-v1.md` |
-| QA-A Visual/Content | `qa-a-visual-content/v3` | `06-qa-a-visual-content-v2.md` |
+| QA-A Visual/Content | `qa-a-visual-content/v4` | `06-qa-a-visual-content-v2.md` |
 | QA-B Browser/Technical | `qa-b-browser-technical/v3` | `07-qa-b-browser-technical-v2.md` |
 | Fix Coordinator | `fix-coordinator/v3` | `08-fix-coordinator-v2.md` |
 | QA-A Confirmation | `qa-a-confirmation/v3` | `09-qa-a-confirmation-v2.md` |
@@ -30,9 +30,9 @@ The domain contract is prepended at runtime and is authoritative over contradict
 
 Consumes versioned Reference Evidence, not loose browser dumps. It is forensic/descriptive and cannot redesign, map Business content, or fabricate observations. Reference Screenshot controls static composition; Reference URL is supplemental behavioral/runtime evidence.
 
-### Visual Blueprint Generator v3
+### Visual Blueprint Generator v4
 
-Produces the binding Visual Blueprint from Reference Analysis plus Business/brand inputs and Adaptation Contract. It cannot copy reference content/branding/assets. Once generation begins the Blueprint cannot be silently changed by downstream repair.
+Produces the binding Visual Blueprint from Reference Analysis plus Business/brand inputs and Adaptation Contract. It cannot copy reference content/branding/assets. Raw Reference Evidence segmentation is observational: the blueprint may aggregate adjacent raw segments into canonical regions and must preserve `sourceEvidenceRegionIds` provenance per canonical region; the ordered canonical region list is the binding topology for implementation and QA. Once generation begins the Blueprint cannot be silently changed by downstream repair.
 
 ### Original Design Blueprint Generator v3
 
@@ -46,9 +46,9 @@ Consumes one Visual Blueprint + one Implementation Contract and generates increm
 
 Consumes stable Image Slots. Enforces CRITICAL/HIGH/NORMAL priority, two-wave orchestration, budget awareness, repair reserve, slot-preserving retries and the USD 3.00 hard completed-site image spend gate.
 
-### QA-A v3
+### QA-A v4
 
-Uses standardized rendered evidence and geometry-comparator evidence. Release requires >=90 visual, >=90 content, zero P0/P1, no fabrication and all hard visual composition gates. QA-A cannot compensate a hard-gate failure with aggregate score.
+Uses standardized rendered evidence and geometry-comparator evidence. Release requires >=90 visual, >=90 content, zero P0/P1, no fabrication and all hard visual composition gates. QA-A cannot compensate a hard-gate failure with aggregate score. Region topology gates judge the generated canonical region sequence against the Visual Blueprint; raw Reference Evidence remains the authority for measured fidelity only.
 
 ### QA-B v3
 

@@ -66,10 +66,10 @@ const BLUEPRINT: VisualBlueprint = {
   headerNavigation: "minimal sticky header",
   homepageFirstViewport: { summary: "asymmetric split hero", regionIds: ["hero"] },
   homepageRegions: [
-    { id: "hero", purpose: "thesis + editorial image", imageRoleId: "role-hero" },
-    { id: "intro", purpose: "introduction" },
-    { id: "services-overview", purpose: "service teasers", imageRoleId: "role-detail" },
-    { id: "contact-cta", purpose: "CTA" },
+    { id: "hero", purpose: "thesis + editorial image", imageRoleId: "role-hero", sourceEvidenceRegionIds: ["region-1"] },
+    { id: "intro", purpose: "introduction", sourceEvidenceRegionIds: ["region-2"] },
+    { id: "services-overview", purpose: "service teasers", imageRoleId: "role-detail", sourceEvidenceRegionIds: ["region-3"] },
+    { id: "contact-cta", purpose: "CTA", sourceEvidenceRegionIds: ["region-4"] },
   ],
   imageSystem: {
     photographyGrammar: "editorial documentary",
@@ -234,6 +234,8 @@ async function preparedContext(): Promise<{
     regions: [
       { id: "region-1", startY: 0, endY: 700, height: 700, viewportHeightRatio: 0.78 },
       { id: "region-2", startY: 700, endY: 1500, height: 800, viewportHeightRatio: 0.89 },
+      { id: "region-3", startY: 1500, endY: 2300, height: 800, viewportHeightRatio: 0.89 },
+      { id: "region-4", startY: 2300, endY: 2900, height: 600, viewportHeightRatio: 0.67 },
     ],
     measuredElements: [{ selectorHint: "h1", role: "typography", computed: { fontSize: "72px" }, confidence: "MEDIUM", source: "COMPUTED_STYLE" }],
     responsiveObservations: [], motionObservations: [], discrepancies: [],
@@ -252,6 +254,7 @@ async function preparedContext(): Promise<{
     siteGenerationId: started.siteGenerationId, buildId: created.buildId, buildVersionId: created.buildVersionId,
     buildVersionNumber: 1, analysis: analysis.analysis, analysisR2Key: analysis.artifactR2Key,
     facts: FACTS, adaptationContract: null, referenceUrl: "https://reference.example.com/",
+    evidenceRegions: frozen.evidence.regions,
     generate: async () => ({ content: JSON.stringify(BLUEPRINT), provider: "test", model: "test-model-b" }),
   });
   const siteId = (await env.DB.prepare("SELECT site_id FROM site_generations WHERE id = ?")
@@ -272,7 +275,7 @@ async function preparedContext(): Promise<{
 }
 
 describe("incremental four-page generation", () => {
-  it("passes measured Reference composition targets to the home prompt when provided", async () => {
+  it("passes canonical measured composition targets to the home prompt when provided", async () => {
     const context = await preparedContext();
     const fullPrompts: string[] = [];
     const { generate } = generateForSite();
@@ -281,7 +284,7 @@ describe("incremental four-page generation", () => {
       return generate(system, user);
     };
 
-    const withGeometry = await generateCompleteSite(env, {
+    const withTargets = await generateCompleteSite(env, {
       siteGenerationId: context.siteGenerationId,
       siteId: context.siteId,
       buildId: context.buildId,
@@ -292,19 +295,22 @@ describe("incremental four-page generation", () => {
       contract: context.contract,
       contractR2Key: context.contractR2Key,
       generate: capturingGenerate,
-      referenceGeometry: [
-        { regionId: "hero", viewportHeightRatio: 0.78 },
-        { regionId: "intro", viewportHeightRatio: 0.89 },
+      compositionTargets: [
+        { regionId: "hero", viewportHeightRatio: 0.78, evidenceSegmentCount: 1 },
+        { regionId: "intro", viewportHeightRatio: 1.56, evidenceSegmentCount: 2 },
       ],
     });
-    expect(withGeometry.validation.passed).toBe(true);
+    expect(withTargets.validation.passed).toBe(true);
     const homePrompt = fullPrompts.find((prompt) => prompt.includes("page id 'home'"))!;
-    expect(homePrompt).toContain("COMPOSITION TARGETS");
-    expect(homePrompt).toContain("hero ≈ 0.78 viewport-heights");
-    expect(homePrompt).toContain("intro ≈ 0.89 viewport-heights");
-    expect(homePrompt).toContain("EXACTLY 2 top-level home sections");
+    expect(homePrompt).toContain("MEASURED COMPOSITION TARGETS");
+    expect(homePrompt).toContain("hero ≈ 0.78 viewport-heights (aggregated from 1 measured evidence segment)");
+    expect(homePrompt).toContain("intro ≈ 1.56 viewport-heights (aggregated from 2 measured evidence segments)");
+    // The Blueprint stays the only binding topology: canonical sections, not
+    // a raw-segment count.
+    expect(homePrompt).toContain("ONE top-level <section data-region>");
+    expect(homePrompt).toContain("never split one canonical region into several top-level data-region sections");
 
-    // Without geometry the prompt stays unchanged (no targets block) — a
+    // Without targets the prompt stays unchanged (no targets block) — a
     // fresh Build Version so nothing is reused from the first generation.
     const context2 = await preparedContext();
     fullPrompts.length = 0;
@@ -321,7 +327,7 @@ describe("incremental four-page generation", () => {
       generate: capturingGenerate,
     });
     const plainHomePrompt = fullPrompts.find((prompt) => prompt.includes("page id 'home'"))!;
-    expect(plainHomePrompt).not.toContain("COMPOSITION TARGETS");
+    expect(plainHomePrompt).not.toContain("MEASURED COMPOSITION TARGETS");
   });
 
   it("generates all four pages plus shared source from one Blueprint + one Implementation Contract, incrementally", async () => {

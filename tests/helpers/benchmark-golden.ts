@@ -46,6 +46,7 @@ function caseBlueprintJson(caseDefinition: BenchmarkCaseDefinition): Record<stri
     homepageRegions: regions.map((region, index) => ({
       id: region.id,
       purpose: `Realize the Reference '${region.id}' region for the Business`,
+      sourceEvidenceRegionIds: [region.id],
       ...(index === 0 ? { imageRoleId: "role-hero" } : index === 1 ? { imageRoleId: "role-detail" } : {}),
     })),
     imageSystem: {

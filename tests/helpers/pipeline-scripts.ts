@@ -64,6 +64,7 @@ const blueprintJson = {
   homepageRegions: REGIONS.map((region, index) => ({
     id: region.id,
     purpose: `Realize the '${region.id}' region`,
+    sourceEvidenceRegionIds: [region.id],
     ...(index === 0 ? { imageRoleId: "role-hero" } : index === 1 ? { imageRoleId: "role-detail" } : {}),
   })),
   imageSystem: {

@@ -954,7 +954,13 @@ Also persist:
 
 # 27. Visual Geometry Comparator
 
-For `REFERENCE_BOUND`, compare normalized structural properties rather than raw pixels:
+For `REFERENCE_BOUND`, compare normalized structural properties rather than raw pixels.
+
+Region topology authority (issue #37): the Visual Blueprint's ordered canonical
+region list is the binding comparison target for region count/order and
+first-viewport topology; raw Reference Evidence segmentation is observational
+and remains the authority for measured geometry (ratios, proportions, mass),
+aggregated per canonical region through provenance.
 
 - first-viewport height ratio;
 - region count/order;

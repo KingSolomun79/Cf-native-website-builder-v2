@@ -24,7 +24,7 @@ import type { Env } from "../env.d";
 import { appendBuildWorkflowEvent, createInitialBuild } from "./lifecycle";
 import { runReferenceIntake, getFrozenReferenceEvidence } from "./reference-intake";
 import { runReferenceAnalysisStage } from "./reference-analysis";
-import { runVisualBlueprintStage } from "./visual-blueprint";
+import { runVisualBlueprintStage, canonicalRegionComposition } from "./visual-blueprint";
 import { produceImplementationContract } from "./implementation-planner";
 import { generateCompleteSite, type ImageSlot } from "./site-generator";
 import {
@@ -351,6 +351,10 @@ export async function runBuildPipeline(
       analysisR2Key: analysis.artifactR2Key,
       facts,
       adaptationContract: frozen.adaptationContract ?? null,
+      evidenceRegions: frozen.evidence.regions.map((region) => ({
+        id: region.id,
+        ...(typeof region.viewportHeightRatio === "number" ? { viewportHeightRatio: region.viewportHeightRatio } : {}),
+      })),
       referenceUrl: frozen.evidence.referenceUrl,
       generate: deps.generate,
       });
@@ -389,6 +393,20 @@ export async function runBuildPipeline(
       };
     }
 
+    // ── Canonical region composition (issue #37) ───────────────────────────
+    // The Blueprint's canonical region topology is the ONLY binding structure
+    // for generation and QA. Frozen Reference Evidence measurements are
+    // aggregated per canonical region through provenance, so the generator
+    // receives numeric per-region targets and QA compares measured geometry
+    // against the SAME canonical regions. Blueprints frozen before the
+    // provenance field carry no aggregation mapping — those keep the legacy
+    // raw-evidence mapping so a re-entered old version still evaluates
+    // instead of silently losing its measured-fidelity evidence.
+    const canonicalComposition = canonicalRegionComposition(blueprint.blueprint, frozen.evidence.regions);
+    const compositionFullyMeasured =
+      canonicalComposition.length > 0 &&
+      canonicalComposition.every((region) => region.viewportHeightRatio !== null);
+
     // ── Candidate production (generation -> images -> assembly -> preview) ─
     // NOTE: step results are capped at 1MiB by the Workflows engine — the
     // candidate's bundled image bytes must never cross a step boundary, only
@@ -397,15 +415,13 @@ export async function runBuildPipeline(
       ctx: VersionContext,
       repairDirectives?: string
     ): Promise<{ manifestHash: string; previewUrl: string }> => {
-      // Measured Reference composition (frozen evidence) feeds generation as
-      // numeric composition targets — QA-A hard-gates these exact proportions
-      // (first_viewport_height_ratio, region count/order tolerance), so the
-      // generator must see the same numbers QA measures.
-      const referenceGeometry = frozen.evidence.regions.flatMap((region) =>
-        typeof region.viewportHeightRatio === "number"
-          ? [{ regionId: region.id, viewportHeightRatio: region.viewportHeightRatio }]
-          : []
-      );
+      const compositionTargets = compositionFullyMeasured
+        ? canonicalComposition.map((region) => ({
+            regionId: region.regionId,
+            viewportHeightRatio: region.viewportHeightRatio!,
+            evidenceSegmentCount: region.sourceEvidenceRegionIds.length,
+          }))
+        : undefined;
       const site = await stepDo(`pipeline: generate site (v${ctx.buildVersionNumber})`, () => generateCompleteSite(env, {
         siteGenerationId: ctx.siteGenerationId,
         siteId: ctx.siteId,
@@ -417,7 +433,7 @@ export async function runBuildPipeline(
         contract: contract.contract,
         contractR2Key: contract.artifactR2Key,
         generate: deps.generate,
-        referenceGeometry,
+        compositionTargets,
         ...(repairDirectives ? { repairDirectives } : {}),
       }));
 
@@ -527,17 +543,33 @@ export async function runBuildPipeline(
         };
       }
 
-      // Geometry comparator: reference evidence regions vs the home desktop
-      // candidate capture — same mapping both sides (PRD section 27).
+      // Geometry comparator (issue #37): the REFERENCE side of the topology
+      // comparison is the canonical Blueprint region list with evidence
+      // measurements aggregated per region — the same topology the generator
+      // was contracted to implement and the candidate capture exposes via
+      // data-region. Legacy provenance-less blueprints fall back to the raw
+      // evidence regions (prior behavior). Measured fidelity still comes from
+      // the frozen evidence; only topology authority changed, not the bar.
       const homeDesktop = evidenceBundle.bundle.captures.find(
         (capture) => capture.page === "home" && capture.viewportWidth === 1440
       );
-      const referenceRegions = frozen.evidence.regions.flatMap((region) =>
-        typeof region.height === "number" && typeof region.viewportHeightRatio === "number"
-          ? [{ id: region.id, height: region.height, viewportHeightRatio: region.viewportHeightRatio }]
-          : []
-      );
-      const referenceProfile = geometryFromRegions(referenceRegions, homeDesktop?.geometry.imageMassRatio ?? 0.38);
+      const referenceProfile = compositionFullyMeasured
+        ? geometryFromRegions(
+            canonicalComposition.map((region) => ({
+              id: region.regionId,
+              height: region.heightPx ?? 0,
+              viewportHeightRatio: region.viewportHeightRatio!,
+            })),
+            homeDesktop?.geometry.imageMassRatio ?? 0.38
+          )
+        : geometryFromRegions(
+            frozen.evidence.regions.flatMap((region) =>
+              typeof region.height === "number" && typeof region.viewportHeightRatio === "number"
+                ? [{ id: region.id, height: region.height, viewportHeightRatio: region.viewportHeightRatio }]
+                : []
+            ),
+            homeDesktop?.geometry.imageMassRatio ?? 0.38
+          );
       const candidateProfile = homeDesktop?.geometry ?? geometryFromRegions([], 0.38);
       const geometryComparison = compareGeometry(referenceProfile, candidateProfile);
 
@@ -551,6 +583,12 @@ export async function runBuildPipeline(
           geometryComparison,
           evidenceSummary: `${evidenceBundle.bundle.captures.length} standardized captures (home 1440/768/390, inner pages desktop+mobile); geometry similarity ${geometryComparison.similarityScore}`,
           signatureTraitIds: blueprint.blueprint.signatureTraits.map((trait) => trait.id),
+          canonicalRegions: canonicalComposition.map((region) => ({
+            order: region.order,
+            id: region.regionId,
+            purpose: region.purpose,
+          })),
+          firstViewportRegionIds: [...blueprint.blueprint.homepageFirstViewport.regionIds],
           adaptationContractQaExceptions: frozen.adaptationContract?.qaExceptions ?? [],
         },
         evidenceR2Key: evidenceBundle.artifactR2Key,

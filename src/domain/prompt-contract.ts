@@ -45,7 +45,7 @@ export const PROMPT_MANIFEST: Record<PromptStageKey, PromptManifestEntry> = {
   },
   "visual-blueprint-generator": {
     promptId: "visual-blueprint-generator",
-    promptVersion: "v3",
+    promptVersion: "v4",
     bodyFile: "02-visual-blueprint-generator-v2.md",
   },
   "original-design-blueprint-generator": {
@@ -65,7 +65,7 @@ export const PROMPT_MANIFEST: Record<PromptStageKey, PromptManifestEntry> = {
   },
   "qa-a-visual-content": {
     promptId: "qa-a-visual-content",
-    promptVersion: "v3",
+    promptVersion: "v4",
     bodyFile: "06-qa-a-visual-content-v2.md",
   },
   "qa-b-browser-technical": {

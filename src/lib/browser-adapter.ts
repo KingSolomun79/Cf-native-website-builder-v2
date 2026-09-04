@@ -32,6 +32,9 @@ export interface RawSection {
   text: string | null;
   bounds: RawBounds;
   evidenceId: string | null;
+  /** Canonical Blueprint region identity emitted by generated pages
+   *  (`<section data-region="...">`); null on external references. */
+  dataRegion: string | null;
 }
 
 export interface RawTypeStyle {
@@ -374,7 +377,7 @@ const EXTRACT_LAYOUT_SCRIPT = `(() => {
   const boundsOf = (el) => { const r = el.getBoundingClientRect(); return { x: round(r.x), y: round(r.y), width: round(r.width), height: round(r.height) }; };
   const styleOf = (el) => { const s = getComputedStyle(el); return { fontFamily: s.fontFamily, fontSize: s.fontSize, fontWeight: s.fontWeight, lineHeight: s.lineHeight, letterSpacing: s.letterSpacing, textTransform: s.textTransform }; };
   const landmark = "header, [role=banner], nav, [role=navigation], main, [role=main], section, article, aside, footer, [role=contentinfo]";
-  const sections = Array.from(document.querySelectorAll(landmark)).filter((el) => el.getBoundingClientRect().width > 0 && el.getBoundingClientRect().height > 0).slice(0, 40).map((el, i) => { const h = el.querySelector("h1, h2, h3, h4"); return { order: i, tag: el.tagName.toLowerCase(), role: el.getAttribute("role"), heading: h ? trim(h.textContent) : null, text: trim(el.textContent), bounds: boundsOf(el), evidenceId: eid(el) }; });
+  const sections = Array.from(document.querySelectorAll(landmark)).filter((el) => el.getBoundingClientRect().width > 0 && el.getBoundingClientRect().height > 0).slice(0, 40).map((el, i) => { const h = el.querySelector("h1, h2, h3, h4"); return { order: i, tag: el.tagName.toLowerCase(), role: el.getAttribute("role"), heading: h ? trim(h.textContent) : null, text: trim(el.textContent), bounds: boundsOf(el), evidenceId: eid(el), dataRegion: el.getAttribute("data-region") }; });
   const typeTargets = [["body", "body"], ["h1", "h1"], ["h2", "h2"], ["p", "p"], ["a", "a"]];
   const typography = typeTargets.map(([key, sel]) => { const el = sel === "body" ? document.body : document.querySelector(sel); if (!el) return null; const s = styleOf(el); return { element: key, fontFamily: s.fontFamily, fontSize: s.fontSize, fontWeight: s.fontWeight, lineHeight: s.lineHeight, letterSpacing: s.letterSpacing, textTransform: s.textTransform, evidenceId: eid(el) }; }).filter(Boolean);
   const bodyStyle = getComputedStyle(document.body);

@@ -75,9 +75,9 @@ describe("Benchmark Site 1 — asymmetric/editorial", () => {
     const provenance = JSON.parse(run!.provenance_json!) as Array<{ stage: string; prompt_id: string; prompt_version: string; model: string; schema_version: string }>;
     const byStage = new Map(provenance.map((entry) => [entry.stage, entry]));
     expect(byStage.get("reference-analyzer")).toMatchObject({ prompt_id: "reference-analyzer", prompt_version: "v3" });
-    expect(byStage.get("visual-blueprint-generator")).toMatchObject({ prompt_version: "v3" });
+    expect(byStage.get("visual-blueprint-generator")).toMatchObject({ prompt_version: "v4" });
     expect(byStage.get("website-generator")).toMatchObject({ prompt_version: "v4" });
-    expect(byStage.get("qa-a-visual-content")).toMatchObject({ prompt_version: "v3" });
+    expect(byStage.get("qa-a-visual-content")).toMatchObject({ prompt_version: "v4" });
 
     // The exact candidate reached Release Ready: release record exists for
     // the run's Build Version and a preview deployment serves it.
