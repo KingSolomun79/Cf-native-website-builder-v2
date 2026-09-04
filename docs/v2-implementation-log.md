@@ -279,7 +279,7 @@ stale-capability checks therefore remain unexercised in production;
 CSO: docs/security/2026-09-02-v2-issue30-release-cso.md (SECURITY OK FOR
 CURRENT SCOPE, watch items recorded).
 
-## 2026-09-04 — #34/#35/#36 Workflow-retry & repair-effectiveness hardening; #30 second-publication attempts 1-6
+## 2026-09-04 — #34/#35/#36 Workflow-retry & repair-effectiveness hardening; #30 second-publication attempts 1-7
 
 **Session goal:** resume #30 from the second-publication requirement by first fixing the documented
 repair-loop state defect (#34). Every attempt then surfaced and fixed one more real defect; five
@@ -321,7 +321,10 @@ dedicated commits shipped, each with regression tests and a deployed exact SHA.
 workflow errored at poisoned manifest; f0dd789d FAILED (boundary trip after repair-regeneration
 drift); 8fea4b6b FAILED (footer-less regeneration caught by deterministic validation); 513390c3
 HUMAN_REVIEW_REQUIRED — repair lifted visual fidelity 63 → 86 with composition targets + applied
-directives, remaining blockers GEOMETRY_REGION_ORDER + CRITICAL_IMAGE_SLOTS_RESOLVE.
+directives, remaining blockers GEOMETRY_REGION_ORDER + CRITICAL_IMAGE_SLOTS_RESOLVE. 78c6da8b
+(attempt 7, after composition targets) HUMAN_REVIEW_REQUIRED at the full ceiling: visual 62 → 88
+across the two applied batches; remaining blockers gate-region-order + technical 74 — converging
+toward the gates on exactly the region-semantics finding.
 
 **Open product-design finding (needs a human decision, deliberately NOT auto-fixed):** Reference
 Analysis aggregates the reference's ~9 visually-segmented regions into 4 blueprint regions;
