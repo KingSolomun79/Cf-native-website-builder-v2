@@ -340,3 +340,57 @@ decision, not a mechanics fix.
 docs/security/2026-09-04-v2-issue34-repair-retry-cso.md + addenda 1-4 (SECURITY OK FOR CURRENT
 SCOPE). #34/#35/#36 closed; #30 remains OPEN — second publication, rollback execution and
 stale-capability rejection remain unexercised pending the region-semantics decision.
+
+## 2026-09-04 — #37 canonical region semantics; #38 confirmation resolution semantics
+
+**#37 (fixed, production-verified, closed — commit 948fac8):** the canonical
+region-semantics inconsistency is resolved. The authoritative model is now:
+Reference Evidence = observational/raw measured evidence; Reference Analysis =
+interpretation/aggregation; Visual Blueprint = binding canonical region
+topology; Generator implements Blueprint topology; QA topology gates judge
+against the Blueprint; measured fidelity gates keep using raw Reference
+Evidence. Production-proven in the #30 revision of build bbe8c8f9:
+PAGE_SILHOUETTE_REGION_ORDER passed correctly. Not to be reopened.
+
+**#38 (this session, implementation b6043541a7391376b2c20e79c1ac95f8ba315d5e):**
+confirmation QA re-emitted resolved blockers as P1 findings and
+`resolveAfterConfirmation` counted every P0/P1 finding as an active Release
+Blocker — driving a factually clean repaired candidate (visual 93, content 92,
+technical 93, all gates green) to HUMAN_REVIEW_REQUIRED with "2 valid Release
+Blocker(s)" that were actually verified resolutions. The defect was two-layered:
+the confirmation seam had no structured way to report resolution state, and the
+resolver classified findings by severity alone.
+
+**Fix (narrow, confirmation seam only):** confirmation findings now carry a
+REQUIRED structured `status: "ACTIVE" | "RESOLVED"` (schemas
+`qa-a-confirmation/2` / `qa-b-confirmation/2`); the confirmation prompt
+instructs explicit classification (RESOLVED = fixed prior defect reported with
+its ORIGINAL severity — a resolution record, never an active blocker; ACTIVE =
+unfixed / partially fixed prior blocker or NEW defect); `isReleaseBlocker` and
+both release evaluators count only non-RESOLVED P0/P1 findings; RESOLVED
+findings are returned as a `resolved` evidence bucket on the verdict and
+resolution result. Fail-closed: missing/ambiguous status fails schema
+validation → one structural repair → stage failure → FAILED terminal — it can
+never silently become Release Ready. Fresh QA-A/QA-B schemas are byte-identical
+(findings cannot carry `status`), so fresh blocker semantics, thresholds
+(>=90), hard gates and P0/P1 definitions are unchanged. Repair budgets, region
+semantics (#37) and glm-5.3-flash routing untouched.
+
+**Regression evidence:** the new pipeline test reproduces the production defect
+end-to-end (repaired v2 whose confirmation re-reports the fixed first-viewport
+P1 with original severity): pre-fix RED (terminal FAILED — the seam could not
+even express resolution state), post-fix RELEASE_READY at v2 with exactly one
+fix_coordinator batch and the release record pinned to the repaired version.
+Evaluator matrix covers resolved P0/P1 (A/B), still-active P0/P1 (C/D), new
+P0/P1 discovered during confirmation (E/F), the exact production note (G),
+fresh-QA invariance, and schema fail-closed guards (H); lifecycle seam tests
+cover the full-budget RESOLVED release (I), still-active + new blockers
+(J), and the ambiguous-output escalation.
+
+**Gates at session end:** 32 test files / 235 tests passing (+10), typecheck
+clean, wrangler dry-run pass. CSO:
+docs/security/2026-09-04-v2-issue38-confirmation-resolution-cso.md (SECURITY OK
+FOR CURRENT SCOPE; watch item: model-controlled status manipulation is the
+pre-existing LLM-evaluator trust boundary, not widened — scores/gates/fabrication
+remain independent conjuncts and full status-bearing findings persist in
+immutable R2 artifacts).
