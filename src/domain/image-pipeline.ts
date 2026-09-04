@@ -262,6 +262,23 @@ export async function runImageWave(env: Env, input: RunImageWaveInput): Promise<
       continue;
     }
 
+    // Workflow-retry safety: attempt numbering resumes from the persisted
+    // attempt rows. Restarting at 1 on every re-entry would collide with the
+    // UNIQUE (build_version_id, slot_id, attempt_number) index and crash-loop
+    // the step for a slot that already has attempts. A slot that already
+    // burned its bounded attempts in an earlier pass is skipped as failed —
+    // the wave completes and assembly's asset-routing/preflight decides.
+    const priorRow = await env.DB.prepare(
+      "SELECT COUNT(*) AS n FROM image_attempts WHERE build_version_id = ? AND slot_id = ?"
+    )
+      .bind(input.buildVersionId, slot.id)
+      .first<{ n: number }>();
+    const firstAttemptNumber = Number(priorRow?.n ?? 0) + 1;
+    if (firstAttemptNumber > MAX_ATTEMPTS_PER_SLOT) {
+      outcomes.push({ slotId: slot.id, status: "failed", costUsd: 0 });
+      continue;
+    }
+
     const spentRow = await env.DB.prepare(
       "SELECT COALESCE(SUM(cost_usd), 0) AS spent FROM image_attempts WHERE build_id = ?"
     )
@@ -272,7 +289,7 @@ export async function runImageWave(env: Env, input: RunImageWaveInput): Promise<
     let succeeded = false;
     let lastOutcome: SlotGenerationOutcome = { slotId: slot.id, status: "failed", costUsd: 0 };
 
-    for (let attemptNumber = 1; attemptNumber <= MAX_ATTEMPTS_PER_SLOT && !succeeded; attemptNumber++) {
+    for (let attemptNumber = firstAttemptNumber; attemptNumber <= MAX_ATTEMPTS_PER_SLOT && !succeeded; attemptNumber++) {
       const attemptId = generateId();
       const createdAt = nowIso();
 

@@ -59,6 +59,14 @@ None for release.
 
 **SECURITY OK FOR CURRENT SCOPE**
 
+### Addendum (same day, image-step re-entry fix)
+
+Live runbook execution surfaced a second #34-class re-entry defect: `runImageWave` restarted `attemptNumber` at 1 on every pass, so any engine re-entry for a slot with persisted attempt rows collided with `UNIQUE (build_version_id, slot_id, attempt_number)` on an un-guarded INSERT and crash-looped the durable step (observed live on Revision Build 09c9f1ab: repeated wave events, no new attempts, no forward progress).
+
+Fix: attempt numbering resumes from the persisted attempt rows; a slot that already burned its bounded attempts is skipped as failed so the wave completes and assembly's asset-routing/preflight decides. Security review of the delta: parameterized COUNT query only, no new surfaces, no secrets, no domain-scope change (the per-slot bounded ceiling of 2 attempts is now enforced ACROSS passes, which is strictly tighter than before — re-entries previously re-spent KIE or crashed). Regression test added to the retry suite (exhausted-slot skip + resume-at-2 acceptance).
+
+Verdict unchanged: **SECURITY OK FOR CURRENT SCOPE**.
+
 ## 9. Next best action
 
 Commit the defect fix as a dedicated commit, deploy that exact SHA, then resume issue #30 from the second-publication requirement (Revision Request → Release Ready → Approval → second Publication → Rollback capability + execution + stale-capability rejection → final gates).

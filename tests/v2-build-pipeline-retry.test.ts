@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { env as providedEnv } from "cloudflare:test";
 import type { Env } from "../src/env.d";
-import { startSiteGeneration } from "../src/domain/lifecycle";
+import { startSiteGeneration, createInitialBuild } from "../src/domain/lifecycle";
 import { runBuildPipeline, type BuildPipelineDeps } from "../src/domain/build-pipeline";
 import { applyRepairBatch, AutomatedRepairError, type FixPlan } from "../src/domain/automated-repair";
+import { runImageWave, type ImageGenerationProvider, type ImagePromptRecord } from "../src/domain/image-pipeline";
+import type { ImageSlot } from "../src/domain/site-generator";
 import type { RawAiGenerate } from "../src/domain/ai-boundary";
 import { createPipelineScripts, persistPipelineScreenshot, PIPELINE_SCRIPTS_BUSINESS } from "./helpers/pipeline-scripts";
 
@@ -291,5 +293,117 @@ describe("build pipeline Workflow-retry safety (issue #34)", () => {
       expect(error?.code).toBe("REPAIR_BUDGET_EXHAUSTED");
     }
     expect(await versionNumbers(buildId)).toEqual(versionsBefore);
+  });
+
+  it("resumes image attempt numbering on re-entry instead of crash-looping on the attempt UNIQUE index", async () => {
+    const imageSlot: ImageSlot = {
+      id: "about-main",
+      page: "about",
+      semanticRole: "editorial supporting image",
+      blueprintRole: "role-detail",
+      priority: "NORMAL",
+      orientation: "landscape",
+      negativeSpaceForText: false,
+    };
+    const prompts: Map<string, ImagePromptRecord> = new Map([
+      [
+        imageSlot.id,
+        {
+          slotId: imageSlot.id,
+          promptText: "Editorial documentary photograph realizing an editorial supporting image.",
+          altText: "supporting photograph",
+          shotType: "wide editorial",
+          lighting: "natural window light",
+          avoidance: "no text overlays",
+        },
+      ],
+    ]);
+    const succeedingProvider: ImageGenerationProvider = {
+      createTask: async (task) => ({ taskId: `kie-${task.slotId}-${Math.random().toString(36).slice(2, 8)}`, costUsd: 0.1 }),
+      fetchResult: async (taskId) => ({
+        status: "complete" as const,
+        bytes: new TextEncoder().encode(`WEBP-${taskId}`),
+        temporaryUrl: `https://tmp.kie.example/${taskId}.webp`,
+      }),
+    };
+
+    async function newImageBuild(): Promise<{ buildId: string; buildVersionId: string }> {
+      const screenshotR2Key = `references/pipeline/img-${Math.random().toString(36).slice(2)}.png`;
+      await persistPipelineScreenshot(env, screenshotR2Key);
+      const started = await startSiteGeneration(env, {
+        payload: {
+          buildMode: "REFERENCE_BOUND",
+          facts: { businessName: PIPELINE_SCRIPTS_BUSINESS, contactEmail: "ops@wazibizwebsites.example" },
+          reference: { screenshotR2Key },
+        },
+      });
+      const created = await createInitialBuild(env, { siteGenerationId: started.siteGenerationId });
+      return { buildId: created.buildId, buildVersionId: created.buildVersionId };
+    }
+    async function attemptRows(buildVersionId: string): Promise<{ attempt_number: number; status: string }[]> {
+      const rows = await env.DB.prepare(
+        "SELECT attempt_number, status FROM image_attempts WHERE build_version_id = ? AND slot_id = 'about-main' ORDER BY attempt_number"
+      )
+        .bind(buildVersionId)
+        .all<{ attempt_number: number; status: string }>();
+      return rows.results;
+    }
+
+    // Scenario A: a re-entered wave for a slot whose TWO bounded attempts
+    // already exist (both failed in the earlier pass) must SKIP the slot —
+    // no UNIQUE collision, no new spend — and complete the wave.
+    {
+      const { buildId, buildVersionId } = await newImageBuild();
+      const failingProvider: ImageGenerationProvider = {
+        createTask: async (task) => ({ taskId: `kie-${task.slotId}-a`, costUsd: 0.1 }),
+        fetchResult: async () => ({ status: "failed" as const }),
+      };
+      await runImageWave(env, {
+        buildId, buildVersionId, buildVersionNumber: 1, wave: 2,
+        slots: [imageSlot], promptRecords: prompts, provider: failingProvider,
+      });
+      expect(await attemptRows(buildVersionId)).toEqual([
+        { attempt_number: 1, status: "failed" },
+        { attempt_number: 2, status: "failed" },
+      ]);
+
+      const outcomes = await runImageWave(env, {
+        buildId, buildVersionId, buildVersionNumber: 1, wave: 2,
+        slots: [imageSlot], promptRecords: prompts, provider: succeedingProvider,
+      });
+      expect(outcomes.map((outcome) => outcome.status)).toEqual(["failed"]);
+      expect(await attemptRows(buildVersionId)).toEqual([
+        { attempt_number: 1, status: "failed" },
+        { attempt_number: 2, status: "failed" },
+      ]);
+    }
+
+    // Scenario B: a wave interrupted after attempt 1 (one failed row) resumes
+    // at attempt 2 on re-entry and can still accept the slot.
+    {
+      const { buildId, buildVersionId } = await newImageBuild();
+      await env.DB.prepare(
+        `INSERT INTO image_attempts (id, build_id, build_version_id, slot_id, wave, attempt_number, status, cost_usd, created_at)
+         VALUES ('seed-a1', ?, ?, 'about-main', 2, 1, 'failed', 0, ?)`
+      )
+        .bind(buildId, buildVersionId, new Date().toISOString())
+        .run();
+
+      const outcomes = await runImageWave(env, {
+        buildId, buildVersionId, buildVersionNumber: 1, wave: 2,
+        slots: [imageSlot], promptRecords: prompts, provider: succeedingProvider,
+      });
+      expect(outcomes.map((outcome) => outcome.status)).toEqual(["accepted"]);
+      expect(await attemptRows(buildVersionId)).toEqual([
+        { attempt_number: 1, status: "failed" },
+        { attempt_number: 2, status: "succeeded" },
+      ]);
+      const accepted = await env.DB.prepare(
+        "SELECT COUNT(*) AS n FROM accepted_images WHERE build_version_id = ? AND slot_id = 'about-main'"
+      )
+        .bind(buildVersionId)
+        .first<{ n: number }>();
+      expect(accepted?.n).toBe(1);
+    }
   });
 });
