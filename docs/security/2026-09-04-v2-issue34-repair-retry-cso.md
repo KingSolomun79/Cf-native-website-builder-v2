@@ -75,6 +75,12 @@ Fix (issue #35): the repaired version is GENERATED WITH its batch's Fix Plan dir
 
 Verdict unchanged: **SECURITY OK FOR CURRENT SCOPE**.
 
+### Addendum 3 (same day, rejected-manifest re-freeze)
+
+Live attempt 3 exposed one more #34-class seam: the preflight-REJECTED assembly wrote its diagnostic manifest with non-tolerant `putImmutableObject`, poisoning `v{n}/manifest.json` — every retried assemble then crashed on "Immutable R2 artifact already exists" instead of surfacing the preflight rejection. Fix (commit 79cfd57): the diagnostic write uses `putImmutableObjectTolerant` (same seam as the passing path). No scope/security change; regression assertion added to the assembly suite (a retried rejection must surface `AssemblyPreflightError` again).
+
+Verdict unchanged: **SECURITY OK FOR CURRENT SCOPE**.
+
 ## 9. Next best action
 
 Commit the defect fix as a dedicated commit, deploy that exact SHA, then resume issue #30 from the second-publication requirement (Revision Request → Release Ready → Approval → second Publication → Rollback capability + execution + stale-capability rejection → final gates).
