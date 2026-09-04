@@ -278,3 +278,62 @@ false positives, transient D1/DO step faults). The rollback execution and
 stale-capability checks therefore remain unexercised in production;
 CSO: docs/security/2026-09-02-v2-issue30-release-cso.md (SECURITY OK FOR
 CURRENT SCOPE, watch items recorded).
+
+## 2026-09-04 — #34/#35/#36 Workflow-retry & repair-effectiveness hardening; #30 second-publication attempts 1-6
+
+**Session goal:** resume #30 from the second-publication requirement by first fixing the documented
+repair-loop state defect (#34). Every attempt then surfaced and fixed one more real defect; five
+dedicated commits shipped, each with regression tests and a deployed exact SHA.
+
+**Defects fixed (all regression-tested, all live-observed first):**
+
+1. **#34 — repair-loop state vs engine retries (22225c1, worker 5dde4344).** The bounded-repair
+   position is now reconstructed from the append-only `repair_batches` ledger on every pipeline
+   entry; a re-entry no longer re-runs the Fix Coordinator into the storage ceiling. Also: repaired
+   versions inherit frozen design artifacts; `qa_report` verdicts are reused (with record-pinning)
+   on re-entry; `applyRepairBatch` pre-checks the budget before creating a version (no more orphan
+   versions). Latent copy bug found by the new tests: the artifact-inheritance INSERT…SELECT bound
+   ONE id for all rows, so INSERT OR IGNORE copied only the first row.
+2. **Image-attempt resume (4e94895, worker 40bde02d).** `runImageWave` restarted attempt numbering
+   at 1 every pass → UNIQUE (build_version_id, slot_id, attempt_number) crash-loops on re-entry
+   (live: build 09c9f1ab). Numbering now resumes from persisted rows; exhausted slots are skipped
+   so the wave completes and assembly routing/preflight decides.
+3. **#35 — repair never applied (c32b2bf, worker c1441c94).** The repaired version was a verbatim
+   copy of the failed one, so confirmation QA re-judged identical content and blockers (incl.
+   GATE_PREVIOUS_BLOCKERS_RESOLVED) were structurally unresolvable. Repaired versions are now
+   GENERATED WITH their batch's plan directives, loaded from D1 truth
+   (`repair_batches.plan_json` by `created_build_version_id`) so re-entries reapply the same plan;
+   design-origin artifacts stay frozen; boundary re-validated on every load.
+4. **Rejected-manifest re-freeze (79cfd57, worker 9df800f1).** The preflight-REJECTED assembly
+   wrote its diagnostic manifest non-tolerantly, poisoning `v{n}/manifest.json` so every retried
+   assemble crashed on "Immutable R2 artifact already exists" (live: build 940570ff).
+5. **#36 — boundary-heuristic false positives (722ae4a, worker f8a12cc8).** The plan-text mutation
+   regex tripped on legitimate realization wording 2 of 6 attempts and crashed builds to FAILED.
+   Planner now gets ONE bounded re-word with the violation shown; a persistent violator routes the
+   build to HUMAN_REVIEW_REQUIRED (no batch consumed, no version created) instead of FAILED.
+6. **Composition targets (77e3fb8, worker db90851e).** Systematic visual-gate failures diagnosed:
+   the generator received only qualitative region purposes while QA hard-gates measured numbers.
+   The frozen evidence's region viewport-height ratios now reach the home prompt as an explicit
+   COMPOSITION TARGETS block (same evidence QA measures — no gate change).
+
+**#30 second-publication attempts (all bounded terminals, none Release Ready):**
+09c9f1ab FAILED (boundary trip); f19a1baf HUMAN_REVIEW_REQUIRED (verbatim-copy era); 940570ff
+workflow errored at poisoned manifest; f0dd789d FAILED (boundary trip after repair-regeneration
+drift); 8fea4b6b FAILED (footer-less regeneration caught by deterministic validation); 513390c3
+HUMAN_REVIEW_REQUIRED — repair lifted visual fidelity 63 → 86 with composition targets + applied
+directives, remaining blockers GEOMETRY_REGION_ORDER + CRITICAL_IMAGE_SLOTS_RESOLVE.
+
+**Open product-design finding (needs a human decision, deliberately NOT auto-fixed):** Reference
+Analysis aggregates the reference's ~9 visually-segmented regions into 4 blueprint regions;
+generation realizes the 4; but QA geometry compares the candidate capture's independent ~9-block
+segmentation against the un-aggregated reference segmentation (live: blueprint 4 regions
+`region_01_hero…region_04_conversion` vs candidate capture 9 blocks `region-1…region-9`,
+first block 0.081 viewport = the header). Until segmentation semantics are unified (capture by
+`[data-region]`, or comparator against blueprint-aggregated regions), the geometry gates measure a
+topology the generator is told to build differently. Changing either side is a QA-gate semantics
+decision, not a mechanics fix.
+
+**Gates at session end:** 31 test files / 216 tests, typecheck clean, dry-run pass. CSO:
+docs/security/2026-09-04-v2-issue34-repair-retry-cso.md + addenda 1-4 (SECURITY OK FOR CURRENT
+SCOPE). #34/#35/#36 closed; #30 remains OPEN — second publication, rollback execution and
+stale-capability rejection remain unexercised pending the region-semantics decision.
