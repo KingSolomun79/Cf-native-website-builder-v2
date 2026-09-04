@@ -290,6 +290,7 @@ function pagePrompt(input: {
   contract: ImplementationContract;
   facts: BusinessFacts;
   slots: ImageSlot[];
+  referenceGeometry?: Array<{ regionId: string; viewportHeightRatio: number }>;
 }): string {
   const { pageId, blueprint, contract, facts, slots } = input;
   const slotsForPage = (page: PageId, all: ImageSlot[]) => all.filter((slot) => slot.page === page).map((slot) => slot.id);
@@ -303,9 +304,12 @@ function pagePrompt(input: {
 - Derived marketing copy may interpret these facts safely but must not invent unsupported facts.`;
 
   if (pageId === "home") {
+    const geometryTargets = (input.referenceGeometry ?? []).length
+      ? `\n- COMPOSITION TARGETS from the frozen Reference Evidence (QA hard-gates these numbers on the rendered page): render EXACTLY ${input.referenceGeometry!.length} top-level home sections, in this exact order, with each section's rendered height approximately ${input.referenceGeometry!.map((region) => `${region.regionId} ≈ ${region.viewportHeightRatio.toFixed(2)} viewport-heights`).join(", ")}. The FIRST viewport ends at the boundary of the first region(s) totaling ≈ 1.0 viewport-height — do not make the first region trivially short or the page one long uniform stack.`
+      : "";
     return `${base}
 - The page structure MUST realize the Blueprint homepage topology in order: each region rendered as a <section data-region="{regionId}"> using EXACTLY these region ids, in order, verbatim (no other ids, no renames): ${blueprint.homepageRegions.map((region) => region.id).join(", ")}. Each section carries its region's purpose.
-- First viewport must match the Blueprint first-viewport description.
+- First viewport must match the Blueprint first-viewport description.${geometryTargets}
 - Anti-fallback rules are binding: ${JSON.stringify(blueprint.antiFallbackRules)}.
 
 HOMEPAGE REGIONS (ordered): ${JSON.stringify(blueprint.homepageRegions)}
@@ -354,6 +358,11 @@ export interface GenerateCompleteSiteInput {
    *  Version. Never carries Business Fact / Reference / Build Mode / Blueprint
    *  changes (assertRepairPlanWithinBounds guards the plan itself). */
   repairDirectives?: string;
+  /** Measured Reference composition (frozen evidence): the numeric region
+   *  proportions the Reference controls and QA-A hard-gates. Generation
+   *  receives them as composition targets — without them the generator only
+   *  sees qualitative region purposes while QA measures the numbers. */
+  referenceGeometry?: Array<{ regionId: string; viewportHeightRatio: number }>;
 }
 
 export interface GeneratedSite extends AssembledSiteSource {
@@ -424,7 +433,7 @@ export async function generateCompleteSite(
   const pages: Partial<Record<PageId, string>> = {};
   const pageRuns: Array<{ pageId: PageId; run: { value: PageHtml; artifactR2Key: string } }> = [];
   for (const pageId of PAGE_IDS) {
-    const run = await runOrReuse<PageHtml>("generated_page", pageId, PageHtmlSchema, `generated-source/page-${pageId}/1`, pagePrompt({ pageId, blueprint: input.blueprint, contract: input.contract, facts, slots: imagePlan.slots }) + repairBlock);
+    const run = await runOrReuse<PageHtml>("generated_page", pageId, PageHtmlSchema, `generated-source/page-${pageId}/1`, pagePrompt({ pageId, blueprint: input.blueprint, contract: input.contract, facts, slots: imagePlan.slots, referenceGeometry: input.referenceGeometry }) + repairBlock);
     pages[pageId] = run.value.html;
     pageRuns.push({ pageId, run: { value: run.value, artifactR2Key: run.artifactR2Key } });
   }

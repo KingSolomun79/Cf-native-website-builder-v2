@@ -272,6 +272,58 @@ async function preparedContext(): Promise<{
 }
 
 describe("incremental four-page generation", () => {
+  it("passes measured Reference composition targets to the home prompt when provided", async () => {
+    const context = await preparedContext();
+    const fullPrompts: string[] = [];
+    const { generate } = generateForSite();
+    const capturingGenerate: RawAiGenerate = async (system, user) => {
+      fullPrompts.push(user);
+      return generate(system, user);
+    };
+
+    const withGeometry = await generateCompleteSite(env, {
+      siteGenerationId: context.siteGenerationId,
+      siteId: context.siteId,
+      buildId: context.buildId,
+      buildVersionId: context.buildVersionId,
+      buildVersionNumber: 1,
+      blueprint: BLUEPRINT,
+      blueprintR2Key: context.blueprintR2Key,
+      contract: context.contract,
+      contractR2Key: context.contractR2Key,
+      generate: capturingGenerate,
+      referenceGeometry: [
+        { regionId: "hero", viewportHeightRatio: 0.78 },
+        { regionId: "intro", viewportHeightRatio: 0.89 },
+      ],
+    });
+    expect(withGeometry.validation.passed).toBe(true);
+    const homePrompt = fullPrompts.find((prompt) => prompt.includes("page id 'home'"))!;
+    expect(homePrompt).toContain("COMPOSITION TARGETS");
+    expect(homePrompt).toContain("hero ≈ 0.78 viewport-heights");
+    expect(homePrompt).toContain("intro ≈ 0.89 viewport-heights");
+    expect(homePrompt).toContain("EXACTLY 2 top-level home sections");
+
+    // Without geometry the prompt stays unchanged (no targets block) — a
+    // fresh Build Version so nothing is reused from the first generation.
+    const context2 = await preparedContext();
+    fullPrompts.length = 0;
+    await generateCompleteSite(env, {
+      siteGenerationId: context2.siteGenerationId,
+      siteId: context2.siteId,
+      buildId: context2.buildId,
+      buildVersionId: context2.buildVersionId,
+      buildVersionNumber: 1,
+      blueprint: BLUEPRINT,
+      blueprintR2Key: context2.blueprintR2Key,
+      contract: context2.contract,
+      contractR2Key: context2.contractR2Key,
+      generate: capturingGenerate,
+    });
+    const plainHomePrompt = fullPrompts.find((prompt) => prompt.includes("page id 'home'"))!;
+    expect(plainHomePrompt).not.toContain("COMPOSITION TARGETS");
+  });
+
   it("generates all four pages plus shared source from one Blueprint + one Implementation Contract, incrementally", async () => {
     const context = await preparedContext();
     const { generate, calls } = generateForSite();

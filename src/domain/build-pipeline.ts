@@ -397,6 +397,15 @@ export async function runBuildPipeline(
       ctx: VersionContext,
       repairDirectives?: string
     ): Promise<{ manifestHash: string; previewUrl: string }> => {
+      // Measured Reference composition (frozen evidence) feeds generation as
+      // numeric composition targets — QA-A hard-gates these exact proportions
+      // (first_viewport_height_ratio, region count/order tolerance), so the
+      // generator must see the same numbers QA measures.
+      const referenceGeometry = frozen.evidence.regions.flatMap((region) =>
+        typeof region.viewportHeightRatio === "number"
+          ? [{ regionId: region.id, viewportHeightRatio: region.viewportHeightRatio }]
+          : []
+      );
       const site = await stepDo(`pipeline: generate site (v${ctx.buildVersionNumber})`, () => generateCompleteSite(env, {
         siteGenerationId: ctx.siteGenerationId,
         siteId: ctx.siteId,
@@ -408,6 +417,7 @@ export async function runBuildPipeline(
         contract: contract.contract,
         contractR2Key: contract.artifactR2Key,
         generate: deps.generate,
+        referenceGeometry,
         ...(repairDirectives ? { repairDirectives } : {}),
       }));
 
