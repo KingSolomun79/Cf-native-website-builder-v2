@@ -26,8 +26,12 @@ const env = providedEnv as unknown as Env;
 function stageLabel(user: string): string {
   if (user.includes("Interpret the frozen versioned Reference Evidence")) return "reference_analysis";
   if (user.includes("Produce the binding Visual Blueprint")) return "blueprint";
-  if (user.includes("page id '")) return "page";
-  if (user.includes("shared stylesheet") || user.includes("minimal shared runtime")) return "shared_source";
+  if (user.includes("page id '")) {
+    return user.includes("BOUNDED REPAIR DIRECTIVES") ? "page_repair" : "page";
+  }
+  if (user.includes("shared stylesheet") || user.includes("minimal shared runtime")) {
+    return user.includes("BOUNDED REPAIR DIRECTIVES") ? "shared_source_repair" : "shared_source";
+  }
   if (user.includes("Generate KIE image prompts")) return "image_prompts";
   if (user.includes("QA-A Confirmation")) return "qa_a_confirmation";
   if (user.includes("hard composition gate")) return "qa_a";
@@ -127,25 +131,35 @@ describe("build pipeline Workflow-retry safety (issue #34)", () => {
     // (4) no premature REPAIR_BUDGET_EXHAUSTED: still exactly one batch.
     expect(await repairBatchKinds(buildId)).toEqual(["fix_coordinator"]);
 
-    // (2) nothing regenerated incorrectly: design stages, shared source,
-    // pages and image prompts were produced exactly once (phase 1, v1) and
-    // reused verbatim on re-entry; the Fix Coordinator planned exactly once.
+    // (2) the repaired version's realization was regenerated exactly once,
+    // WITH the batch's directives (issue #35) — never a plain re-roll and
+    // never a verbatim copy; the frozen design stages were produced exactly
+    // once (phase 1, v1) and reused on re-entry; the Fix Coordinator planned
+    // exactly once.
     expect(audit.filter((label) => label === "reference_analysis")).toHaveLength(1);
     expect(audit.filter((label) => label === "blueprint")).toHaveLength(1);
     expect(audit.filter((label) => label === "shared_source")).toHaveLength(2);
+    expect(audit.filter((label) => label === "shared_source_repair")).toHaveLength(2);
     expect(audit.filter((label) => label === "page")).toHaveLength(4);
+    expect(audit.filter((label) => label === "page_repair")).toHaveLength(4);
     expect(audit.filter((label) => label === "image_prompts")).toHaveLength(1);
     expect(audit.filter((label) => label === "fix_coordinator_plan")).toHaveLength(1);
 
-    // The inherited artifacts really are the v1 rows: every repaired-version
-    // generation artifact points at v1's read-only R2 keys.
+    // The repaired version inherits the frozen design stages (v1 R2 keys) and
+    // regenerates its own realization under the batch directives (v2 keys).
     const v2ArtifactKeys = await env.DB.prepare(
       "SELECT kind, subkey, artifact_r2_key FROM build_stage_artifacts WHERE build_version_id = ? AND kind IN ('reference_analysis','visual_blueprint','implementation_contract','generated_page','image_plan')"
     )
       .bind(versions.results[1].id)
       .all<{ kind: string; subkey: string; artifact_r2_key: string }>();
-    expect(v2ArtifactKeys.results.every((row) => row.artifact_r2_key.includes("/v1/"))).toBe(true);
-    expect(v2ArtifactKeys.results.filter((row) => row.kind === "reference_analysis" || row.kind === "visual_blueprint" || row.kind === "implementation_contract")).toHaveLength(3);
+    const designRows = v2ArtifactKeys.results.filter(
+      (row) => row.kind === "reference_analysis" || row.kind === "visual_blueprint" || row.kind === "implementation_contract"
+    );
+    expect(designRows).toHaveLength(3);
+    expect(designRows.every((row) => row.artifact_r2_key.includes("/v1/"))).toBe(true);
+    const pageRows = v2ArtifactKeys.results.filter((row) => row.kind === "generated_page");
+    expect(pageRows).toHaveLength(4);
+    expect(pageRows.every((row) => row.artifact_r2_key.includes("/v2/"))).toBe(true);
 
     // Fresh QA evaluated the NEW immutable version (v1 failed, v2 released).
     expect(audit.filter((label) => label === "qa_a")).toHaveLength(2);
@@ -189,10 +203,12 @@ describe("build pipeline Workflow-retry safety (issue #34)", () => {
 
     // Exactly one Fix Coordinator plan across the crash and the re-entry. The
     // crash happened inside the QA verdicts step (before any QA-A call), so
-    // phase 2's re-evaluation of v1 is the only full QA-A run.
+    // phase 2's re-evaluation of v1 is the only full QA-A run. The repaired
+    // version regenerated its realization once, under the batch directives.
     expect(audit.filter((label) => label === "fix_coordinator_plan")).toHaveLength(1);
     expect(audit.filter((label) => label === "qa_a")).toHaveLength(1);
     expect(audit.filter((label) => label === "page")).toHaveLength(4);
+    expect(audit.filter((label) => label === "page_repair")).toHaveLength(4);
   });
 
   it("re-invoking a completed build reuses the frozen verdict and consumes nothing", async () => {
@@ -257,8 +273,13 @@ describe("build pipeline Workflow-retry safety (issue #34)", () => {
     expect(outcome.repairApplied).toBe(true);
 
     // Exactly one plan per batch kind across crash + re-entry; no third batch.
+    // Both repaired versions regenerated their realization with their own
+    // batch's directives (v2 with the Fix Coordinator plan, v3 with the
+    // Release Blocker Fix plan — reconstructed from D1 on re-entry).
     expect(audit.filter((label) => label === "fix_coordinator_plan")).toHaveLength(1);
     expect(audit.filter((label) => label === "release_blocker_fix_plan")).toHaveLength(1);
+    expect(audit.filter((label) => label === "page")).toHaveLength(4);
+    expect(audit.filter((label) => label === "page_repair")).toHaveLength(8);
     expect(await repairBatchKinds(buildId)).toEqual(["fix_coordinator", "release_blocker_fix"]);
     expect(await versionNumbers(buildId)).toEqual([1, 2, 3]);
 

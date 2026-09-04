@@ -67,6 +67,14 @@ Fix: attempt numbering resumes from the persisted attempt rows; a slot that alre
 
 Verdict unchanged: **SECURITY OK FOR CURRENT SCOPE**.
 
+### Addendum 2 (same day, issue #35 — repair application)
+
+Live runbook attempt 2 exposed a deeper defect: the repaired Build Version inherited the failed version's realization verbatim, so confirmation QA re-judged identical content and the recorded blockers (incl. `GATE_PREVIOUS_BLOCKERS_RESOLVED`) were structurally unresolvable — bounded repair could never clear anything.
+
+Fix (issue #35): the repaired version is GENERATED WITH its batch's Fix Plan directives. The directives are loaded from D1 truth (`repair_batches.plan_json` keyed by `created_build_version_id`), so engine re-entries reapply the same plan deterministically; design-origin artifacts (analysis/blueprint/contract/image plan) remain inherited and frozen; Accepted Images remain reused; ceilings, gates and immutability are unchanged. Boundary guard `assertRepairPlanWithinBounds` re-validates the persisted plan on every load. Security review of the delta: no new surfaces, no secrets, parameterized SQL only, the repair boundary check is now applied MORE often (on every re-entry load), and the realization change is confined to the existing `repairDirectives` prompt seam of `generateCompleteSite`.
+
+Verdict unchanged: **SECURITY OK FOR CURRENT SCOPE**.
+
 ## 9. Next best action
 
 Commit the defect fix as a dedicated commit, deploy that exact SHA, then resume issue #30 from the second-publication requirement (Revision Request → Release Ready → Approval → second Publication → Rollback capability + execution + stale-capability rejection → final gates).

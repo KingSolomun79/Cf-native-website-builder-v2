@@ -45,7 +45,9 @@ import type { ImplementationContract } from "./implementation-planner";
 import { getEffectiveBusinessFacts } from "./revision";
 import {
   applyRepairBatch,
+  assertRepairPlanWithinBounds,
   AutomatedRepairError,
+  parseFixPlan,
   runConfirmationQa,
   runFixCoordinatorStage,
   runReleaseBlockerFixStage,
@@ -152,6 +154,23 @@ async function hasRepairBatch(env: Env, buildId: string, kind: "fix_coordinator"
   return row !== null;
 }
 
+// The Fix Plan of the batch that CREATED this Build Version (D1 truth, so it
+// survives Workflow engine re-entries). The plan's realization directives are
+// what the repaired version's generation must apply — a repaired candidate is
+// regenerated with them, never silently copied from the failed version.
+async function loadRepairPlanForVersion(env: Env, buildId: string, buildVersionId: string): Promise<FixPlan | null> {
+  const row = await env.DB.prepare(
+    "SELECT plan_json FROM repair_batches WHERE build_id = ? AND created_build_version_id = ?"
+  )
+    .bind(buildId, buildVersionId)
+    .first<{ plan_json: string }>();
+  if (!row) return null;
+  const parsed = parseFixPlan(JSON.parse(row.plan_json));
+  if (!parsed) throw new Error(`repair batch plan for Build Version ${buildVersionId} failed its schema`);
+  assertRepairPlanWithinBounds(parsed);
+  return parsed;
+}
+
 // The frozen combined QA report stored by assignReleaseReady — a version's
 // evaluation verdict, immutable once stored.
 interface FrozenQaReport {
@@ -180,22 +199,22 @@ async function reuseAcceptedImages(env: Env, fromBuildVersionId: string, toBuild
     .run();
 }
 
-// Inherits the source Build Version's validated artifacts onto the repaired
-// Build Version: the frozen design stages (reference analysis, blueprint,
-// contract — Automated Repair never mutates the validated design) plus the
-// generation artifacts (css/js/pages/image plan). R2 objects are shared
-// read-only (same immutable content, same keys); each version gets its own
-// artifact rows so per-version immutability and provenance stay truthful.
-// Idempotent (INSERT OR IGNORE) so re-running the inheritance after a
-// Workflow engine reset restores it harmlessly. The id is computed PER ROW
-// inside the SELECT — a bound single id would collide on the primary key and
-// silently copy only the first row.
+// Inherits the source Build Version's DESIGN-ORIGIN artifacts onto the
+// repaired Build Version: reference analysis, blueprint, contract and the
+// image plan. Automated Repair never mutates the validated design — only the
+// realization (pages/css/js) is regenerated, driven by the batch's Fix Plan
+// directives. R2 objects are shared read-only (same immutable content, same
+// keys); each version gets its own artifact rows so per-version immutability
+// and provenance stay truthful. Idempotent (INSERT OR IGNORE) so re-running
+// the inheritance after a Workflow engine reset restores it harmlessly. The
+// id is computed PER ROW inside the SELECT — a bound single id would collide
+// on the primary key and silently copy only the first row.
 async function inheritValidatedArtifacts(env: Env, buildId: string, fromBuildVersionId: string, toBuildVersionId: string): Promise<void> {
   await env.DB.prepare(
     `INSERT OR IGNORE INTO build_stage_artifacts (id, build_id, build_version_id, site_generation_id, kind, subkey, schema_version, artifact_r2_key, provenance_json, checksum, created_at)
      SELECT lower(hex(randomblob(16))), ?, ?, site_generation_id, kind, subkey, schema_version, artifact_r2_key, provenance_json, checksum, ?
      FROM build_stage_artifacts
-     WHERE build_version_id = ? AND kind IN ('reference_analysis', 'visual_blueprint', 'implementation_contract', 'generated_shared_source', 'generated_page', 'image_plan')`
+     WHERE build_version_id = ? AND kind IN ('reference_analysis', 'visual_blueprint', 'implementation_contract', 'image_plan')`
   )
     .bind(buildId, toBuildVersionId, nowIso(), fromBuildVersionId)
     .run();
@@ -252,15 +271,21 @@ export async function runBuildPipeline(
   const repairState = await loadRepairState(env, buildId);
   let repairApplied = repairState.fixCoordinator !== null;
 
-  // Batch-created Build Versions inherit the source version's validated
+  // Batch-created Build Versions inherit the source version's design-origin
   // artifacts. Re-running the idempotent inheritance on every entry restores
   // it after a reset, so a re-entered pipeline reuses the repaired version's
-  // frozen design and pages instead of regenerating them.
+  // frozen design instead of regenerating it.
   for (const batch of [repairState.fixCoordinator, repairState.releaseBlockerFix]) {
     if (!batch) continue;
     await reuseAcceptedImages(env, batch.sourceBuildVersionId, batch.createdBuildVersionId);
     await inheritValidatedArtifacts(env, buildId, batch.sourceBuildVersionId, batch.createdBuildVersionId);
   }
+
+  // A current version created by a repair batch is GENERATED WITH that batch's
+  // Fix Plan directives (D1 truth — survives engine re-entries). The
+  // realization is repaired, not copied from the failed version; the frozen
+  // design and Accepted Images are inherited unchanged.
+  const currentVersionRepairPlan = await loadRepairPlanForVersion(env, buildId, version.buildVersionId);
 
   try {
     // ── Reference intake (idempotent: frozen evidence is reused) ───────────
@@ -567,7 +592,7 @@ export async function runBuildPipeline(
     const first = await produceCandidate({
       siteGenerationId: input.siteGenerationId, siteId, buildId,
       buildVersionId: version.buildVersionId, buildVersionNumber: version.buildVersionNumber,
-    });
+    }, currentVersionRepairPlan ? repairDirectivesFromPlan(currentVersionRepairPlan) : undefined);
     const firstQa = await evaluate(
       { siteGenerationId: input.siteGenerationId, siteId, buildId, buildVersionId: version.buildVersionId, buildVersionNumber: version.buildVersionNumber },
       first.previewUrl,
@@ -696,12 +721,10 @@ export async function runBuildPipeline(
       priorVersionId = version.buildVersionId;
       version = { buildVersionId: applied.newBuildVersionId, buildVersionNumber: applied.newBuildVersionNumber };
       await reuseAcceptedImages(env, priorVersionId, version.buildVersionId);
-      // The repaired candidate REUSES the source version's validated
-      // generation artifacts verbatim (the recorded Fix Plan is the repair
-      // provenance). Fresh LLM regeneration of already-validated pages is
-      // exactly where repairs have regressed structure (live evidence:
-      // footer-less/invented-slot regenerations), and Automated Repair may
-      // only modify realization details — never the validated design.
+      // The repaired version inherits only the frozen DESIGN-ORIGIN artifacts
+      // (analysis, blueprint, contract, image plan); its realization is
+      // regenerated below with the batch's directives — Automated Repair may
+      // only modify realization details, never the validated design.
       await inheritValidatedArtifacts(env, buildId, priorVersionId, version.buildVersionId);
 
       // Material repair creates a NEW immutable Build Version; confirmation
@@ -710,7 +733,15 @@ export async function runBuildPipeline(
         siteGenerationId: input.siteGenerationId, siteId, buildId,
         buildVersionId: version.buildVersionId, buildVersionNumber: version.buildVersionNumber,
       };
-      const regenerated = await produceCandidate(repairedCtx);
+      // The repaired candidate is GENERATED WITH the batch's Fix Plan
+      // directives: Automated Repair repairs the realization (HTML/CSS/JS
+      // within the frozen Blueprint/Contract) instead of copying the failed
+      // version's content — a verbatim copy could never clear the blockers
+      // that GATE_PREVIOUS_BLOCKERS_RESOLVED re-checks. The plan is durable
+      // in repair_batches, so an engine re-entry regenerates the same
+      // repaired version with the SAME directives (runOrReuse then reuses
+      // whatever the interrupted pass already produced).
+      const regenerated = await produceCandidate(repairedCtx, repairDirectivesFromPlan(plan));
       currentPreviewUrl = regenerated.previewUrl;
 
       const confirmation = await runConfirmationQa(env, {
