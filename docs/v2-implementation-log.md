@@ -394,3 +394,58 @@ FOR CURRENT SCOPE; watch item: model-controlled status manipulation is the
 pre-existing LLM-evaluator trust boundary, not widened — scores/gates/fabrication
 remain independent conjuncts and full status-bearing findings persist in
 immutable R2 artifacts).
+
+## 2026-09-04 — #30 closed: second publication, rollback and stale-capability rejection (post-#38)
+
+Deployed the #38 implementation SHA b6043541a7391376b2c20e79c1ac95f8ba315d5e
+to cf-website-factory-v2 (worker version 257ea70c-c9d7-4ba4-9d71-74ef41a12163,
+2026-09-04T21:29Z; targets verified: D1 website_factory_v2, R2
+website-factory-v2-assets, V1 untouched). Production health verified.
+
+**One new Revision Request d7d38808** on published build dddd8e0d (Site
+5ce85bdf) created Build 7da9e4fa. The real pipeline ran: v1 failed QA-A
+(first-viewport hero at 0.081 of viewport vs required 0.9, region-count
+deviation) → ONE Fix Coordinator batch → repaired immutable v2 4f8cf734 →
+confirmation QA → **RELEASE_READY**.
+
+**#38 proven in production:** the confirmation reports re-emitted both prior
+P1 blockers with their ORIGINAL severity and `status: RESOLVED` (four findings
+across QA-A/QA-B — the exact production defect pattern), and the resolver
+counted zero active blockers: release record visual 92 / content 94 /
+technical 92, fabrication 0, all hard+mandatory gates green,
+`releaseBlockers: 0`, verdict RELEASE_READY. The Release Blocker Fix budget
+was never consumed (exactly one repair batch). Provenance:
+provider=zhipu, model=glm-5.3-flash on fix-coordinator and both confirmation
+stages.
+
+**Release lifecycle:** Approval acedb185 (2026-09-04T21:49:03Z) bound to v2
+4f8cf734 + artifactManifestHash 4ade328bca45106b680246cad440c99f5c0cce8426d7d11587c8b43b2db687ec.
+An approval capability against the publication endpoint was correctly denied
+403 CAPABILITY_INSUFFICIENT; a separate publish capability executed the second
+Publication 41c2dd04 (https://pub-7da9e4fa5c-v2.wazibizwebsites.workers.dev,
+published 2026-09-04T21:49:22Z) with the exact approved hash — no
+regeneration, no candidate reselection. Live verification: four pages 200,
+site.css/site.js + assets 200 (project-controlled asset paths only), contact
+form posts to the platform Form Service endpoint, no provider temp URLs, no
+secrets.
+
+**Rollback:** capability bound to Site 5ce85bdf + current Published Version #2
+executed → Published Version #1 restored (publication 7e0f7b9d, build version
+edecd502, https://pub-dddd8e0d86-v2.wazibizwebsites.workers.dev) — no new
+Build, no new Approval, no new publication row, exact prior artifact, Site
+Configuration untouched. A subsequent rollback capability stale relative to
+the now-current state was **rejected 403 CAPABILITY_INSUFFICIENT**.
+
+**Form/email:** live submission on the restored version → Accepted Submission
+(202) → email_deliveries `delivered` attempt 1 to the platform sender identity
+(destination notifications@wazibiz.ke). Origin enforcement verified fail-closed
+(403 ORIGIN_NOT_ALLOWED without allowed Origin).
+
+**V1 unchanged:** worker cf-website-factory last deployed 2026-08-19
+(version dc99fb34, predates all V2 work); D1 website_factory_v1 and R2
+website-factory-assets present and untouched. V2 has no V1 fallback path.
+
+**Final #30 gates:** 32 test files / 235 tests passing, typecheck clean,
+wrangler dry-run pass. CSO final verdict (with production addendum):
+docs/security/2026-09-04-v2-issue38-confirmation-resolution-cso.md — SECURITY
+OK FOR CURRENT SCOPE.

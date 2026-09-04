@@ -125,3 +125,35 @@ Commit the implementation, deploy the exact SHA, and resume #30 with exactly
 one new Revision Request to prove the fix on the real repaired candidate
 (production confirmation should now report the prior first-viewport P1 as
 RESOLVED without consuming the Release Blocker Fix budget).
+
+---
+
+## Addendum (final #30 CSO gate, 2026-09-04T22:0xZ) — production verification
+
+Post-deployment production run (worker version 257ea70c, code SHA b604354):
+
+- **Resolved-status semantics held in production**: the repaired candidate's
+  confirmation emitted four findings, all original-P1 severity with
+  `status: RESOLVED` (the exact #38 pattern); the release record shows
+  `releaseBlockers: 0`, verdict RELEASE_READY, visual 92 / content 94 /
+  technical 92, no failed gates. The Release Blocker Fix budget was not
+  consumed.
+- **Capability flows exercised and denied correctly**: an `approve` capability
+  against the publication endpoint → 403 CAPABILITY_INSUFFICIENT; a separate
+  `publish` capability published the exact approved hash
+  (4ade328b…7ec); a rollback capability stale relative to the now-current
+  publication state → 403 CAPABILITY_INSUFFICIENT (no redirect to an
+  unintended version). Token contents were never recorded in evidence.
+- **Form Service origin enforcement** verified fail-closed live (403
+  ORIGIN_NOT_ALLOWED without an allowed Origin; 202 Accepted Submission with
+  it) and production Email Delivery returned `delivered` (attempt 1, platform
+  sender identity notifications@wazibiz.ke).
+- **No V1 fallback**: V2 route table only; V1 worker (cf-website-factory),
+  D1 (website_factory_v1) and R2 (website-factory-assets) identities unchanged
+  (V1 last deployed 2026-08-19, version dc99fb34, predating all V2 work).
+- No secrets, capability tokens or visitor PII recorded in this report or the
+  issue evidence.
+
+### Final verdict (incl. addendum)
+
+SECURITY OK FOR CURRENT SCOPE
