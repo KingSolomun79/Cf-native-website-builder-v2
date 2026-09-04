@@ -93,6 +93,7 @@ export default defineWorkersConfig({
       "tests/v2-operator-capability.test.ts",
       "tests/v2-llm-model-routing.test.ts",
       "tests/v2-build-pipeline.test.ts",
+      "tests/v2-build-pipeline-retry.test.ts",
       "tests/v2-retention.test.ts",
       "tests/v2-benchmark-harness.test.ts",
       "tests/v2-benchmark-site-1.test.ts",

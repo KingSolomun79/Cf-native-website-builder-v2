@@ -143,7 +143,16 @@ function contactHtml(endpoint: string, siteFormId: string): string {
   );
 }
 
-export function createPipelineScripts(options: { firstQaAFails?: boolean } = {}): BuildPipelineDeps {
+export function createPipelineScripts(
+  options: {
+    /** Only the FIRST full QA-A evaluation fails (then always passes). */
+    firstQaAFails?: boolean;
+    /** Every full QA-A evaluation fails (repair-resistance scenarios). */
+    allQaAFails?: boolean;
+    /** Post-repair confirmation QA-A fails (second-batch scenarios). */
+    confirmationQaAFails?: boolean;
+  } = {}
+): BuildPipelineDeps {
   let qaACalls = 0;
   const generate: RawAiGenerate = async (_system, user) => {
     const respond = (value: unknown) => ({
@@ -179,7 +188,8 @@ export function createPipelineScripts(options: { firstQaAFails?: boolean } = {})
     }
     if (user.includes("hard composition gate")) {
       qaACalls += 1;
-      return respond(options.firstQaAFails && qaACalls === 1 ? failingQaA : passingQaA);
+      const fail = options.allQaAFails || (options.firstQaAFails && qaACalls === 1);
+      return respond(fail ? failingQaA : passingQaA);
     }
     if (user.includes("browser/technical review")) return respond(passingQaB);
     if (user.includes("Plan ONE coordinated main Automated Repair batch")) {
@@ -190,7 +200,7 @@ export function createPipelineScripts(options: { firstQaAFails?: boolean } = {})
         blueprintReviewRequired: false,
       });
     }
-    if (user.includes("QA-A Confirmation")) return respond(passingQaA);
+    if (user.includes("QA-A Confirmation")) return respond(options.confirmationQaAFails ? failingQaA : passingQaA);
     if (user.includes("QA-B Confirmation")) return respond(passingQaB);
     if (user.includes("Plan at most ONE narrow final Automated Repair batch")) {
       return respond({

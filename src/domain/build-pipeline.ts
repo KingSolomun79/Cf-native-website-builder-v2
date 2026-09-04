@@ -19,7 +19,7 @@
 // platform's own PUBLIC_APP_URL so generated Contact forms post to the real
 // central Form Service — never the placeholder default.
 
-import { generateId, nowIso } from "../lib/crypto";
+import { nowIso } from "../lib/crypto";
 import type { Env } from "../env.d";
 import { appendBuildWorkflowEvent, createInitialBuild } from "./lifecycle";
 import { runReferenceIntake, getFrozenReferenceEvidence } from "./reference-intake";
@@ -34,7 +34,7 @@ import {
   type ImageGenerationProvider,
 } from "./image-pipeline";
 import { assembleBuildVersionCandidate, deployPreview, type PreviewDeployer } from "./assembly";
-import { buildStandardEvidenceBundle, compareGeometry, geometryFromRegions, type QaCaptureFn } from "./qa-evidence";
+import { buildStandardEvidenceBundle, compareGeometry, geometryFromRegions, type GeometryComparison, type QaCaptureFn } from "./qa-evidence";
 import { createProductionQaCapture } from "./qa-capture";
 import { runQaAStage, runQaBStage, type QaAReport, type QaBReport, type QaFinding } from "./qa-stages";
 import { assignReleaseReady, ReleaseGateError } from "./release";
@@ -45,10 +45,12 @@ import type { ImplementationContract } from "./implementation-planner";
 import { getEffectiveBusinessFacts } from "./revision";
 import {
   applyRepairBatch,
+  AutomatedRepairError,
   runConfirmationQa,
   runFixCoordinatorStage,
   runReleaseBlockerFixStage,
   resolveAfterConfirmation,
+  type AppliedRepairBatch,
   type FixPlan,
 } from "./automated-repair";
 import type { RawAiGenerate } from "./ai-boundary";
@@ -111,6 +113,59 @@ async function currentVersionNumber(env: Env, buildId: string): Promise<{ buildV
   return { buildVersionId: row.id, buildVersionNumber: row.version_number };
 }
 
+// ── Bounded-repair state, reconstructed from D1 truth ────────────────────────
+// The repair loop's control flags are memory-only and do not survive the
+// Workflow engine re-running this function after a Durable Object reset or
+// isolate eviction. The append-only repair_batches ledger is the durable
+// source of truth for how much of the bounded budget a Build has consumed.
+
+interface RepairBatchRef {
+  batchId: string;
+  sourceBuildVersionId: string;
+  createdBuildVersionId: string;
+}
+
+interface RepairStateSnapshot {
+  fixCoordinator: RepairBatchRef | null;
+  releaseBlockerFix: RepairBatchRef | null;
+}
+
+async function loadRepairState(env: Env, buildId: string): Promise<RepairStateSnapshot> {
+  const { results } = await env.DB.prepare(
+    "SELECT id, kind, source_build_version_id, created_build_version_id FROM repair_batches WHERE build_id = ?"
+  )
+    .bind(buildId)
+    .all<{ id: string; kind: string; source_build_version_id: string; created_build_version_id: string }>();
+  const pick = (kind: string): RepairBatchRef | null => {
+    const row = results.find((batch) => batch.kind === kind);
+    return row
+      ? { batchId: row.id, sourceBuildVersionId: row.source_build_version_id, createdBuildVersionId: row.created_build_version_id }
+      : null;
+  };
+  return { fixCoordinator: pick("fix_coordinator"), releaseBlockerFix: pick("release_blocker_fix") };
+}
+
+async function hasRepairBatch(env: Env, buildId: string, kind: "fix_coordinator" | "release_blocker_fix"): Promise<boolean> {
+  const row = await env.DB.prepare("SELECT id FROM repair_batches WHERE build_id = ? AND kind = ?")
+    .bind(buildId, kind)
+    .first<{ id: string }>();
+  return row !== null;
+}
+
+// The frozen combined QA report stored by assignReleaseReady — a version's
+// evaluation verdict, immutable once stored.
+interface FrozenQaReport {
+  schemaVersion: string;
+  qaA: QaAReport;
+  qaB: QaBReport;
+  geometryComparison: GeometryComparison | null;
+  releaseBlockers: QaFinding[];
+  nonBlockingPolish: QaFinding[];
+  evidenceR2Keys: string[];
+  verdict: "RELEASE_READY" | "NOT_RELEASE_READY";
+  reasons: string[];
+}
+
 // Copy the previous version's Accepted Images onto a repaired Build Version:
 // the persisted attempts stay valid project-controlled assets, so the repair
 // regeneration reuses them without burning further KIE budget.
@@ -125,18 +180,24 @@ async function reuseAcceptedImages(env: Env, fromBuildVersionId: string, toBuild
     .run();
 }
 
-// Copies the source Build Version's validated generation artifacts (css/js/
-// pages/image plan) onto the repaired Build Version. R2 objects are shared
+// Inherits the source Build Version's validated artifacts onto the repaired
+// Build Version: the frozen design stages (reference analysis, blueprint,
+// contract — Automated Repair never mutates the validated design) plus the
+// generation artifacts (css/js/pages/image plan). R2 objects are shared
 // read-only (same immutable content, same keys); each version gets its own
 // artifact rows so per-version immutability and provenance stay truthful.
-async function copyGenerationArtifacts(env: Env, buildId: string, fromBuildVersionId: string, toBuildVersionId: string): Promise<void> {
+// Idempotent (INSERT OR IGNORE) so re-running the inheritance after a
+// Workflow engine reset restores it harmlessly. The id is computed PER ROW
+// inside the SELECT — a bound single id would collide on the primary key and
+// silently copy only the first row.
+async function inheritValidatedArtifacts(env: Env, buildId: string, fromBuildVersionId: string, toBuildVersionId: string): Promise<void> {
   await env.DB.prepare(
     `INSERT OR IGNORE INTO build_stage_artifacts (id, build_id, build_version_id, site_generation_id, kind, subkey, schema_version, artifact_r2_key, provenance_json, checksum, created_at)
-     SELECT ?, ?, ?, site_generation_id, kind, subkey, schema_version, artifact_r2_key, provenance_json, checksum, ?
+     SELECT lower(hex(randomblob(16))), ?, ?, site_generation_id, kind, subkey, schema_version, artifact_r2_key, provenance_json, checksum, ?
      FROM build_stage_artifacts
-     WHERE build_version_id = ? AND kind IN ('generated_shared_source', 'generated_page', 'image_plan')`
+     WHERE build_version_id = ? AND kind IN ('reference_analysis', 'visual_blueprint', 'implementation_contract', 'generated_shared_source', 'generated_page', 'image_plan')`
   )
-    .bind(generateId(), buildId, toBuildVersionId, nowIso(), fromBuildVersionId)
+    .bind(buildId, toBuildVersionId, nowIso(), fromBuildVersionId)
     .run();
 }
 
@@ -182,6 +243,24 @@ export async function runBuildPipeline(
 
   let version = await currentVersionNumber(env, buildId);
   let priorVersionId: string | null = null;
+
+  // Bounded-repair position, reconstructed from D1 truth on EVERY entry: the
+  // engine may re-run this function after a Durable Object reset with the
+  // loop flags below gone. Reconstructing from the repair_batches ledger is
+  // what keeps a retried pipeline from misreading the repair budget and
+  // terminating with a premature REPAIR_BUDGET_EXHAUSTED.
+  const repairState = await loadRepairState(env, buildId);
+  let repairApplied = repairState.fixCoordinator !== null;
+
+  // Batch-created Build Versions inherit the source version's validated
+  // artifacts. Re-running the idempotent inheritance on every entry restores
+  // it after a reset, so a re-entered pipeline reuses the repaired version's
+  // frozen design and pages instead of regenerating them.
+  for (const batch of [repairState.fixCoordinator, repairState.releaseBlockerFix]) {
+    if (!batch) continue;
+    await reuseAcceptedImages(env, batch.sourceBuildVersionId, batch.createdBuildVersionId);
+    await inheritValidatedArtifacts(env, buildId, batch.sourceBuildVersionId, batch.createdBuildVersionId);
+  }
 
   try {
     // ── Reference intake (idempotent: frozen evidence is reused) ───────────
@@ -373,6 +452,46 @@ export async function runBuildPipeline(
       }));
 
       return stepDo(`pipeline: QA verdicts (v${ctx.buildVersionNumber})`, async () => {
+      // Workflow-retry safety: a version's evaluation is frozen in its
+      // qa_report artifact. A re-entered pipeline reuses that verdict instead
+      // of re-judging the immutable version with fresh LLM runs (which could
+      // never reproduce the frozen checksum and would hard-fail the store).
+      const frozenReport = await getBuildStageArtifact<FrozenQaReport>(env, ctx.buildVersionId, "qa_report");
+      if (frozenReport) {
+        const releaseReady = frozenReport.value.verdict === "RELEASE_READY";
+        if (releaseReady) {
+          // A reset can hit the window between the report store and the
+          // release-record insert: re-assigning with the frozen verdicts
+          // reproduces the identical checksum (idempotent store) and pins
+          // the record. An existing record is an idempotent success.
+          try {
+            await assignReleaseReady(env, {
+              buildId: ctx.buildId,
+              buildVersionId: ctx.buildVersionId,
+              siteGenerationId: ctx.siteGenerationId,
+              qaA: frozenReport.value.qaA,
+              qaB: frozenReport.value.qaB,
+              qaBuildVersionId: ctx.buildVersionId,
+              geometryComparison: frozenReport.value.geometryComparison ?? undefined,
+              evidenceR2Keys: frozenReport.value.evidenceR2Keys,
+            });
+          } catch (error) {
+            if (!(error instanceof ReleaseGateError && error.code === "RELEASE_ALREADY_ASSIGNED")) throw error;
+          }
+        }
+        return {
+          qaA: frozenReport.value.qaA,
+          qaB: frozenReport.value.qaB,
+          release: {
+            releaseReady,
+            reasons: frozenReport.value.reasons,
+            blockers: frozenReport.value.releaseBlockers,
+            polish: frozenReport.value.nonBlockingPolish,
+            ...(releaseReady ? { recordId: `release:${ctx.buildVersionId}` } : {}),
+          },
+        };
+      }
+
       // Geometry comparator: reference evidence regions vs the home desktop
       // candidate capture — same mapping both sides (PRD section 27).
       const homeDesktop = evidenceBundle.bundle.captures.find(
@@ -470,12 +589,39 @@ export async function runBuildPipeline(
       : null;
 
     // ── Bounded repair: one Fix Coordinator batch + one Release Blocker Fix ─
-    let repairApplied = false;
+    // `repairApplied` starts from the D1-reconstructed state above.
     let previousBlockers: QaFinding[] = firstQa.release.blockers;
     let currentQa = firstQa;
     let currentPreviewUrl = first.previewUrl;
 
     while (!outcome) {
+      // Bounded ceiling, re-derived from D1 each pass: once both batches are
+      // durably recorded, valid blockers mean automation must stop — the same
+      // terminal resolveAfterConfirmation reaches after the final batch.
+      if (repairApplied && (await hasRepairBatch(env, buildId, "release_blocker_fix"))) {
+        const reasons = [
+          "bounded repair budget consumed (one Fix Coordinator batch + one Release Blocker Fix) while valid Release Blockers remain",
+          ...currentQa.release.reasons,
+        ];
+        await appendBuildWorkflowEvent(env, {
+          buildId,
+          buildVersionId: version.buildVersionId,
+          fromState: "QA",
+          toState: "HUMAN_REVIEW_REQUIRED",
+          stage: "human_review",
+          detail: `HUMAN_REVIEW_REQUIRED: ${reasons.slice(0, 5).join("; ").slice(0, 300)}`,
+        });
+        outcome = {
+          terminal: "HUMAN_REVIEW_REQUIRED",
+          reasons,
+          siteGenerationId: input.siteGenerationId, siteId, buildId,
+          releaseReadyBuildVersionId: null, artifactManifestHash: null,
+          previewUrl: currentPreviewUrl,
+          qaA: currentQa.qaA, qaB: currentQa.qaB, repairApplied,
+        };
+        break;
+      }
+
       // First pass: the one coordinated Fix Coordinator batch. Second pass
       // (only after RELEASE_BLOCKER_FIX_ALLOWED): the one narrow final batch.
       const planResult = repairApplied
@@ -500,13 +646,32 @@ export async function runBuildPipeline(
           });
       const plan = planResult.plan;
 
-      const applied = await applyRepairBatch(env, {
-        siteGenerationId: input.siteGenerationId,
-        buildId,
-        sourceBuildVersionId: version.buildVersionId,
-        kind: repairApplied ? "release_blocker_fix" : "fix_coordinator",
-        plan,
-      });
+      let applied: AppliedRepairBatch;
+      try {
+        applied = await applyRepairBatch(env, {
+          siteGenerationId: input.siteGenerationId,
+          buildId,
+          sourceBuildVersionId: version.buildVersionId,
+          kind: repairApplied ? "release_blocker_fix" : "fix_coordinator",
+          plan,
+        });
+      } catch (error) {
+        // Storage-ceiling backstop (e.g. a concurrent pipeline racing the same
+        // Build): automation stops and routes to human review — the budget
+        // error must never surface as a FAILED pipeline.
+        if (error instanceof AutomatedRepairError && error.code === "REPAIR_BUDGET_EXHAUSTED") {
+          outcome = {
+            terminal: "HUMAN_REVIEW_REQUIRED",
+            reasons: [(error as Error).message],
+            siteGenerationId: input.siteGenerationId, siteId, buildId,
+            releaseReadyBuildVersionId: null, artifactManifestHash: null,
+            previewUrl: currentPreviewUrl,
+            qaA: currentQa.qaA, qaB: currentQa.qaB, repairApplied,
+          };
+          break;
+        }
+        throw error;
+      }
 
       if (applied.status === "BLUEPRINT_REVIEW_REQUIRED") {
         await appendBuildWorkflowEvent(env, {
@@ -537,7 +702,7 @@ export async function runBuildPipeline(
       // exactly where repairs have regressed structure (live evidence:
       // footer-less/invented-slot regenerations), and Automated Repair may
       // only modify realization details — never the validated design.
-      await copyGenerationArtifacts(env, buildId, priorVersionId, version.buildVersionId);
+      await inheritValidatedArtifacts(env, buildId, priorVersionId, version.buildVersionId);
 
       // Material repair creates a NEW immutable Build Version; confirmation
       // QA evaluates the NEW version only.

@@ -210,6 +210,19 @@ export async function applyRepairBatch(
     throw new AutomatedRepairError("BUILD_NOT_FOUND", `Build ${input.buildId} does not exist`);
   }
 
+  // Budget pre-check BEFORE the next Build Version is created: a rejected
+  // batch must not burn an orphan immutable version. The UNIQUE (build_id,
+  // kind) index below stays as the concurrent-race backstop.
+  const budgetMessage = `Build ${input.buildId} already consumed its ${input.kind === "fix_coordinator" ? "single Fix Coordinator batch" : "single Release Blocker Fix"}; automation must stop`;
+  const existingBatch = await env.DB.prepare(
+    "SELECT id FROM repair_batches WHERE build_id = ? AND kind = ?"
+  )
+    .bind(input.buildId, input.kind)
+    .first<{ id: string }>();
+  if (existingBatch) {
+    throw new AutomatedRepairError("REPAIR_BUDGET_EXHAUSTED", budgetMessage);
+  }
+
   // Blueprint-root defects never reach implementation repair: emit
   // BLUEPRINT_REVIEW_REQUIRED -> HUMAN_REVIEW_REQUIRED and stop automation.
   if (input.plan.blueprintReviewRequired) {
@@ -242,10 +255,7 @@ export async function applyRepairBatch(
       .run();
   } catch (error) {
     if (error instanceof Error && error.message.includes("UNIQUE constraint failed: repair_batches")) {
-      throw new AutomatedRepairError(
-        "REPAIR_BUDGET_EXHAUSTED",
-        `Build ${input.buildId} already consumed its ${input.kind === "fix_coordinator" ? "single Fix Coordinator batch" : "single Release Blocker Fix"}; automation must stop`
-      );
+      throw new AutomatedRepairError("REPAIR_BUDGET_EXHAUSTED", budgetMessage);
     }
     throw error;
   }

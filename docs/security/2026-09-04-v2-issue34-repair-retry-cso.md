@@ -1,0 +1,64 @@
+# CSO Report — Issue #34: Repair-loop state across Cloudflare Workflow retries
+
+Date: 2026-09-04
+Scope: defect fix only (no #30 runbook items)
+Change surface:
+- `src/domain/build-pipeline.ts` — repair-state reconstruction from D1 truth, artifact inheritance (design stages added, per-row ids), frozen `qa_report` reuse on re-entry, D1-derived ceiling guard, `REPAIR_BUDGET_EXHAUSTED` backstop mapped to `HUMAN_REVIEW_REQUIRED`
+- `src/domain/automated-repair.ts` — budget pre-check before `createNextBuildVersion` (prevents orphan versions); UNIQUE index unchanged as race backstop
+- `tests/v2-build-pipeline-retry.test.ts` (new, 4 regression tests), `tests/helpers/pipeline-scripts.ts` (script options), `vitest.config.ts` (suite registered)
+
+Gates at time of review: 31 files / 213 tests passing (incl. 4 new retry tests), `tsc --noEmit` clean, `wrangler deploy --dry-run` pass.
+
+## 1. What was audited
+
+Full diff of the four files above, plus the interaction of the changed pipeline seams with the existing release/publication/rollback boundaries (`release.ts`, `stage-artifacts.ts`, capability-gated routes).
+
+## 2. Security scope
+
+- Auth/authorization: not touched (no routes changed; pipeline is internally invoked by the capability-gated workflow path).
+- Secrets: none added, none moved.
+- D1/R2 data access: changed (new reads/copies of internal rows).
+- Public endpoints / visitor data: not touched.
+- Payment flows: none.
+
+## 3. Attack-surface summary
+
+No new externally reachable surface. All new code executes inside the build pipeline's trusted context with platform-controlled inputs (D1 rows written only by pipeline/domain code; R2 objects written only through `putImmutableObject*`). All new SQL is parameterized.
+
+## 4. Findings
+
+**F1 (Verified, acceptable): frozen `qa_report` reuse trusts an internally-written artifact.**
+The re-entry path reuses the stored combined QA report instead of re-judging with fresh LLM runs. The artifact is only writable by `assignReleaseReady` inside the pipeline itself (no route writes stage artifacts), R2 writes are immutable, and the record-pinning re-assign re-submits the exact frozen verdicts (identical checksum → idempotent store). A `NOT_RELEASE_READY` verdict can never upgrade itself: `releaseReady` derives from the frozen `verdict` field and only `RELEASE_READY` triggers the pinning call. No new trust boundary.
+
+**F2 (Verified, acceptable): `REPAIR_BUDGET_EXHAUSTED` now maps to `HUMAN_REVIEW_REQUIRED` at the orchestration seam.**
+This converts an automation-stop into the domain-correct terminal instead of `FAILED`. Automation is not extended: the hard ceiling remains the append-only `repair_batches` UNIQUE (build_id, kind) plus no-update/no-delete triggers, and the loop's D1-derived guard stops before spending further LLM calls. The event trail records the terminal with explicit reasons.
+
+**F3 (Verified, fixed by this change): artifact-inheritance statement bound a single generated id for all copied rows.**
+`generateId()` was evaluated once, so every copied row shared one primary key and `INSERT OR IGNORE` silently copied only the first row. This was a correctness defect (repairs regenerated validated pages fresh), not an injection vector — the statement is parameterized and now computes ids per row via `lower(hex(randomblob(16)))`.
+
+**F4 (Verified, fixed by this change): budget pre-check now precedes `createNextBuildVersion`.**
+Previously a budget-rejected batch still burned an immutable Build Version (orphan with no artifacts). The pre-check rejects before version creation; the UNIQUE index remains as the concurrent-race backstop.
+
+## 5. Severity summary
+
+- Critical: none
+- High: none
+- Medium: none
+- Low: none open (F3/F4 were correctness defects fixed in this change; F1/F2 reviewed and accepted)
+
+## 6. Required remediation
+
+None for release.
+
+## 7. Watch items
+
+- **Legacy orphan versions:** Builds that ran `applyRepairBatch` before this fix may carry an orphan Build Version (created before the budget insert). They are inert (no artifacts, no release record). A manual pipeline re-trigger against such an old build would adopt the orphan as the current version. New builds are protected by the pre-check; no migration needed for #30 (a fresh revision Build is used).
+- **`repairApplied` outcome semantics on re-entry:** when a re-entered pipeline releases the repaired version through the full QA path, the outcome reports `repairApplied: false` for that invocation while the batch remains in D1. Informational only; evidence queries should rely on `repair_batches`/`build_release_records`, not the outcome flag.
+
+## 8. Final security verdict
+
+**SECURITY OK FOR CURRENT SCOPE**
+
+## 9. Next best action
+
+Commit the defect fix as a dedicated commit, deploy that exact SHA, then resume issue #30 from the second-publication requirement (Revision Request → Release Ready → Approval → second Publication → Rollback capability + execution + stale-capability rejection → final gates).
