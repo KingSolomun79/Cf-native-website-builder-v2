@@ -427,4 +427,30 @@ describe("build pipeline Workflow-retry safety (issue #34)", () => {
       expect(accepted?.n).toBe(1);
     }
   });
+
+  it("re-words a boundary-tripping fix plan once and applies it; a persistent violator routes to human review without consuming budget (issue #36)", async () => {
+    // Case 1: the first plan trips the text-boundary heuristic, the bounded
+    // re-word complies, and the batch applies to Release Ready.
+    const audit1: string[] = [];
+    const scripted1 = auditedScripts({ firstQaAFails: true, fixCoordinatorPlanTrips: "once" }, audit1);
+    const siteGenerationId1 = await startGeneration("references/pipeline/retry-reword.png");
+    const outcome1 = await runBuildPipeline(env, { siteGenerationId: siteGenerationId1, deps: scripted1 });
+    expect(outcome1.terminal).toBe("RELEASE_READY");
+    expect(outcome1.repairApplied).toBe(true);
+    // Exactly two planner calls (original + re-word), one batch, versions [1,2].
+    expect(audit1.filter((label) => label === "fix_coordinator_plan")).toHaveLength(2);
+    expect(await repairBatchKinds(outcome1.buildId)).toEqual(["fix_coordinator"]);
+    expect(await versionNumbers(outcome1.buildId)).toEqual([1, 2]);
+
+    // Case 2: a planner that keeps violating stops automation at the bounded
+    // terminal — no batch consumed, no new Build Version, candidate recorded.
+    const scripted2 = auditedScripts({ firstQaAFails: true, fixCoordinatorPlanTrips: "always" }, []);
+    const siteGenerationId2 = await startGeneration("references/pipeline/retry-violator.png");
+    const outcome2 = await runBuildPipeline(env, { siteGenerationId: siteGenerationId2, deps: scripted2 });
+    expect(outcome2.terminal).toBe("HUMAN_REVIEW_REQUIRED");
+    expect(outcome2.reasons[0]).toContain("bounds-compliant plan");
+    expect(outcome2.previewUrl).not.toBeNull();
+    expect(await repairBatchKinds(outcome2.buildId)).toEqual([]);
+    expect(await versionNumbers(outcome2.buildId)).toEqual([1]);
+  });
 });

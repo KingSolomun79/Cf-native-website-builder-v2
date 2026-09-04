@@ -151,9 +151,13 @@ export function createPipelineScripts(
     allQaAFails?: boolean;
     /** Post-repair confirmation QA-A fails (second-batch scenarios). */
     confirmationQaAFails?: boolean;
+    /** Fix Coordinator plan trips the text-boundary heuristic once (then the
+     *  re-worded plan complies) or always (violator scenarios). */
+    fixCoordinatorPlanTrips?: "once" | "always";
   } = {}
 ): BuildPipelineDeps {
   let qaACalls = 0;
+  let fixCoordinatorCalls = 0;
   const generate: RawAiGenerate = async (_system, user) => {
     const respond = (value: unknown) => ({
       content: JSON.stringify(value),
@@ -193,6 +197,21 @@ export function createPipelineScripts(
     }
     if (user.includes("browser/technical review")) return respond(passingQaB);
     if (user.includes("Plan ONE coordinated main Automated Repair batch")) {
+      fixCoordinatorCalls += 1;
+      const trips =
+        options.fixCoordinatorPlanTrips === "always" ||
+        (options.fixCoordinatorPlanTrips === "once" && !user.includes("YOUR PREVIOUS PLAN WAS REJECTED"));
+      if (trips) {
+        // Schema-valid realization plan whose wording trips the deterministic
+        // mutation-pattern scan (mentions the Blueprint as a reference point
+        // next to an update verb).
+        return respond({
+          version: "1",
+          rootCauses: [{ findingRef: "qa/home-1440-first.png", domain: "visual-fidelity", rootCause: "hero heading rendered below token contrast" }],
+          repairs: [{ target: "implementation", strategy: "html_structure", description: "Update the hero section markup so it reflects the blueprint's first-viewport silhouette." }],
+          blueprintReviewRequired: false,
+        });
+      }
       return respond({
         version: "1",
         rootCauses: [{ findingRef: "qa/home-1440-first.png", domain: "visual-fidelity", rootCause: "hero heading rendered below token contrast" }],

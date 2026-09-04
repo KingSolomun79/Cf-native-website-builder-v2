@@ -164,21 +164,56 @@ export async function runFixCoordinatorStage(
   env: Env,
   input: RunFixCoordinatorInput
 ): Promise<{ plan: FixPlan }> {
-  const run = await runSchemaValidatedAiStage<FixPlan>(env, {
+  return planWithinBounds(env, input, {
     stage: "fix-coordinator",
-    schema: FixPlanSchema,
     schemaVersion: FIX_PLAN_SCHEMA_VERSION,
-    userPrompt: buildFixCoordinatorUserPrompt({ qaA: input.qaA, qaB: input.qaB }),
-    buildId: input.buildId,
-    siteGenerationId: input.siteGenerationId,
-    buildVersionId: input.buildVersionId,
-    buildVersionNumber: input.buildVersionNumber,
-    inputArtifactIds: input.evidenceR2Keys ?? [],
-    temperature: 0.2,
-    generate: input.generate,
+    basePrompt: buildFixCoordinatorUserPrompt({ qaA: input.qaA, qaB: input.qaB }),
   });
-  assertRepairPlanWithinBounds(run.value);
-  return { plan: run.value };
+}
+
+// Text-boundary scan with ONE bounded re-word: a plan that trips the
+// deterministic mutation-pattern heuristic gets exactly one re-planning
+// chance with the violation shown to the planner (the scan reads plan text,
+// and legitimate realization wording can mention design-origin nouns as
+// reference points). A second violation propagates — the caller routes the
+// build to human review. A genuinely design-mutating plan is rejected twice;
+// the boundary never loosens.
+async function planWithinBounds(
+  env: Env,
+  input: RunFixCoordinatorInput,
+  planInput: { stage: import("./prompt-contract").PromptStageKey; schemaVersion: string; basePrompt: string }
+): Promise<{ plan: FixPlan }> {
+  const plan = async (userPrompt: string) =>
+    (
+      await runSchemaValidatedAiStage<FixPlan>(env, {
+        stage: planInput.stage,
+        schema: FixPlanSchema,
+        schemaVersion: planInput.schemaVersion,
+        userPrompt,
+        buildId: input.buildId,
+        siteGenerationId: input.siteGenerationId,
+        buildVersionId: input.buildVersionId,
+        buildVersionNumber: input.buildVersionNumber,
+        inputArtifactIds: input.evidenceR2Keys ?? [],
+        temperature: 0.2,
+        generate: input.generate,
+      })
+    ).value;
+
+  let value: FixPlan;
+  try {
+    value = await plan(planInput.basePrompt);
+    assertRepairPlanWithinBounds(value);
+    return { plan: value };
+  } catch (error) {
+    if (!(error instanceof AutomatedRepairError && error.code === "REPAIR_BOUNDARY_VIOLATION")) throw error;
+    const violation = (error as Error).message;
+    value = await plan(
+      `${planInput.basePrompt}\n\nYOUR PREVIOUS PLAN WAS REJECTED: ${violation}. Re-emit the SAME repairs using ONLY implementation wording (CSS rules, HTML elements, asset paths, metadata). Never mention the Blueprint, the Business Facts, the Reference or the Build Mode anywhere in the plan text.`
+    );
+    assertRepairPlanWithinBounds(value);
+    return { plan: value };
+  }
 }
 
 // ── Batch application (material repair -> new immutable Build Version) ──────
@@ -348,24 +383,14 @@ export async function runReleaseBlockerFixStage(
   env: Env,
   input: RunFixCoordinatorInput & { remainingBlockers: QaFinding[] }
 ): Promise<{ plan: FixPlan }> {
-  const run = await runSchemaValidatedAiStage<FixPlan>(env, {
+  return planWithinBounds(env, input, {
     stage: "release-blocker-fix",
-    schema: FixPlanSchema,
     schemaVersion: FIX_PLAN_SCHEMA_VERSION,
-    userPrompt: `Plan at most ONE narrow final Automated Repair batch for the still-valid Release Blockers after failed confirmation. Repair only the narrowest realization details behind the remaining blockers; do not introduce new human intent and do not change Business Facts, Reference, Build Mode or the Visual Blueprint. If you cannot fix a blocker within those bounds, say so via blueprintReviewRequired only when the Blueprint itself is the root cause.
+    basePrompt: `Plan at most ONE narrow final Automated Repair batch for the still-valid Release Blockers after failed confirmation. Repair only the narrowest realization details behind the remaining blockers; do not introduce new human intent and do not change Business Facts, Reference, Build Mode or the Visual Blueprint. If you cannot fix a blocker within those bounds, say so via blueprintReviewRequired only when the Blueprint itself is the root cause.
 
 REMAINING VALID BLOCKERS:
 ${JSON.stringify(input.remainingBlockers, null, 2)}`,
-    buildId: input.buildId,
-    siteGenerationId: input.siteGenerationId,
-    buildVersionId: input.buildVersionId,
-    buildVersionNumber: input.buildVersionNumber,
-    inputArtifactIds: input.evidenceR2Keys ?? [],
-    temperature: 0.2,
-    generate: input.generate,
   });
-  assertRepairPlanWithinBounds(run.value);
-  return { plan: run.value };
 }
 
 // ── Terminal resolution ─────────────────────────────────────────────────────

@@ -79,7 +79,9 @@ Verdict unchanged: **SECURITY OK FOR CURRENT SCOPE**.
 
 Live attempt 3 exposed one more #34-class seam: the preflight-REJECTED assembly wrote its diagnostic manifest with non-tolerant `putImmutableObject`, poisoning `v{n}/manifest.json` — every retried assemble then crashed on "Immutable R2 artifact already exists" instead of surfacing the preflight rejection. Fix (commit 79cfd57): the diagnostic write uses `putImmutableObjectTolerant` (same seam as the passing path). No scope/security change; regression assertion added to the assembly suite (a retried rejection must surface `AssemblyPreflightError` again).
 
-Verdict unchanged: **SECURITY OK FOR CURRENT SCOPE**.
+### Addendum 4 (same day, issue #36 — boundary-heuristic false positive)
+
+Live attempts 1 and 3 died because the plan-text mutation heuristic tripped on legitimate realization wording (design-origin nouns used as reference points) and the pipeline classified the build FAILED. Fix (issue #36): the planner gets exactly ONE bounded re-word with the violation shown; a persistent violator routes the pipeline to HUMAN_REVIEW_REQUIRED (no batch consumed, no version created) instead of FAILED. The heuristic itself is unchanged and is now applied to the re-worded plan too; the true structural boundary (frozen design-origin inheritance + revalidation of persisted plans) is untouched. Regression tests: tripping-then-compliant plan applies; persistent violator stops at the bounded terminal. Verdict: **SECURITY OK FOR CURRENT SCOPE**.
 
 ## 9. Next best action
 

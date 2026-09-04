@@ -649,26 +649,55 @@ export async function runBuildPipeline(
 
       // First pass: the one coordinated Fix Coordinator batch. Second pass
       // (only after RELEASE_BLOCKER_FIX_ALLOWED): the one narrow final batch.
-      const planResult = repairApplied
-        ? await runReleaseBlockerFixStage(env, {
-            siteGenerationId: input.siteGenerationId,
+      let planResult: Awaited<ReturnType<typeof runFixCoordinatorStage>>;
+      try {
+        planResult = repairApplied
+          ? await runReleaseBlockerFixStage(env, {
+              siteGenerationId: input.siteGenerationId,
+              buildId,
+              buildVersionId: version.buildVersionId,
+              buildVersionNumber: version.buildVersionNumber,
+              qaA: currentQa.qaA,
+              qaB: currentQa.qaB,
+              remainingBlockers: previousBlockers,
+              generate: deps.generate,
+            })
+          : await runFixCoordinatorStage(env, {
+              siteGenerationId: input.siteGenerationId,
+              buildId,
+              buildVersionId: version.buildVersionId,
+              buildVersionNumber: version.buildVersionNumber,
+              qaA: currentQa.qaA,
+              qaB: currentQa.qaB,
+              generate: deps.generate,
+            });
+      } catch (error) {
+        // The planner could not produce a bounds-compliant plan even after
+        // its one bounded re-word: automation stops for human review. No
+        // batch is consumed and no Build Version is created — this is a
+        // bounded terminal, not a pipeline failure.
+        if (error instanceof AutomatedRepairError && error.code === "REPAIR_BOUNDARY_VIOLATION") {
+          const reason = `Automated Repair planning could not produce a bounds-compliant plan: ${(error as Error).message}`;
+          await appendBuildWorkflowEvent(env, {
             buildId,
             buildVersionId: version.buildVersionId,
-            buildVersionNumber: version.buildVersionNumber,
-            qaA: currentQa.qaA,
-            qaB: currentQa.qaB,
-            remainingBlockers: previousBlockers,
-            generate: deps.generate,
-          })
-        : await runFixCoordinatorStage(env, {
-            siteGenerationId: input.siteGenerationId,
-            buildId,
-            buildVersionId: version.buildVersionId,
-            buildVersionNumber: version.buildVersionNumber,
-            qaA: currentQa.qaA,
-            qaB: currentQa.qaB,
-            generate: deps.generate,
+            fromState: "QA",
+            toState: "HUMAN_REVIEW_REQUIRED",
+            stage: "repair_boundary",
+            detail: reason.slice(0, 300),
           });
+          outcome = {
+            terminal: "HUMAN_REVIEW_REQUIRED",
+            reasons: [reason],
+            siteGenerationId: input.siteGenerationId, siteId, buildId,
+            releaseReadyBuildVersionId: null, artifactManifestHash: null,
+            previewUrl: currentPreviewUrl,
+            qaA: currentQa.qaA, qaB: currentQa.qaB, repairApplied,
+          };
+          break;
+        }
+        throw error;
+      }
       const plan = planResult.plan;
 
       let applied: AppliedRepairBatch;
