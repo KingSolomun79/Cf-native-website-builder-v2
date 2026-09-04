@@ -222,6 +222,12 @@ describe("assembly and preview deployment", () => {
     // No accepted images at all: CRITICAL slot unresolved.
     await expect(assembleBuildVersionCandidate(env, assemblyInput(context))).rejects.toBeInstanceOf(AssemblyPreflightError);
 
+    // Workflow-retry safety (issue #34 class): a retried re-run of the
+    // rejected assembly re-freezes its diagnostic manifest and surfaces the
+    // PREFLIGHT rejection again — never "Immutable R2 artifact already
+    // exists" from its own earlier diagnostic write.
+    await expect(assembleBuildVersionCandidate(env, assemblyInput(context))).rejects.toBeInstanceOf(AssemblyPreflightError);
+
     const events = await env.DB.prepare("SELECT to_state FROM build_workflow_events WHERE build_id = ?")
       .bind(context.buildId)
       .all<{ to_state: string }>();

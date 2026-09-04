@@ -12,7 +12,7 @@
 
 import type { Env } from "../env.d";
 import { generateId, nowIso } from "../lib/crypto";
-import { getObject, putImmutableObject, putImmutableObjectTolerant } from "../lib/assets";
+import { getObject, putImmutableObjectTolerant } from "../lib/assets";
 import { appendBuildWorkflowEvent } from "./lifecycle";
 import { storeBuildStageArtifact, storeBuildStageArtifactIdempotent } from "./stage-artifacts";
 import { buildVersionAssetKey, buildVersionManifestKey, buildVersionSourceKey } from "./artifact-keys";
@@ -136,8 +136,10 @@ export async function assembleBuildVersionCandidate(
 
   if (!preflight.passed) {
     // Persist the rejected manifest for diagnosis, then stop: no Preview,
-    // no QA, nothing ships.
-    await putImmutableObject(env, manifestR2Key, manifestJson, { httpMetadata: { contentType: "application/json" } });
+    // no QA, nothing ships. Tolerant re-freeze: a retried step re-running the
+    // rejected assembly must surface the PREFLIGHT error again, not crash on
+    // its own earlier diagnostic write.
+    await putImmutableObjectTolerant(env, manifestR2Key, manifestJson, { httpMetadata: { contentType: "application/json" } });
     throw new AssemblyPreflightError(preflight.blockers);
   }
 
