@@ -557,8 +557,11 @@ export async function generateVisionWithGateway(
         // hang the calling stage (production retest 2026-09-05).
         let bodyReadTimer: ReturnType<typeof setTimeout> | undefined;
         try {
-          const parsed = await Promise.race([
-            response.json() as Promise<ChatCompletionResponse>,
+          // Read the body as text (raced under the same budget) so an
+          // empty-content response can contribute its raw payload to the
+          // diagnostics — providers embed refusal reasons in 200 bodies.
+          const rawText = await Promise.race([
+            response.text(),
             new Promise<never>((_, reject) => {
               bodyReadTimer = setTimeout(() => {
                 const abortError = new Error("The operation was aborted.");
@@ -567,10 +570,25 @@ export async function generateVisionWithGateway(
               }, timeoutMs);
             }),
           ]);
+          let parsed: ChatCompletionResponse;
+          try {
+            parsed = JSON.parse(rawText) as ChatCompletionResponse;
+          } catch {
+            parsed = { choices: [] } as unknown as ChatCompletionResponse;
+          }
           clearTimeout(timeoutId);
           const content = parsed.choices[0]?.message?.content;
           if (!content) {
-            attempts.push({ provider: route.provider, model: route.model, attempt, durationMs, outcome: "failure", classification: "empty_response", gatewayRequestId: gatewayRequestId(response) });
+            attempts.push({
+              provider: route.provider,
+              model: route.model,
+              attempt,
+              durationMs,
+              outcome: "failure",
+              classification: "empty_response",
+              gatewayRequestId: gatewayRequestId(response),
+              ...(rawText ? { responseSnippet: rawText.replace(/\s+/g, " ").slice(0, 400) } : {}),
+            });
             if (attempt < maxAttempts) {
               await new Promise((resolve) => setTimeout(resolve, retryDelayMs * Math.pow(2, attempt - 1)));
               continue;
