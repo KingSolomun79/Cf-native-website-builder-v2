@@ -76,7 +76,7 @@ function isVisionSeamExhaustion(error: unknown): boolean {
 function visionSeamDetail(error: unknown): string {
   if (error instanceof VisionGatewayError) {
     const attempts = error.attempts
-      .map((attempt) => `${attempt.provider}/${attempt.model}#${attempt.attempt}:${attempt.outcome}${attempt.classification ? `(${attempt.classification})` : ""}${attempt.httpStatus ? ` http ${attempt.httpStatus}` : ""}`)
+      .map((attempt) => `${attempt.provider}/${attempt.model}#${attempt.attempt}:${attempt.outcome}${attempt.classification ? `(${attempt.classification})` : ""}${attempt.httpStatus ? ` http ${attempt.httpStatus}` : ""}${attempt.responseSnippet ? ` "${attempt.responseSnippet.slice(0, 120)}"` : ""}`)
       .join("; ");
     return attempts || "all configured vision providers failed with no attempt record";
   }

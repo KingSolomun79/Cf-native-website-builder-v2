@@ -381,6 +381,9 @@ export interface VisionAttemptDiagnostic {
   classification?: VisionFailureClassification;
   httpStatus?: number;
   gatewayRequestId?: string;
+  /** First bytes of a failure response body, bounded — provider rejection
+   *  reasons must be diagnosable from the persisted diagnostics alone. */
+  responseSnippet?: string;
 }
 
 export class VisionGatewayError extends Error {
@@ -532,7 +535,17 @@ export async function generateVisionWithGateway(
         if (!response.ok) {
           clearTimeout(timeoutId);
           const classification = classifyVisionResponse(response.status);
-          attempts.push({ provider: route.provider, model: route.model, attempt, durationMs, outcome: "failure", classification, httpStatus: response.status, gatewayRequestId: gatewayRequestId(response) });
+          let responseSnippet: string | undefined;
+          try {
+            const text = await Promise.race([
+              response.text(),
+              new Promise<string>((resolve) => setTimeout(() => resolve(""), Math.min(timeoutMs, 2000))),
+            ]);
+            responseSnippet = text.replace(/\s+/g, " ").slice(0, 400) || undefined;
+          } catch {
+            responseSnippet = undefined;
+          }
+          attempts.push({ provider: route.provider, model: route.model, attempt, durationMs, outcome: "failure", classification, httpStatus: response.status, gatewayRequestId: gatewayRequestId(response), responseSnippet });
           if (retryableVisionFailure(classification) && attempt < maxAttempts) {
             await new Promise((resolve) => setTimeout(resolve, retryDelayMs * Math.pow(2, attempt - 1)));
             continue;
