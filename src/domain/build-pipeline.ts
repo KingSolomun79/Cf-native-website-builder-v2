@@ -23,7 +23,7 @@ import { nowIso } from "../lib/crypto";
 import type { Env } from "../env.d";
 import { appendBuildWorkflowEvent, createInitialBuild } from "./lifecycle";
 import { runReferenceIntake, getFrozenReferenceEvidence, type ReferenceCaptureFn } from "./reference-intake";
-import { runReferenceAnalysisStage } from "./reference-analysis";
+import { runReferenceAnalysisStage, ReferenceAnalysisError } from "./reference-analysis";
 import { runVisualBlueprintStage, canonicalRegionComposition, evaluateBlueprintCoverage } from "./visual-blueprint";
 import { produceImplementationContract } from "./implementation-planner";
 import { generateCompleteSite, type ImageSlot } from "./site-generator";
@@ -56,7 +56,35 @@ import {
   type FixPlan,
 } from "./automated-repair";
 import type { RawAiGenerate } from "./ai-boundary";
+import { VisionGatewayError } from "../lib/ai-gateway";
 import { KieV2ImageProvider } from "../lib/kie-v2";
+
+// Deterministic, unhealable vision-seam failures: every configured vision
+// provider was exhausted (VisionGatewayError carries the per-attempt record)
+// or the stored visual input is missing/cannot be bounded. Transient faults
+// stay covered by the gateway's own per-provider attempts; these terminal
+// classifications must surface as an observable pipeline state instead of a
+// generic step-retry storm.
+function isVisionSeamExhaustion(error: unknown): boolean {
+  if (error instanceof VisionGatewayError) return true;
+  if (error instanceof ReferenceAnalysisError) {
+    return error.code === "VISION_INPUT_UNAVAILABLE" || error.code === "VISION_INPUT_OVERSIZE";
+  }
+  return false;
+}
+
+function visionSeamDetail(error: unknown): string {
+  if (error instanceof VisionGatewayError) {
+    const attempts = error.attempts
+      .map((attempt) => `${attempt.provider}/${attempt.model}#${attempt.attempt}:${attempt.outcome}${attempt.classification ? `(${attempt.classification})` : ""}${attempt.httpStatus ? ` http ${attempt.httpStatus}` : ""}`)
+      .join("; ");
+    return attempts || "all configured vision providers failed with no attempt record";
+  }
+  if (error instanceof ReferenceAnalysisError) {
+    return `${error.code}: ${error.message}`;
+  }
+  return (error as Error).message;
+}
 
 export interface BuildPipelineDeps {
   generate?: RawAiGenerate;
@@ -353,23 +381,60 @@ export async function runBuildPipeline(
     // Retry safety lives at THIS seam: a stage whose frozen artifact already
     // exists for the Build Version is reused verbatim; the domain stages
     // themselves stay strictly once-per-version.
-    const analysis = await stepDo("pipeline: reference analysis", async () => {
+    //
+    // Vision-seam exhaustion (all configured vision providers rejected or
+    // could not be bounded) is deterministic and cannot heal through the
+    // generic step-retry budget — it returns a terminal marker from inside
+    // the step so the pipeline records an observable FAILED state with the
+    // per-attempt evidence (production retest 2026-09-05: silent retry storms
+    // here used to outlive the outer workflow step timeout with zero
+    // recorded diagnostics).
+    const analysis = await stepDo("pipeline: reference analysis", async (): Promise<
+      | { kind: "produced"; analysis: ReferenceAnalysis; artifactR2Key: string }
+      | { kind: "vision-seam-unavailable"; detail: string }
+    > => {
       const existingAnalysis = await getBuildStageArtifact<ReferenceAnalysis>(env, version.buildVersionId, "reference_analysis");
       if (existingAnalysis) {
-        return { analysis: existingAnalysis.value, artifactR2Key: existingAnalysis.artifactR2Key };
+        return { kind: "produced", analysis: existingAnalysis.value, artifactR2Key: existingAnalysis.artifactR2Key };
       }
-      return runReferenceAnalysisStage(env, {
-      siteGenerationId: input.siteGenerationId,
-      buildId,
-      buildVersionId: version.buildVersionId,
-      buildVersionNumber: version.buildVersionNumber,
-      evidence: frozen.evidence,
-      evidenceR2Key: frozen.evidenceR2Key,
-      visualInputs: frozen.evidence.visualInputs,
-      visionGenerate: deps.visionGenerate,
-      generate: deps.generate,
-      });
+      try {
+        const produced = await runReferenceAnalysisStage(env, {
+          siteGenerationId: input.siteGenerationId,
+          buildId,
+          buildVersionId: version.buildVersionId,
+          buildVersionNumber: version.buildVersionNumber,
+          evidence: frozen.evidence,
+          evidenceR2Key: frozen.evidenceR2Key,
+          visualInputs: frozen.evidence.visualInputs,
+          visionGenerate: deps.visionGenerate,
+          generate: deps.generate,
+        });
+        return { kind: "produced", analysis: produced.analysis, artifactR2Key: produced.artifactR2Key };
+      } catch (error) {
+        if (isVisionSeamExhaustion(error)) {
+          return { kind: "vision-seam-unavailable", detail: visionSeamDetail(error) };
+        }
+        throw error;
+      }
     });
+    if (analysis.kind === "vision-seam-unavailable") {
+      const reason = `REFERENCE_ANALYSIS vision seam unavailable: ${analysis.detail}`;
+      await appendBuildWorkflowEvent(env, {
+        buildId,
+        buildVersionId: version.buildVersionId,
+        fromState: "REFERENCE_ANALYSIS",
+        toState: "FAILED",
+        stage: "reference_analysis",
+        detail: reason.slice(0, 400),
+      });
+      return {
+        terminal: "FAILED",
+        reasons: [reason],
+        siteGenerationId: input.siteGenerationId, siteId, buildId,
+        releaseReadyBuildVersionId: null, artifactManifestHash: null, previewUrl: null,
+        qaA: null, qaB: null, repairApplied: false,
+      };
+    }
 
     const facts = (await getEffectiveBusinessFacts(env, buildId)).facts;
     const blueprint = await stepDo("pipeline: visual blueprint", async () => {

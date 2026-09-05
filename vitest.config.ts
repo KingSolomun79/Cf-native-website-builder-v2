@@ -113,6 +113,7 @@ export default defineWorkersConfig({
       "tests/v2-original-design.test.ts",
       "tests/v2-final-verification.test.ts",
       "tests/v2-qa-sweep.test.ts",
+      "tests/v2-vision-seam.test.ts",
       // Retained platform infrastructure tests.
       "tests/browser-lifecycle.test.ts",
       "tests/browser-adapter-spy.test.ts",

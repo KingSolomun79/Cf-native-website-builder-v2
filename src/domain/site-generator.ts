@@ -417,7 +417,12 @@ export async function generateCompleteSite(
   const referenceBlock = visualInputs.length > 0 ? referenceContextBlock(visualInputs) : "";
   const visionSeam =
     input.visionGenerate ??
-    (visualInputs.length > 0 ? createProductionVisionGenerate(env, visualInputs) : undefined);
+    (visualInputs.length > 0
+      ? createProductionVisionGenerate(env, visualInputs, {
+          buildId: input.buildId,
+          buildVersionNumber: input.buildVersionNumber,
+        })
+      : undefined);
   const stageInput = {
     buildId: input.buildId,
     siteGenerationId: input.siteGenerationId,

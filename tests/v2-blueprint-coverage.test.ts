@@ -266,9 +266,11 @@ describe("multimodal Reference Analysis (issue #42)", () => {
   });
 
   it("the production vision adapter refuses to run blind when the visual artifact is missing", async () => {
-    const adapter = createProductionVisionGenerate(env, [
-      { kind: "full-page", artifact: "references/uploads/does-not-exist.png", sha256: "x", width: 10, height: 10 },
-    ]);
+    const adapter = createProductionVisionGenerate(
+      env,
+      [{ kind: "full-page", artifact: "references/uploads/does-not-exist.png", sha256: "x", width: 10, height: 10 }],
+      { buildId: "build-context", buildVersionNumber: 1 }
+    );
     await expect(adapter("system", "user", 1)).rejects.toMatchObject({ code: "VISION_INPUT_UNAVAILABLE" });
   });
 

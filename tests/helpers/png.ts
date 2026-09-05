@@ -110,3 +110,38 @@ export function buildPng(options: BuildPngOptions = {}): ArrayBuffer {
 export function buildPngHeaderOnly(width: number, height: number): ArrayBuffer {
   return buildPng({ width, height, omitIend: true, idatBytes: 0 });
 }
+
+// Structurally valid PNG with REAL image data so decodePng succeeds (the
+// zero-filled buildPng IDAT is not a valid zlib stream). Deterministic
+// gradient pixels compress to a small fixture; filters stay type 0.
+export async function buildDecodablePng(width: number, height: number): Promise<ArrayBuffer> {
+  const stride = width * 3;
+  const raw = new Uint8Array(height * (stride + 1));
+  for (let y = 0; y < height; y++) {
+    const rowStart = y * (stride + 1);
+    raw[rowStart] = 0; // filter type: None
+    for (let x = 0; x < width; x++) {
+      const px = rowStart + 1 + x * 3;
+      raw[px] = (x + y) % 256;
+      raw[px + 1] = (x * 2 + y) % 256;
+      raw[px + 2] = (x + y * 3) % 256;
+    }
+  }
+  const idatPayload = await new Response(
+    new Blob([raw]).stream().pipeThrough(new CompressionStream("deflate"))
+  ).arrayBuffer();
+  const parts = [
+    new Uint8Array(PNG_SIGNATURE),
+    ihdr(width, height),
+    idat(new Uint8Array(idatPayload)),
+    iend(),
+  ];
+  const total = parts.reduce((sum, p) => sum + p.length, 0);
+  const out = new Uint8Array(total);
+  let offset = 0;
+  for (const p of parts) {
+    out.set(p, offset);
+    offset += p.length;
+  }
+  return out.buffer;
+}

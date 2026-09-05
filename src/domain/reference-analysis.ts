@@ -12,6 +12,7 @@ import { Type, type Static } from "@sinclair/typebox";
 import { Value } from "@sinclair/typebox/value";
 import type { Env } from "../env.d";
 import { getObject } from "../lib/assets";
+import { decodePng, downscaleRgb, encodePng } from "../lib/png-codec";
 import { runSchemaValidatedAiStage, type RawAiGenerate } from "./ai-boundary";
 import { appendBuildWorkflowEvent } from "./lifecycle";
 import { getBuildStageArtifact, storeBuildStageArtifact, type StoredStageArtifact } from "./stage-artifacts";
@@ -59,7 +60,7 @@ export const ReferenceAnalysisSchema = Type.Object(
 export type ReferenceAnalysis = Static<typeof ReferenceAnalysisSchema>;
 
 export class ReferenceAnalysisError extends Error {
-  readonly code: "EVIDENCE_FABRICATION" | "ARTIFACT_ALREADY_EXISTS" | "VISION_INPUT_UNAVAILABLE";
+  readonly code: "EVIDENCE_FABRICATION" | "ARTIFACT_ALREADY_EXISTS" | "VISION_INPUT_UNAVAILABLE" | "VISION_INPUT_OVERSIZE";
 
   constructor(code: ReferenceAnalysisError["code"], message: string) {
     super(message);
@@ -173,9 +174,16 @@ export interface ReferenceAnalysisProduced extends StoredStageArtifact {
 // model policy — glm-5.3-flash serves vision through the configured provider;
 // no separate legacy vision model). The system prompt is folded into the
 // user message: the vision path sends a single multimodal user turn.
+//
+// Production retest 2026-09-05 hardening: the request is bounded by the
+// VISION_INPUT_MAX_BYTES budget AFTER base64 inflation (a 3.45MB PNG is a
+// 4.6MB wire payload), oversized inputs are deterministically downscaled
+// rather than sent anyway, and failures persist per-Build vision diagnostics
+// so provider rejections are observable instead of invisible.
 export function createProductionVisionGenerate(
   env: Env,
   visualInputs: NonNullable<ReferenceEvidence["visualInputs"]>,
+  buildContext: { buildId: string; buildVersionNumber: number },
   deps: { gateway?: typeof import("../lib/ai-gateway").generateVisionWithGateway } = {}
 ): RawAiGenerate {
   return async (systemPrompt, userPrompt) => {
@@ -188,7 +196,8 @@ export function createProductionVisionGenerate(
         `Visual input ${primary.artifact} is missing from storage; the analyzer refuses to run blind`
       );
     }
-    const bytes = new Uint8Array(await new Response(body).arrayBuffer());
+    const sourceBytes = new Uint8Array(await new Response(body).arrayBuffer());
+    const bytes = await fitVisionInputToBudget(env, sourceBytes);
     let binary = "";
     const CHUNK = 0x8000;
     for (let i = 0; i < bytes.length; i += CHUNK) {
@@ -205,10 +214,43 @@ export function createProductionVisionGenerate(
         site_id: "reference-analysis",
         stage: "reference-analyzer",
       },
-      { stage: "reference-analyzer", maxTokens: 4096 }
+      {
+        stage: "reference-analyzer",
+        maxTokens: 4096,
+        diagnosticR2Key: `builds/${buildContext.buildId}/v${buildContext.buildVersionNumber}/ai/reference-analyzer/vision-diagnostics.json`,
+      }
     );
     return { content: result.content, provider: result.provider, model: result.model };
   };
+}
+
+// The vision wire format is base64 (+33%): the budget applies to the ENCODED
+// request, not the raw artifact. Oversized visual inputs are deterministically
+// downscaled (composition preserved, only resolution reduced) with a bounded
+// width ladder; failing closed beats sending an unbounded request.
+export async function fitVisionInputToBudget(env: Env, bytes: Uint8Array): Promise<Uint8Array> {
+  const configured = Number.parseInt(env.VISION_INPUT_MAX_BYTES ?? "", 10);
+  const maxBytes = Number.isFinite(configured) ? Math.min(10 * 1024 * 1024, Math.max(64 * 1024, configured)) : 4 * 1024 * 1024;
+  const encodedBudget = Math.floor((maxBytes * 3) / 4);
+  if (bytes.byteLength <= encodedBudget) return bytes;
+
+  const decoded = await decodePng(bytes);
+  if (!decoded.ok) {
+    throw new ReferenceAnalysisError(
+      "VISION_INPUT_OVERSIZE",
+      `Visual input is ${bytes.byteLength} bytes (encoded budget ${encodedBudget}) and is not a decodable PNG; refusing to send an unbounded vision request`
+    );
+  }
+  for (const width of [768, 640, 512, 448, 384, 320]) {
+    if (width >= decoded.png.width) continue;
+    const scaled = downscaleRgb(decoded.png, width);
+    const png = await encodePng(scaled);
+    if (png.byteLength <= encodedBudget) return png;
+  }
+  throw new ReferenceAnalysisError(
+    "VISION_INPUT_OVERSIZE",
+    `Visual input is ${bytes.byteLength} bytes and could not be reduced under the encoded budget ${encodedBudget}; refusing to send an unbounded vision request`
+  );
 }
 
 export async function runReferenceAnalysisStage(
@@ -222,7 +264,12 @@ export async function runReferenceAnalysisStage(
   const visualInputs = input.visualInputs ?? input.evidence.visualInputs;
   const generate =
     input.visionGenerate ??
-    (visualInputs && visualInputs.length > 0 ? createProductionVisionGenerate(env, visualInputs) : input.generate);
+    (visualInputs && visualInputs.length > 0
+      ? createProductionVisionGenerate(env, visualInputs, {
+          buildId: input.buildId,
+          buildVersionNumber: input.buildVersionNumber,
+        })
+      : input.generate);
 
   const run = await runSchemaValidatedAiStage<ReferenceAnalysis>(env, {
     stage: "reference-analyzer",

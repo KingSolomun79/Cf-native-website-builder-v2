@@ -3,9 +3,11 @@ import { env as providedEnv } from "cloudflare:test";
 import type { Env } from "../src/env.d";
 import { startSiteGeneration } from "../src/domain/lifecycle";
 import { runBuildPipeline } from "../src/domain/build-pipeline";
-import { getObject } from "../src/lib/assets";
+import { getObject, putObject } from "../src/lib/assets";
 import { buildVersionSourceKey } from "../src/domain/artifact-keys";
+import { VisionGatewayError } from "../src/lib/ai-gateway";
 import { createPipelineScripts, persistPipelineScreenshot, PIPELINE_SCRIPTS_BUSINESS } from "./helpers/pipeline-scripts";
+import { buildDecodablePng } from "./helpers/png";
 
 // Production build-pipeline wiring (issue #30): one REFERENCE_BOUND Build from
 // Onboarding Submission through Release Ready through the REAL supported
@@ -139,5 +141,51 @@ describe("production build pipeline (issue #30 wiring)", () => {
       "SELECT build_version_id FROM build_release_records WHERE build_version_id = ?"
     ).bind(outcome.releaseReadyBuildVersionId!).first();
     expect(release).not.toBeNull();
+  });
+
+  it("terminates observably when the vision seam is exhausted — no silent retry storm (production retest 2026-09-05)", async () => {
+    // A decodable canonical screenshot so intake freezes normalized visual
+    // inputs and the analyzer actually takes the multimodal path.
+    const screenshotKey = "references/pipeline/vision-seam.png";
+    await putObject(env, screenshotKey, new Uint8Array(await buildDecodablePng(1440, 3200)));
+    const started = await startSiteGeneration(env, {
+      payload: {
+        buildMode: "REFERENCE_BOUND",
+        facts: { businessName: PIPELINE_SCRIPTS_BUSINESS, contactEmail: "ops@wazibizwebsites.example" },
+        reference: { screenshotR2Key: screenshotKey, url: "https://meridian-atelier.example.com/" },
+      },
+    });
+
+    const exhausted = new VisionGatewayError(
+      [
+        { provider: "zhipu", model: "glm-5.3-flash", attempt: 1, durationMs: 12, outcome: "failure", classification: "non_retryable_http", httpStatus: 413 },
+        { provider: "zhipu", model: "glm-5.3-flash", attempt: 2, durationMs: 9, outcome: "failure", classification: "non_retryable_http", httpStatus: 413 },
+      ],
+      "builds/x/v1/ai/reference-analyzer/vision-diagnostics.json"
+    );
+    const outcome = await runBuildPipeline(env, {
+      siteGenerationId: started.siteGenerationId,
+      deps: { ...createPipelineScripts(), visionGenerate: async () => { throw exhausted; } },
+    });
+
+    expect(outcome.terminal).toBe("FAILED");
+    expect(outcome.reasons[0]).toContain("vision seam unavailable");
+    expect(outcome.reasons[0]).toContain("http 413");
+
+    const build = await env.DB.prepare("SELECT state FROM builds WHERE id = ?").bind(outcome.buildId).first<{ state: string }>();
+    expect(build?.state).toBe("FAILED");
+
+    const event = await env.DB.prepare(
+      "SELECT to_state, stage, detail FROM build_workflow_events WHERE build_id = ? AND stage = 'reference_analysis' ORDER BY rowid DESC LIMIT 1"
+    ).bind(outcome.buildId).first<{ to_state: string; stage: string; detail: string }>();
+    expect(event?.to_state).toBe("FAILED");
+    expect(event?.detail).toContain("zhipu/glm-5.3-flash#1");
+
+    // The pipeline stopped at the seam: no Blueprint was produced from blind
+    // defaults and no downstream stage ran for this Build.
+    const blueprint = await env.DB.prepare(
+      "SELECT id FROM build_stage_artifacts WHERE build_version_id = ? AND kind = 'visual_blueprint'"
+    ).bind(outcome.releaseReadyBuildVersionId ?? (await env.DB.prepare("SELECT id FROM build_versions WHERE build_id = ? ORDER BY version_number").bind(outcome.buildId).first<{ id: string }>()).id).first();
+    expect(blueprint).toBeNull();
   });
 });

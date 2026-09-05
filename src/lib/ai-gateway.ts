@@ -1,6 +1,6 @@
 import type { ChatCompletionRequest, ChatCompletionResponse, GatewayMeta } from "../types";
 import type { Env } from "../env.d";
-import { putImmutableObject } from "./assets";
+import { putImmutableObject, putImmutableObjectTolerant } from "./assets";
 import type { VisionInputArtifact } from "./vision-input";
 
 export type LlmProvider = "ai-gateway" | "zhipu" | "openrouter";
@@ -463,8 +463,11 @@ async function persistVisionDiagnostics(
   visionInput?: VisionInputArtifact
 ): Promise<void> {
   if (!key) return;
+  // Tolerant put: diagnostics for the same Build Version key may already
+  // exist from a bounded retry run; a diagnostics rewrite must never fail the
+  // underlying call that just succeeded.
   try {
-    await putImmutableObject(env, key, JSON.stringify({
+    await putImmutableObjectTolerant(env, key, JSON.stringify({
       schemaVersion: 1,
       jobId: meta.job_id,
       siteId: meta.site_id,
@@ -525,9 +528,9 @@ export async function generateVisionWithGateway(
           "cf-aig-request-timeout": String(timeoutMs),
           "cf-aig-max-attempts": "1",
         });
-        clearTimeout(timeoutId);
         const durationMs = Date.now() - startedAt;
         if (!response.ok) {
+          clearTimeout(timeoutId);
           const classification = classifyVisionResponse(response.status);
           attempts.push({ provider: route.provider, model: route.model, attempt, durationMs, outcome: "failure", classification, httpStatus: response.status, gatewayRequestId: gatewayRequestId(response) });
           if (retryableVisionFailure(classification) && attempt < maxAttempts) {
@@ -536,21 +539,39 @@ export async function generateVisionWithGateway(
           }
           break;
         }
-        const parsed = await response.json() as ChatCompletionResponse;
-        const content = parsed.choices[0]?.message?.content;
-        if (!content) {
-          attempts.push({ provider: route.provider, model: route.model, attempt, durationMs, outcome: "failure", classification: "empty_response", gatewayRequestId: gatewayRequestId(response) });
-          if (attempt < maxAttempts) {
-            await new Promise((resolve) => setTimeout(resolve, retryDelayMs * Math.pow(2, attempt - 1)));
-            continue;
+        // The abort budget covers the BODY read too: a provider that returns
+        // headers but stalls the body must fail as a bounded timeout, never
+        // hang the calling stage (production retest 2026-09-05).
+        let bodyReadTimer: ReturnType<typeof setTimeout> | undefined;
+        try {
+          const parsed = await Promise.race([
+            response.json() as Promise<ChatCompletionResponse>,
+            new Promise<never>((_, reject) => {
+              bodyReadTimer = setTimeout(() => {
+                const abortError = new Error("The operation was aborted.");
+                abortError.name = "AbortError";
+                reject(abortError);
+              }, timeoutMs);
+            }),
+          ]);
+          clearTimeout(timeoutId);
+          const content = parsed.choices[0]?.message?.content;
+          if (!content) {
+            attempts.push({ provider: route.provider, model: route.model, attempt, durationMs, outcome: "failure", classification: "empty_response", gatewayRequestId: gatewayRequestId(response) });
+            if (attempt < maxAttempts) {
+              await new Promise((resolve) => setTimeout(resolve, retryDelayMs * Math.pow(2, attempt - 1)));
+              continue;
+            }
+            break;
           }
-          break;
+          attempts.push({ provider: route.provider, model: route.model, attempt, durationMs, outcome: "success", gatewayRequestId: gatewayRequestId(response) });
+          await persistVisionDiagnostics(env, options?.diagnosticR2Key, meta, stage, "succeeded", attempts, route, options?.visionInput);
+          // Prefer the provider-reported model identity for provenance.
+          const servedModel = typeof parsed.model === "string" && parsed.model.length > 0 ? parsed.model : route.model;
+          return { content, provider: route.provider, model: servedModel };
+        } finally {
+          if (bodyReadTimer !== undefined) clearTimeout(bodyReadTimer);
         }
-        attempts.push({ provider: route.provider, model: route.model, attempt, durationMs, outcome: "success", gatewayRequestId: gatewayRequestId(response) });
-        await persistVisionDiagnostics(env, options?.diagnosticR2Key, meta, stage, "succeeded", attempts, route, options?.visionInput);
-        // Prefer the provider-reported model identity for provenance.
-        const servedModel = typeof parsed.model === "string" && parsed.model.length > 0 ? parsed.model : route.model;
-        return { content, provider: route.provider, model: servedModel };
       } catch (error) {
         clearTimeout(timeoutId);
         if (error instanceof VisionDiagnosticsPersistenceError) throw error;
