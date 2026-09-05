@@ -975,6 +975,23 @@ aggregated per canonical region through provenance.
 
 Comparator output is evidence for QA-A, not a standalone verdict.
 
+Reference fidelity truthfulness (2026-09-05 remediation, issues #39-#46):
+`REFERENCE_BOUND` requires actual visual evidence. Missing Reference
+measurements are UNKNOWN — comparator defaults (0.9/0.83/0.22/"asymmetric"),
+self-comparison and similarity against an unmeasured reference are forbidden:
+the comparator emits `INSUFFICIENT_REFERENCE_EVIDENCE` instead of a
+percentage. `REFERENCE_MACRO_FIDELITY` is a deterministic, non-averageable
+hard gate comparing Reference evidence directly with the candidate; it fails
+closed on insufficient evidence and on any material measured deviation,
+independently of the QA-A score. Evidence sufficiency is evaluated and frozen
+at intake: dimensions-only evidence fails closed (no invented Blueprint, no
+generic defaults, no silent mode switch). The Reference Analyzer, Website
+Generator and QA-A operate on the normalized Reference Visual Package (the
+Reference Screenshot is consumed by the pipeline — reference pixels never
+disappear after intake), and the Visual Blueprint must cover every
+identity-defining trait and major measured visual mass or escalate via
+`BLUEPRINT_REVIEW_REQUIRED`.
+
 ---
 
 # 28. QA-A — Visual and Content

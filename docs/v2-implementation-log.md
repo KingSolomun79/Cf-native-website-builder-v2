@@ -687,3 +687,33 @@ wrangler dry-run pass. CSO: no new surfaces (deterministic planner + outcome
 classification) — covered by the #44 CSO scope.
 
 **Commit:** 7eab24277b2a798904e0afb051625daf2c004ef7
+
+## 2026-09-05 — #46 RankForge negative regression frozen + canonical docs (issue H)
+
+**Change:** (1) tests/v2-rankforge-regression.test.ts freezes the exact
+RankForge/Morabeza failure numbers (1440x3752 dimensions-only evidence;
+5-section/2.6-viewport candidate vs ~9 masses/~8.5 viewports; the fabricated
+"similarity 75") as permanent negative regressions: dimensions-only evidence
+fails the sufficiency gate; the frozen candidate geometry FAILS
+REFERENCE_MACRO_FIDELITY against the measured reference (region_count
+deviation); an unmeasured reference never yields a similarity percentage.
+No Morabeza-specific product rules — only deterministic gate behavior on
+frozen measurements. The published bad candidate remains untouched.
+(2) Canonical docs updated (single insertion each, no duplication):
+IMPLEMENTATION-PRD.md section 27 and CAPABILITY-ENVELOPE.md reference-bound
+fidelity section now state the full remediated architecture (visual evidence
+required; sufficiency fail-closed; UNKNOWN not defaults; direct
+REFERENCE_MACRO_FIDELITY independently of the aggregate score; coverage
+contract; visual package consumed by analyzer/generator/QA).
+(3) Deferred, deliberately: the human-reviewed POSITIVE production fixture
+and the one fresh production RankForge Site Generation retest require
+operator authorization (production deploy + live KIE/LLM spend); the
+untracked scripts/rankforge-smoke.mjs remains uncommitted pending
+redaction review, per the investigation handoff. Existing benchmark sites
+1-5 plus the #44/#46 gate tests cover the accept/reject pairing at the
+deterministic level.
+
+**Gates:** full suite 39 files / 280 tests passing; typecheck clean; wrangler
+dry-run pass.
+
+**Commit:** (sha recorded post-commit)
