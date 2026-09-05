@@ -638,4 +638,4 @@ dry-run pass; CSO:
 docs/security/2026-09-05-v2-issue43-generator-context-cso.md — SECURITY OK
 FOR CURRENT SCOPE.
 
-**Commit:** (sha recorded post-commit)
+**Commit:** a116f48582d7c0ea62c9e8dfcc7358e136cddb9d
