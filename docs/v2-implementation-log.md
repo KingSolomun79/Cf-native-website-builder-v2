@@ -522,4 +522,4 @@ dry-run pass; CSO: docs/security/2026-09-05-v2-issue40-production-capture-cso.md
 and recorded; capture fan-out R2 cost retention-managed; real-Playwright
 staging verification deferred to the #46 production retest).
 
-**Commit:** (sha recorded post-commit)
+**Commit:** 7c4483ec6584ffa8ddd7f8f871f2891de89f6f31
