@@ -567,3 +567,46 @@ docs/security/2026-09-05-v2-issue41-visual-package-cso.md — SECURITY OK FOR
 CURRENT SCOPE (watch: coverage reported but not gating until #44).
 
 **Commit:** 587ac6d1dea063e3ddfd47b5802af337c25cef4a
+
+## 2026-09-05 — #42 multimodal Reference Analysis + Blueprint coverage contract (issue D)
+
+**Change:** the analyzer finally sees the reference and the Blueprint can no
+longer silently erase it.
+(a) Multimodal analyzer: when frozen evidence carries normalized visual
+inputs, runReferenceAnalysisStage routes through createProductionVisionGenerate
+(R2 read of the primary visual input, base64, generateVisionWithGateway —
+glm-5.3-flash per canonical model policy, provider chain + bounded retries;
+system prompt folded into the single multimodal user turn). Provenance records
+visual input artifact ids; a missing visual artifact fails typed
+(VISION_INPUT_UNAVAILABLE) instead of silently degrading to text-only. The
+analysis prompt declares the attached visual package, keeps JSON evidence as
+the sole authority for measured facts, and includes the extraction channel.
+Text-only `generate` seam remains for evidence without visual inputs (tests /
+undecodable screenshots).
+(b) Coverage contract: evaluateBlueprintCoverage (deterministic, significance-
+based — no fixed region counts): identity-defining analysis traits preserved
+via sourceTraitId; major measured masses (>= 0.35 viewport) claimed by
+canonical regions via sourceEvidenceRegionIds; extraction image-mass bands
+inside claimed territory (y-overlap); explicit Adaptation Contract tokens
+(`mass:<id>`) may legally accept a mass drop. GAPS -> BLUEPRINT_REVIEW_REQUIRED
+event -> HUMAN_REVIEW_REQUIRED terminal BEFORE Implementation Contract
+production — generation never starts from a known-lossy Blueprint.
+(c) Fixed the un-interpolated trait-id template literal in
+buildBlueprintUserPrompt (model saw raw JS source) and added the coverage
+mandate sentence. #37 aggregation/provenance semantics unchanged and
+aggregation remains allowed.
+
+**Tests:** new tests/v2-blueprint-coverage.test.ts (10): COVERED/GAPS unit
+semantics (mass drop, contract-declared drop, trait erasure, sub-threshold
+freedom, image-mass overlap), multimodal seam routing (vision called, text
+seam proven untouched, provenance artifacts recorded, prompt metadata),
+production adapter R2-miss refusal, prompt content, and full-pipeline
+enforcement (lossy blueprint -> HUMAN_REVIEW_REQUIRED with no implementation
+contract artifact).
+
+**Gates:** full suite 36 files / 269 tests passing; typecheck clean; wrangler
+dry-run pass; CSO:
+docs/security/2026-09-05-v2-issue42-multimodal-coverage-cso.md — SECURITY OK
+FOR CURRENT SCOPE.
+
+**Commit:** (sha recorded post-commit)

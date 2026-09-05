@@ -17,7 +17,7 @@ import { runSchemaValidatedAiStage, type RawAiGenerate } from "./ai-boundary";
 import { appendBuildWorkflowEvent } from "./lifecycle";
 import { getBuildStageArtifact, storeBuildStageArtifact, type StoredStageArtifact } from "./stage-artifacts";
 import type { ReferenceAnalysis } from "./reference-analysis";
-import type { AdaptationContract } from "./reference-evidence-schema";
+import type { AdaptationContract, ReferenceEvidence } from "./reference-evidence-schema";
 import type { BusinessFacts } from "./lifecycle-schema";
 
 export const VISUAL_BLUEPRINT_SCHEMA_VERSION = "visual-blueprint/1";
@@ -235,6 +235,121 @@ export function validateBlueprintRegionProvenance(
   return problems.length === 0 ? { valid: true } : { valid: false, problems };
 }
 
+// Aggregation may combine subordinate visual parts but may not erase the
+// Reference (issue #42). Coverage contract: every identity-defining analysis
+// trait and every MAJOR measured visual mass must map to a canonical
+// Blueprint region/trait, or to an explicit Adaptation Contract entry. This
+// is significance-based, not count-based: works for 3-section landing pages
+// and 20-section editorial pages alike. A gap emits
+// BLUEPRINT_REVIEW_REQUIRED upstream — generation never starts from a known
+// lossy Blueprint.
+export interface BlueprintCoverageInput {
+  blueprint: VisualBlueprint;
+  analysis: ReferenceAnalysis;
+  /** Frozen evidence regions (DOM or extracted pixel bands) with measured ratios. */
+  evidenceRegions: Array<{ id: string; viewportHeightRatio?: number }>;
+  /** Deterministic screenshot extraction channel (image masses, surface bands). */
+  extraction?: ReferenceEvidence["extraction"];
+  adaptationContract: AdaptationContract | null;
+}
+
+export interface BlueprintCoverage {
+  status: "COVERED" | "GAPS";
+  /** Identity-defining analysis traits erased by the Blueprint. */
+  uncoveredTraits: string[];
+  /** Major measured masses (>= ~1/3 viewport) no canonical region claims. */
+  uncoveredMasses: Array<{ regionId: string; viewportHeightRatio: number | null }>;
+  /** Extraction image-mass bands not covered by any claimed evidence region. */
+  uncoveredImageMasses: string[];
+  /** Share of total measured viewport height claimed by canonical regions. */
+  claimedMassRatio: number | null;
+  reasons: string[];
+}
+
+// A mass is "major" when it measurably occupies at least ~1/3 of a viewport:
+// observed visual significance, not a fixed region count.
+const MAJOR_MASS_RATIO = 0.35;
+
+export function evaluateBlueprintCoverage(input: BlueprintCoverageInput): BlueprintCoverage {
+  const { blueprint, analysis, evidenceRegions, extraction, adaptationContract } = input;
+
+  // a) Identity-defining traits must be preserved via sourceTraitId.
+  const preserved = new Set(blueprint.signatureTraits.map((trait) => trait.sourceTraitId));
+  const uncoveredTraits = analysis.signatureTraits
+    .filter((trait) => trait.identityDefining && !preserved.has(trait.id))
+    .map((trait) => trait.id);
+
+  // Declared adaptations can legally accept a mass drop (feature token
+  // 'mass:<segment-id>'); nothing else may erase a measured mass.
+  const declared = new Set<string>();
+  if (adaptationContract) {
+    for (const entry of adaptationContract.unsupportedFeatures) declared.add(entry.feature);
+    for (const entry of adaptationContract.acceptedApproximations) declared.add(entry.replaces);
+  }
+
+  // b) Major measured masses must be claimed by a canonical region.
+  const claimedSegmentIds = new Set(
+    blueprint.homepageRegions.flatMap((region) => region.sourceEvidenceRegionIds ?? [])
+  );
+  const uncoveredMasses: BlueprintCoverage["uncoveredMasses"] = [];
+  let claimedHeight = 0;
+  let totalHeight = 0;
+  for (const region of evidenceRegions) {
+    const ratio = typeof region.viewportHeightRatio === "number" ? region.viewportHeightRatio : null;
+    if (ratio !== null) {
+      totalHeight += ratio;
+      if (claimedSegmentIds.has(region.id)) claimedHeight += ratio;
+    }
+    const major = (ratio ?? 0) >= MAJOR_MASS_RATIO;
+    if (major && !claimedSegmentIds.has(region.id) && !declared.has(`mass:${region.id}`)) {
+      uncoveredMasses.push({ regionId: region.id, viewportHeightRatio: ratio });
+    }
+  }
+
+  // c) Extraction image-mass bands must sit inside claimed evidence territory
+  //    (y-overlap with any claimed region that carries geometry) or be
+  //    explicitly declared. Only evaluated when geometry exists on both sides.
+  const claimedGeometries = evidenceRegions
+    .filter((region) => claimedSegmentIds.has(region.id))
+    .map((region) => region as { startY?: number; endY?: number })
+    .filter((region) => typeof region.startY === "number" && typeof region.endY === "number");
+  const uncoveredImageMasses: string[] = [];
+  if (extraction?.coverage.decoded) {
+    for (const mass of extraction.imageMasses) {
+      const y0 = mass.boundingBox.y;
+      const y1 = mass.boundingBox.y + mass.boundingBox.height;
+      const covered =
+        claimedGeometries.some((geometry) => geometry.startY! < y1 && geometry.endY! > y0) ||
+        declared.has(`mass:y:${y0}`);
+      if (!covered) uncoveredImageMasses.push(`y:${y0}-${y1}`);
+    }
+  }
+
+  const reasons: string[] = [];
+  if (uncoveredTraits.length > 0) {
+    reasons.push(`identity-defining analysis traits erased by the Blueprint: ${uncoveredTraits.join(", ")}`);
+  }
+  if (uncoveredMasses.length > 0) {
+    reasons.push(
+      `major measured visual masses not claimed by any canonical region: ${uncoveredMasses
+        .map((mass) => `${mass.regionId} (${mass.viewportHeightRatio ?? "unknown"} viewports)`)
+        .join(", ")}`
+    );
+  }
+  if (uncoveredImageMasses.length > 0) {
+    reasons.push(`image-mass bands outside claimed canonical territory: ${uncoveredImageMasses.join(", ")}`);
+  }
+
+  return {
+    status: reasons.length === 0 ? "COVERED" : "GAPS",
+    uncoveredTraits,
+    uncoveredMasses,
+    uncoveredImageMasses,
+    claimedMassRatio: totalHeight > 0 ? Number((claimedHeight / totalHeight).toFixed(3)) : null,
+    reasons,
+  };
+}
+
 // Aggregated canonical composition (issue #37): the Blueprint region order is
 // the binding topology; the frozen evidence measurements of the contributing
 // segments are summed per canonical region so generation receives numeric
@@ -284,7 +399,9 @@ export function buildBlueprintUserPrompt(input: {
   adaptationContract: AdaptationContract | null;
   evidenceRegions: Array<{ id: string; viewportHeightRatio?: number }>;
 }): string {
-  return `Produce the binding Visual Blueprint for THIS Business from the Reference Analysis below. Preserve the Reference's identity-defining structure and signature traits while replacing its branding, content and assets with the Business's own. Every signature trait must trace to an analysis trait via sourceTraitId — use EXACTLY these analysis trait ids (verbatim, no other notation): " + JSON.stringify(input.analysis.signatureTraits.map((trait) => trait.id)) + ". Do NOT copy Reference copy, logos, trademarks, photography or proprietary assets. Define: visual thesis, 3-8 signature traits, fidelity priorities, tokens, global grid/container logic, spacing rhythm, typography roles, color roles, surface/depth language, header/navigation language, homepage first viewport, ordered homepage regions, image system with prioritized image roles, motion grammar, responsive contract, inner-page vocabulary, anti-fallback rules, accessibility adaptations and declared limitations. In homepageRegions, OMIT imageRoleId entirely for text-only regions — never write 'none', 'null', 'n/a' or an empty string; when present it must be an exact id from imageSystem.imageRoles.
+  return `Produce the binding Visual Blueprint for THIS Business from the Reference Analysis below. Preserve the Reference's identity-defining structure and signature traits while replacing its branding, content and assets with the Business's own. Every signature trait must trace to an analysis trait via sourceTraitId — use EXACTLY these analysis trait ids (verbatim, no other notation): ${JSON.stringify(input.analysis.signatureTraits.map((trait) => trait.id))}. Do NOT copy Reference copy, logos, trademarks, photography or proprietary assets. Define: visual thesis, 3-8 signature traits, fidelity priorities, tokens, global grid/container logic, spacing rhythm, typography roles, color roles, surface/depth language, header/navigation language, homepage first viewport, ordered homepage regions, image system with prioritized image roles, motion grammar, responsive contract, inner-page vocabulary, anti-fallback rules, accessibility adaptations and declared limitations. In homepageRegions, OMIT imageRoleId entirely for text-only regions — never write 'none', 'null', 'n/a' or an empty string; when present it must be an exact id from imageSystem.imageRoles.
+
+COVERAGE MANDATE (issue #42): aggregation must never erase the Reference. Every identity-defining analysis trait and every MAJOR measured visual mass (evidence segments of roughly a third of a viewport or more, and every image-mass band) must be claimed by a canonical region's sourceEvidenceRegionIds — or, when genuinely adapted away, be covered by an explicit Adaptation Contract entry (feature token 'mass:<segment-id>'). A Blueprint that silently drops a distinct visual mass, surface change or signature component is a Blueprint defect and will be rejected before generation.
 
 CANONICAL REGION RULES: The Reference Evidence segmentation listed below is OBSERVATIONAL — measured raw visual segments, not a binding topology. You MAY aggregate adjacent raw segments into ONE canonical homepageRegions entry when they form a single compositional unit (e.g. header + hero image + hero copy + hero CTA = one hero region). Every homepageRegions entry MUST carry sourceEvidenceRegionIds: the verbatim contributing segment ids from the evidence inventory (never invented ids, never empty). Claim each evidence segment in at most one canonical region. The ordered homepageRegions list is the binding canonical region topology for implementation and QA.
 

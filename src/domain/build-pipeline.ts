@@ -24,7 +24,7 @@ import type { Env } from "../env.d";
 import { appendBuildWorkflowEvent, createInitialBuild } from "./lifecycle";
 import { runReferenceIntake, getFrozenReferenceEvidence, type ReferenceCaptureFn } from "./reference-intake";
 import { runReferenceAnalysisStage } from "./reference-analysis";
-import { runVisualBlueprintStage, canonicalRegionComposition } from "./visual-blueprint";
+import { runVisualBlueprintStage, canonicalRegionComposition, evaluateBlueprintCoverage } from "./visual-blueprint";
 import { produceImplementationContract } from "./implementation-planner";
 import { generateCompleteSite, type ImageSlot } from "./site-generator";
 import {
@@ -360,6 +360,7 @@ export async function runBuildPipeline(
       buildVersionNumber: version.buildVersionNumber,
       evidence: frozen.evidence,
       evidenceR2Key: frozen.evidenceR2Key,
+      visualInputs: frozen.evidence.visualInputs,
       generate: deps.generate,
       });
     });
@@ -387,6 +388,38 @@ export async function runBuildPipeline(
       generate: deps.generate,
       });
     });
+
+    // ── Blueprint coverage contract (issue #42) ─────────────────────────────
+    // The Blueprint may aggregate the reference but may never erase it: every
+    // identity-defining analysis trait and every major measured visual mass
+    // must map to a canonical region/trait or an explicit Adaptation Contract
+    // entry. A gap is a BLUEPRINT-ROOT defect — escalate to human review
+    // instead of generating from a known-lossy Blueprint.
+    const coverage = evaluateBlueprintCoverage({
+      blueprint: blueprint.blueprint,
+      analysis: analysis.analysis,
+      evidenceRegions: frozen.evidence.regions,
+      extraction: frozen.evidence.extraction,
+      adaptationContract: frozen.adaptationContract,
+    });
+    if (coverage.status === "GAPS") {
+      const reason = `BLUEPRINT_REVIEW_REQUIRED: blueprint fails the reference coverage contract — ${coverage.reasons.join("; ")}`;
+      await appendBuildWorkflowEvent(env, {
+        buildId,
+        buildVersionId: version.buildVersionId,
+        fromState: "BLUEPRINT",
+        toState: "HUMAN_REVIEW_REQUIRED",
+        stage: "blueprint_coverage",
+        detail: reason.slice(0, 400),
+      });
+      return {
+        terminal: "HUMAN_REVIEW_REQUIRED",
+        reasons: [reason],
+        siteGenerationId: input.siteGenerationId, siteId, buildId,
+        releaseReadyBuildVersionId: null, artifactManifestHash: null, previewUrl: null,
+        qaA: null, qaB: null, repairApplied: false,
+      };
+    }
 
     const contract = await stepDo("pipeline: implementation contract", async () => {
       const existingContract = await getBuildStageArtifact<ImplementationContract>(env, version.buildVersionId, "implementation_contract");
