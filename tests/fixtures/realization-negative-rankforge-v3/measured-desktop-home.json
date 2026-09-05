@@ -1,0 +1,61 @@
+{
+  "fixture": "realization-negative-rankforge-v3",
+  "provenance": {
+    "buildId": "2c8e73ec-3849-4787-bc3c-a51577eb1901",
+    "buildVersion": "v3 (final candidate, HUMAN_REVIEW_REQUIRED)",
+    "previewUrl": "https://b-2c8e73ec38-v3.wazibizwebsites.workers.dev/",
+    "measuredAt": "2026-09-05",
+    "viewport": { "width": 1440, "height": 900 },
+    "note": "Measured from the live immutable v3 preview deployment after the retest. HTML/CSS frozen verbatim alongside this file."
+  },
+  "regions": [
+    { "region": "hero_first_viewport", "tag": "HEADER", "height": 997, "viewportHeightRatio": 1.108 },
+    { "region": "about_split_editorial", "tag": "SECTION", "height": 932, "viewportHeightRatio": 1.036 },
+    { "region": "services_card_collection", "tag": "SECTION", "height": 2892, "viewportHeightRatio": 3.213 },
+    { "region": "why_rankforge_split", "tag": "SECTION", "height": 209, "viewportHeightRatio": 0.233 },
+    { "region": "process_sequence", "tag": "SECTION", "height": 374, "viewportHeightRatio": 0.415 },
+    { "region": "dark_positioning_band", "tag": "SECTION", "height": 680, "viewportHeightRatio": 0.755 },
+    { "region": "audience_trust_strip", "tag": "SECTION", "height": 107, "viewportHeightRatio": 0.119 },
+    { "region": "closing_cta_band", "tag": "SECTION", "height": 100, "viewportHeightRatio": 0.111 },
+    { "region": "dark_footer", "tag": "FOOTER", "height": 365, "viewportHeightRatio": 0.406 }
+  ],
+  "h1": {
+    "computedFontSize": "32px",
+    "computedFontFamily": "Poppins, sans-serif",
+    "boundingRect": { "width": 170, "height": 224, "top": 264 },
+    "clippedOffCanvas": true,
+    "note": "UA-default styling (2em/32px, body font) because the CSS defines .display-h1 but the HTML h1 carries no class; the unstyled 1344px-wide .hero-bg image hogs the flex row and squeezes .hero-content off the right edge."
+  },
+  "heroImage": {
+    "slotId": "home-hero_first_viewport",
+    "naturalSize": [1344, 768],
+    "renderedSize": [1344, 768],
+    "renderedAsFullBleedCover": false,
+    "contentDefect": "KIE-generated image depicts a tablet/website-UI mockup collage (reference-styled screenshot with garbled UI chrome), not a full-bleed purple-graded photographic scene."
+  },
+  "aboutImage": {
+    "slotId": "home-about_split_editorial",
+    "requiredRole": "img_about_portrait (2:3 portrait in circular/organic mask)",
+    "actualPixelSize": [1344, 768],
+    "orientationConformance": "FAIL (landscape asset for a portrait role)",
+    "contentDefect": "Image embeds a fabricated client-logo strip with invented names ('Glap Thon', 'Marivert', '6699', 'Scap Thes', 'Hopes') baked into its pixels — Business Truth violation invisible to HTML text lints."
+  },
+  "classVocabularyDiff": {
+    "htmlClassesUsed": 59,
+    "cssClassesDefined": 87,
+    "htmlClassesWithNoCssRule": 28,
+    "cssClassesNeverUsedByHomeHtml": 58,
+    "keyOrphans": ["card-grid (4-up .services-grid rule never applies)", "hero-bg (full-bleed .hero-media rule never applies)", "hero-content", "display-h1 never attached (bare <h1>)", "pill-eyebrow", "btn-primary/btn-secondary (CSS defines .btn--primary/.btn--ghost)", "split-grid (CSS defines .split)", "portrait-masked", "step-number", "floating-cards/light-card", "band-bg/band-overlay", "audience-line", "pill-cta"]
+  },
+  "servicesGrid": {
+    "cssRule": ".services-grid { grid-template-columns: repeat(4, 1fr); } (correct 4-up per Blueprint)",
+    "htmlClass": "card-grid",
+    "renderedResult": "single-column stack, 3.21 viewports tall (10 cards)",
+    "rootCause": "CSS/HTML class vocabulary split — the correct rule is orphaned"
+  },
+  "qualityGateSources": [
+    "QA-A confirmation v3 (2026-09-05T10:35:26Z): visual 62, 4x P1 ACTIVE, FIRST_VIEWPORT/DOMINANT_TEXT_IMAGE_MASS/CRITICAL_SIGNATURE_TRAITS_PRESERVED/CRITICAL_IMAGERY_SERVES_ROLE all failed",
+    "geometry comparator: first_viewport_height_ratio ref 1.258 vs cand 0.3 (production capture context); image_mass_ratio cand 0.0",
+    "fresh post-retest measurement (this file): hero region 1.108 viewports but content clipped off-canvas — both states are realization failures with the same root cause"
+  ]
+}

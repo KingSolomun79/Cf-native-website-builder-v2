@@ -844,3 +844,150 @@ observable vision seam), 458e3ea (failure snippets), d6c7e0d (timeout
 probe), dbad9b2 (ZAI-leg vision shaping — root cause), ba33cfb (empty-body
 snippets), dd43d95 (informed assembly repair), c3f11b3 (informed blueprint
 repair), 2f08b93 (canonical gate enums), 8b187d3 (restart adoption).
+
+## 2026-09-05 — #47/#48 forensic trace: where Blueprint fidelity died in the failed v3 realization
+
+Mandatory reading honored (CONTEXT.md, PRD, capability envelope, decision
+record, prompt manifest). Before any code change, one focused forensic pass
+over the frozen production build 2c8e73ec-3849-4787-bc3c-a51577eb1901
+(v1 74 -> v2 71 -> v3 62 visual; HUMAN_REVIEW_REQUIRED), using the live v3
+preview deployment (immutable), the repair batches ledger, the frozen
+Blueprint/analyzer artifacts and a fresh Playwright measurement of the
+deployed candidate. Frozen as the repo fixture
+`tests/fixtures/realization-negative-rankforge-v3/`.
+
+Part 2 trace (hero) — the requirement died twice, in the planner and
+between two generator calls:
+
+1. Visual Blueprint: CORRECT. Full-bleed ~1.07-viewport dark photographic
+   hero, anti-fallback rule "do not shrink the hero to a conventional
+   70-80vh banner", tokens demand 60px Figtree display type.
+2. Implementation Contract: first loss. Home regions carry
+   `realization: "section"` — no geometry, no class bindings, no media
+   mode. Measured viewport-height targets bypass the contract as optional
+   `compositionTargets` prompt text and are all-or-nothing
+   (`compositionFullyMeasured`).
+3. Generation: second, fatal loss. `site.css` and the four pages are
+   generated in SEPARATE AI calls; the CSS prompt explicitly invites
+   invented class names ("Class names may be domain-specific"), and the
+   page prompts never see the generated CSS vocabulary. Measured on v3:
+   28 of 59 HTML classes have NO CSS rule; 58 of 87 CSS classes are never
+   used. The CSS correctly wrote `.services-grid { grid-template-columns:
+   repeat(4, 1fr) }`, `.hero { min-height: 100svh }`, `.display-h1` at
+   60px — and the HTML used `card-grid`, `hero-bg`, a bare `<h1>`: the
+   Blueprint-faithful CSS was orphaned wholesale and the page fell back to
+   UA-default rendering. This single mechanism explains the collapsed/
+   off-canvas hero AND the single-column services stack AND the missing
+   pill/display typography.
+4. Deterministic validation: blind spot. `validateAssembledSite` checks
+   tags/regions/slots/facts but has NO CSS-to-HTML correspondence check,
+   so the vocabulary split sailed through assembly and preflight every
+   time.
+5. QA told the truth (74/71/62, macro FAIL) but could not converge the
+   fix (see Part 15).
+
+Part 3 trace (services grid): Blueprint specified 4-up (globalGrid
+columnRatios prose) -> contract dropped it (no field) -> CSS re-derived it
+correctly but orphaned (`services-grid` vs `card-grid`). Not "CSS collapsed
+it" — the CSS was correct and unbound. Root cause identical: no shared,
+machine-enforced class/selector contract between the CSS call and the page
+calls.
+
+Parts 15/19 repair effectiveness (why scores FELL): both repair plans were
+measured and precise (Fix Coordinator: hero image-mass root cause,
+fabricated placeholder names enumerated, minor tech; Release Blocker Fix:
+"min-height ~100svh", "object-fit cover", scoped-to-hero). They failed
+because (a) every repair REGENERATES THE ENTIRE SITE (css+js+4 pages) at
+temperature 0.35 — already-passing regions re-roll every round (v1 flat
+purple hero -> v2 short inset card -> v3 clipped-flex hero: three
+different random realizations of the same defect family); (b) directives
+reference regions/classes but each round re-splits the CSS/HTML
+vocabulary; (c) nothing compares the new version's gates against the
+previous version's PASSING gates (v3 regressed geometry earlier rounds had
+achieved); (d) confirmation QA is model-only — no deterministic
+re-measurement between repair rounds.
+
+Part 22 evidence (fabrication): v1 carried fabricated client names in HTML
+text (QA caught it; Fix Coordinator ordered removal — text was clean by
+v3). But the KIE images themselves baked the same fabrication into PIXELS:
+the v3 about-split asset (1344x768 landscape) embeds a fake client logo
+strip ("Glap Thon", "Marivert", "6699", "Scap Thes", "Hopes") and the hero
+asset is a reference-styled website-UI mockup collage with garbled chrome
+text. Accepted images are reused across versions (`reuseAcceptedImages`),
+so contaminated v1 imagery persisted through v3. `deriveImagePlan`
+hardcodes `orientation: "landscape"` on both branches of its conditional
+so the 2:3 portrait about role was generated 16:9; `runImageWave` accepts
+ANY completed attempt with zero conformance checks — no orientation, no
+content, no role check. The v3 confirmation QA (fabrication=false, content
+88) missed all of it: HTML lints cannot see image pixels and the
+confirmation prompt does not restate imagery-fabrication inspection.
+
+Measurement-context note: production QA recorded hero 0.3 viewports /
+image mass 0.0; the fresh measurement of the same deployment records 1.108
+viewports (content clipped off-canvas). The swept R2 artifacts make the
+capture-time state unreconstructable; both states are the same realization
+failure, but capture determinism around deploy propagation is recorded as
+an observability watch item, not a gate change.
+
+Disposition of instruction parts: content capacity (Parts 9-10) is
+enforced by outcome measures — per-region measured height targets, the
+clipped-headline check and a "fit copy to measured region capacity, do not
+drop geometry for copy" generation rule — rather than by inventing
+per-region text budgets the evidence cannot deterministically support.
+Parts 13-14 (ownership/carry-forward) become structural: CSS owns the
+class vocabulary and is generated first; every page prompt receives the
+actual generated CSS class inventory; every repair round inherits the same
+binding.
+
+## 2026-09-05 — #47 Enforce measured REFERENCE_BOUND realization contracts in generation and repair (scope)
+
+1. Implementation Contract gains a deterministic `realization` block:
+   per-canonical-region CSS selector binding (`[data-region="{id}"]`) plus
+   a class-vocabulary policy. Backward-compatible optional schema field.
+2. Generation binding: CSS must scope rules to every canonical region;
+   page prompts receive the actual generated CSS class inventory and may
+   use ONLY those classes; deterministic assembly validation gains
+   `REGION_STYLE_MISSING` and `ORPHANED_CLASS`.
+3. Deterministic realization precheck (new workflow step after preview,
+   BEFORE expensive QA): one desktop-home capture; gross-error checks
+   against frozen measured targets — region height vs compositionTargets,
+   first-viewport image mass vs reference extraction (Part 12), clipped
+   headline, display type scale vs Blueprint tokens, CRITICAL image
+   rendered in its region with meaningful area (Part 11). On failure:
+   exactly ONE informed per-page regeneration carrying the measured
+   deltas, then re-assemble + redeploy + re-check once. No QA repair
+   budget consumed; unresolved findings still flow to full QA. Bounded by
+   construction.
+4. Image slot orientation derived from the Blueprint role (portrait/square
+   keywords) instead of hardcoded landscape; acceptance gate decodes the
+   returned asset dimensions and rejects orientation-nonconforming
+   attempts (bounded by the existing per-slot attempt cap).
+5. Repair directives become measurable: the pipeline attaches current
+   measured geometry, per-region deltas vs targets, the already-PASSING
+   gate list and mutation-scope constraints to Fix Coordinator and Release
+   Blocker Fix prompts; a deterministic regression guard records
+   `REPAIR_REGRESSION` when a previously-passing hard gate fails on the
+   repaired version and the terminal reasons cite it.
+
+## 2026-09-05 — #48 Prevent fabricated identity/trust content in visual placeholder regions (scope)
+
+1. Deterministic trust-context lint in assembly validation: container/
+   heading/aria trust contexts (trusted by / clients / partners / featured
+   in / awards / certifications / testimonials / logos) may only contain
+   labels backed by Business Facts, service vocabulary or geographic
+   labels; unsupported proper-name-shaped labels fail assembly.
+   Facts-allowlisted so legitimate service names never flag.
+2. KIE prompts gain a binding prohibition: no readable text, wordmarks,
+   logos, brand or client names, UI chrome or screenshot-like composition
+   in generated imagery.
+3. Bounded acceptance vision check on CRITICAL/HIGH attempts: one JSON
+   verdict (contains text/logos? UI-screenshot-like?) — rejected attempts
+   burn the existing bounded attempt budget, never the spend gate.
+4. Confirmation QA restate: fresh and confirmation QA-A must apply the
+   same Business Truth rule to rendered IMAGERY (fabricated logos/client
+   names/UI screenshots count as fabrication), with regression coverage
+   proving the confirmation path blocks release on it.
+5. Reference truth preserved (Part 23): trust/visual patterns are kept and
+   adapted with fact-safe content — the lint forbids fabrication, never
+   the region itself. ORIGINAL_DESIGN keeps every capability; the lint is
+   a Business Truth rule, not a REFERENCE_BOUND constraint.
