@@ -11,7 +11,7 @@
 import { Type, type Static } from "@sinclair/typebox";
 import { Value } from "@sinclair/typebox/value";
 
-export const REFERENCE_EVIDENCE_VERSION = "1";
+export const REFERENCE_EVIDENCE_VERSION = "2";
 export const ADAPTATION_CONTRACT_VERSION = "1";
 
 // Parses a stored evidence JSON document and returns it only when it still
@@ -88,6 +88,90 @@ export const ReferenceEvidenceSchema = Type.Object(
     responsiveObservations: Type.Array(Type.Unknown()),
     motionObservations: Type.Array(Type.Unknown()),
     discrepancies: Type.Array(Type.Unknown()),
+    // Issue #41 — deterministic screenshot-derived evidence channel. Optional:
+    // v1 packages (and URL captures before #41) predate it and stay valid.
+    extraction: Type.Optional(
+      Type.Object(
+        {
+          version: Type.String({ minLength: 1 }),
+          extractor: Type.String({ minLength: 1 }),
+          sourceArtifact: Type.String({ minLength: 1 }),
+          sourceSha256: Type.String({ minLength: 1 }),
+          coverage: Type.Union([
+            Type.Object(
+              {
+                decoded: Type.Literal(true),
+                width: Type.Number(),
+                height: Type.Number(),
+                sampledWidth: Type.Number(),
+              },
+              { additionalProperties: false }
+            ),
+            Type.Object({ decoded: Type.Literal(false), reason: Type.String() }, { additionalProperties: false }),
+          ]),
+          bands: Type.Array(
+            Type.Object(
+              {
+                id: Type.String({ minLength: 1 }),
+                startY: Type.Number(),
+                endY: Type.Number(),
+                height: Type.Number(),
+                viewportHeightRatio: Type.Number(),
+                dominantColour: Type.String(),
+                luminance: Type.Number(),
+                inkDensity: Type.Number(),
+                bandClass: Type.Union([
+                  Type.Literal("surface"),
+                  Type.Literal("content"),
+                  Type.Literal("image-mass"),
+                ]),
+              },
+              { additionalProperties: false }
+            )
+          ),
+          imageMasses: Type.Array(
+            Type.Object(
+              {
+                boundingBox: BoundsSchema,
+                density: Type.Number(),
+              },
+              { additionalProperties: false }
+            )
+          ),
+          surfaceSequence: Type.Array(Type.String()),
+          containerWidthRatio: Type.Union([Type.Number(), Type.Null()]),
+          colourRoles: Type.Object(
+            {
+              background: Type.Union([Type.String(), Type.Null()]),
+              accents: Type.Array(Type.String()),
+            },
+            { additionalProperties: false }
+          ),
+          imageMassRatio: Type.Union([Type.Number(), Type.Null()]),
+        },
+        { additionalProperties: false }
+      )
+    ),
+    // Issue #41 — normalized model-consumable visual inputs (the Reference
+    // Visual Package's model-facing artifacts). Deterministic downscales and,
+    // for very tall pages, ordered vertical slices; slicing preserves spatial
+    // meaning (composition is never rearranged). Hashes bind them to the
+    // canonical screenshot provenance.
+    visualInputs: Type.Optional(
+      Type.Array(
+        Type.Object(
+          {
+            kind: Type.Union([Type.Literal("full-page"), Type.Literal("slice")]),
+            artifact: Type.String({ minLength: 1 }),
+            sha256: Type.String({ minLength: 1 }),
+            width: Type.Number(),
+            height: Type.Number(),
+            sliceIndex: Type.Optional(Type.Number()),
+          },
+          { additionalProperties: false }
+        )
+      )
+    ),
   },
   { additionalProperties: false }
 );

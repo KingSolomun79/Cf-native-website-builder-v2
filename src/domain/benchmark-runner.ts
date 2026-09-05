@@ -248,7 +248,10 @@ export async function runBenchmarkCase(
       })
     );
 
-    const imageMass = input.imageMassRatio ?? 0.38;
+    // Reference profile carries only real measurements (issue #41): image
+    // mass comes from the harness-injected extraction channel or stays
+    // UNKNOWN — never a fabricated default.
+    const referenceImageMass = input.imageMassRatio ?? null;
     const referenceProfile = compositionFullyMeasured
       ? geometryFromRegions(
           canonicalComposition.map((region) => ({
@@ -256,9 +259,16 @@ export async function runBenchmarkCase(
             height: region.heightPx ?? 0,
             viewportHeightRatio: region.viewportHeightRatio!,
           })),
-          imageMass
+          referenceImageMass
         )
-      : geometryFromRegions(caseDefinition.evidence.regions, imageMass);
+      : geometryFromRegions(
+          caseDefinition.evidence.regions.map((region) => ({
+            id: region.id,
+            height: region.height,
+            viewportHeightRatio: region.viewportHeightRatio,
+          })),
+          referenceImageMass
+        );
     const geometryComparison = compareGeometry(referenceProfile, referenceProfile);
 
     const qaA = await labeled("qa", () =>

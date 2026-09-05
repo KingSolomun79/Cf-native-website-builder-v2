@@ -25,14 +25,15 @@ export const QA_VIEWPORTS = {
 
 export interface GeometryProfile {
   regionOrder: string[];
-  firstViewportHeightRatio: number;
+  /** UNKNOWN (null) when not measured — never a fabricated default. */
+  firstViewportHeightRatio: number | null;
   sectionHeightRatios: number[];
-  imageMassRatio: number;
-  containerWidthRatio: number;
+  imageMassRatio: number | null;
+  containerWidthRatio: number | null;
   columnRatios: number[];
-  dominantAlignment: "left" | "center" | "right" | "asymmetric";
+  dominantAlignment: "left" | "center" | "right" | "asymmetric" | null;
   surfaceSequence: string[];
-  whitespaceRatio: number;
+  whitespaceRatio: number | null;
 }
 
 export interface PageCapture {
@@ -47,23 +48,24 @@ export interface PageCapture {
 export type QaCaptureFn = (spec: Array<{ page: PageId; viewportWidth: number; firstViewport: boolean }>) => Promise<PageCapture[]>;
 
 // Builds a comparable GeometryProfile from a regions list (reference evidence
-// or candidate layout — same mapping both sides). Metrics not carried by
-// regions (surface sequence, whitespace) keep neutral values so the
-// comparator judges the measurable structural properties.
+// or candidate layout — same mapping both sides). Metrics the regions cannot
+// measure are UNKNOWN (null): reference geometry is never fabricated for
+// similarity scoring (issue #41). imageMassRatio must come from real
+// measurement (pixel extraction channel or DOM capture) or stay null.
 export function geometryFromRegions(
   regions: Array<{ id: string; height: number; viewportHeightRatio: number }>,
-  imageMassRatio: number
+  imageMassRatio: number | null
 ): GeometryProfile {
   return {
     regionOrder: regions.map((region) => region.id),
-    firstViewportHeightRatio: regions[0]?.viewportHeightRatio ?? 0.9,
+    firstViewportHeightRatio: regions[0]?.viewportHeightRatio ?? null,
     sectionHeightRatios: regions.map((region) => region.height / (regions[0]?.height || 1)),
     imageMassRatio,
-    containerWidthRatio: 0.83,
-    columnRatios: [5 / 7],
-    dominantAlignment: "asymmetric",
-    surfaceSequence: regions.map((_, index) => (index % 3 === 2 ? "ink" : "paper")),
-    whitespaceRatio: 0.22,
+    containerWidthRatio: null,
+    columnRatios: [],
+    dominantAlignment: null,
+    surfaceSequence: [],
+    whitespaceRatio: null,
   };
 }
 
@@ -185,17 +187,49 @@ export interface GeometryComparisonMetric {
 }
 
 export interface GeometryComparison {
+  /** MEASURED: at least the minimum comparable metric set exists.
+   *  INSUFFICIENT_REFERENCE_EVIDENCE: the reference side lacks the
+   *  measurements behind a similarity percentage — no score is emitted. */
+  status: "MEASURED" | "INSUFFICIENT_REFERENCE_EVIDENCE";
   metrics: GeometryComparisonMetric[];
-  similarityScore: number;
+  /** Only meaningful when status === "MEASURED". */
+  similarityScore: number | null;
+  /** Share of comparable metrics that both sides actually measured (0-1). */
+  measuredCoverage: number;
   materialDeviations: string[];
 }
 
+const COMPARABLE_METRIC_IDS = [
+  "region_count",
+  "region_order",
+  "first_viewport_height_ratio",
+  "image_mass_ratio",
+  "container_width_ratio",
+  "dominant_alignment",
+  "surface_sequence",
+  "whitespace_ratio",
+] as const;
+
 // Normalized structural comparison with explicit tolerances — no pixel
-// equality anywhere (PRD section 27).
+// equality anywhere (PRD section 27). A metric is compared ONLY when both
+// sides carry a real measurement; a similarity percentage is never emitted
+// against an unmeasured reference profile (issue #41).
 export function compareGeometry(reference: GeometryProfile, candidate: GeometryProfile): GeometryComparison {
   const metrics: GeometryComparisonMetric[] = [];
 
+  // Region topology (count + order) is comparable whenever the reference
+  // carries ANY measured region structure; an empty reference profile is the
+  // RankForge failure mode and fails loudly instead of passing vacuously.
   const regionCountRef = reference.regionOrder.length;
+  if (regionCountRef === 0) {
+    return {
+      status: "INSUFFICIENT_REFERENCE_EVIDENCE",
+      metrics: [],
+      similarityScore: null,
+      measuredCoverage: 0,
+      materialDeviations: [],
+    };
+  }
   const regionCountCand = candidate.regionOrder.length;
   metrics.push({
     id: "region_count",
@@ -221,74 +255,101 @@ export function compareGeometry(reference: GeometryProfile, candidate: GeometryP
     withinTolerance: orderSimilarity >= 0.75,
   });
 
-  const fvDeviation = Math.abs(reference.firstViewportHeightRatio - candidate.firstViewportHeightRatio);
-  metrics.push({
-    id: "first_viewport_height_ratio",
-    referenceValue: Number(reference.firstViewportHeightRatio.toFixed(3)),
-    candidateValue: Number(candidate.firstViewportHeightRatio.toFixed(3)),
-    deviation: Number(fvDeviation.toFixed(3)),
-    tolerance: 0.15,
-    withinTolerance: fvDeviation <= 0.15,
-  });
+  if (reference.firstViewportHeightRatio !== null && candidate.firstViewportHeightRatio !== null) {
+    const fvDeviation = Math.abs(reference.firstViewportHeightRatio - candidate.firstViewportHeightRatio);
+    metrics.push({
+      id: "first_viewport_height_ratio",
+      referenceValue: Number(reference.firstViewportHeightRatio.toFixed(3)),
+      candidateValue: Number(candidate.firstViewportHeightRatio.toFixed(3)),
+      deviation: Number(fvDeviation.toFixed(3)),
+      tolerance: 0.15,
+      withinTolerance: fvDeviation <= 0.15,
+    });
+  }
 
-  const imageMassDeviation = Math.abs(reference.imageMassRatio - candidate.imageMassRatio);
-  metrics.push({
-    id: "image_mass_ratio",
-    referenceValue: Number(reference.imageMassRatio.toFixed(3)),
-    candidateValue: Number(candidate.imageMassRatio.toFixed(3)),
-    deviation: Number(imageMassDeviation.toFixed(3)),
-    tolerance: 0.2,
-    withinTolerance: imageMassDeviation <= 0.2,
-  });
+  if (reference.imageMassRatio !== null && candidate.imageMassRatio !== null) {
+    const imageMassDeviation = Math.abs(reference.imageMassRatio - candidate.imageMassRatio);
+    metrics.push({
+      id: "image_mass_ratio",
+      referenceValue: Number(reference.imageMassRatio.toFixed(3)),
+      candidateValue: Number(candidate.imageMassRatio.toFixed(3)),
+      deviation: Number(imageMassDeviation.toFixed(3)),
+      tolerance: 0.2,
+      withinTolerance: imageMassDeviation <= 0.2,
+    });
+  }
 
-  const containerDeviation = Math.abs(reference.containerWidthRatio - candidate.containerWidthRatio);
-  metrics.push({
-    id: "container_width_ratio",
-    referenceValue: Number(reference.containerWidthRatio.toFixed(3)),
-    candidateValue: Number(candidate.containerWidthRatio.toFixed(3)),
-    deviation: Number(containerDeviation.toFixed(3)),
-    tolerance: 0.1,
-    withinTolerance: containerDeviation <= 0.1,
-  });
+  if (reference.containerWidthRatio !== null && candidate.containerWidthRatio !== null) {
+    const containerDeviation = Math.abs(reference.containerWidthRatio - candidate.containerWidthRatio);
+    metrics.push({
+      id: "container_width_ratio",
+      referenceValue: Number(reference.containerWidthRatio.toFixed(3)),
+      candidateValue: Number(candidate.containerWidthRatio.toFixed(3)),
+      deviation: Number(containerDeviation.toFixed(3)),
+      tolerance: 0.1,
+      withinTolerance: containerDeviation <= 0.1,
+    });
+  }
 
-  metrics.push({
-    id: "dominant_alignment",
-    referenceValue: reference.dominantAlignment,
-    candidateValue: candidate.dominantAlignment,
-    deviation: reference.dominantAlignment === candidate.dominantAlignment ? 0 : 1,
-    tolerance: 0,
-    withinTolerance: reference.dominantAlignment === candidate.dominantAlignment,
-  });
+  if (reference.dominantAlignment !== null && candidate.dominantAlignment !== null) {
+    metrics.push({
+      id: "dominant_alignment",
+      referenceValue: reference.dominantAlignment,
+      candidateValue: candidate.dominantAlignment,
+      deviation: reference.dominantAlignment === candidate.dominantAlignment ? 0 : 1,
+      tolerance: 0,
+      withinTolerance: reference.dominantAlignment === candidate.dominantAlignment,
+    });
+  }
 
-  const surfaceCommon = Math.min(reference.surfaceSequence.length, candidate.surfaceSequence.length);
-  const surfaceMatches = Array.from({ length: surfaceCommon }).filter(
-    (_, i) => reference.surfaceSequence[i] === candidate.surfaceSequence[i]
-  ).length;
-  const surfaceSimilarity = surfaceCommon === 0 ? 1 : surfaceMatches / Math.max(reference.surfaceSequence.length, candidate.surfaceSequence.length);
-  metrics.push({
-    id: "surface_sequence",
-    referenceValue: reference.surfaceSequence.join(">"),
-    candidateValue: candidate.surfaceSequence.join(">"),
-    deviation: Number((1 - surfaceSimilarity).toFixed(3)),
-    tolerance: 0.34,
-    withinTolerance: surfaceSimilarity >= 0.66,
-  });
+  if (reference.surfaceSequence.length > 0 && candidate.surfaceSequence.length > 0) {
+    const surfaceCommon = Math.min(reference.surfaceSequence.length, candidate.surfaceSequence.length);
+    const surfaceMatches = Array.from({ length: surfaceCommon }).filter(
+      (_, i) => reference.surfaceSequence[i] === candidate.surfaceSequence[i]
+    ).length;
+    const surfaceSimilarity = surfaceMatches / Math.max(reference.surfaceSequence.length, candidate.surfaceSequence.length);
+    metrics.push({
+      id: "surface_sequence",
+      referenceValue: reference.surfaceSequence.join(">"),
+      candidateValue: candidate.surfaceSequence.join(">"),
+      deviation: Number((1 - surfaceSimilarity).toFixed(3)),
+      tolerance: 0.34,
+      withinTolerance: surfaceSimilarity >= 0.66,
+    });
+  }
 
-  const whitespaceDeviation = Math.abs(reference.whitespaceRatio - candidate.whitespaceRatio);
-  metrics.push({
-    id: "whitespace_ratio",
-    referenceValue: Number(reference.whitespaceRatio.toFixed(3)),
-    candidateValue: Number(candidate.whitespaceRatio.toFixed(3)),
-    deviation: Number(whitespaceDeviation.toFixed(3)),
-    tolerance: 0.15,
-    withinTolerance: whitespaceDeviation <= 0.15,
-  });
+  if (reference.whitespaceRatio !== null && candidate.whitespaceRatio !== null) {
+    const whitespaceDeviation = Math.abs(reference.whitespaceRatio - candidate.whitespaceRatio);
+    metrics.push({
+      id: "whitespace_ratio",
+      referenceValue: Number(reference.whitespaceRatio.toFixed(3)),
+      candidateValue: Number(candidate.whitespaceRatio.toFixed(3)),
+      deviation: Number(whitespaceDeviation.toFixed(3)),
+      tolerance: 0.15,
+      withinTolerance: whitespaceDeviation <= 0.15,
+    });
+  }
+
+  // A similarity percentage requires the measurement coverage behind it:
+  // below the minimum comparable set the comparator refuses to score.
+  const measuredCoverage = metrics.length / COMPARABLE_METRIC_IDS.length;
+  if (metrics.length < 3) {
+    return {
+      status: "INSUFFICIENT_REFERENCE_EVIDENCE",
+      metrics,
+      similarityScore: null,
+      measuredCoverage,
+      materialDeviations: [],
+    };
+  }
 
   const passed = metrics.filter((metric) => metric.withinTolerance).length;
   const similarityScore = Math.round((passed / metrics.length) * 100);
   return {
+    status: "MEASURED",
     metrics,
     similarityScore,
+    measuredCoverage,
     materialDeviations: metrics.filter((metric) => !metric.withinTolerance).map((metric) => `${metric.id} (ref ${metric.referenceValue} vs cand ${metric.candidateValue})`),
   };
 }

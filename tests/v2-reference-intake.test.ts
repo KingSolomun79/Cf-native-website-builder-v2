@@ -179,7 +179,7 @@ describe("Reference intake and evidence freeze", () => {
     await expectStoredBytes(stored!.body, screenshotBytes("submitted"));
 
     const read = await getFrozenReferenceEvidence(env, context.siteGenerationId);
-    expect(read!.evidence.version).toBe("1");
+    expect(read!.evidence.version).toBe("2");
     expect(read!.evidence.regions).toHaveLength(0);
   });
 

@@ -571,16 +571,18 @@ export async function runBuildPipeline(
         };
       }
 
-      // Geometry comparator (issue #37): the REFERENCE side of the topology
-      // comparison is the canonical Blueprint region list with evidence
-      // measurements aggregated per region — the same topology the generator
-      // was contracted to implement and the candidate capture exposes via
-      // data-region. Legacy provenance-less blueprints fall back to the raw
-      // evidence regions (prior behavior). Measured fidelity still comes from
-      // the frozen evidence; only topology authority changed, not the bar.
+      // Geometry comparator (issue #37 topology authority; #41 truthfulness).
+      // The REFERENCE side carries only real measurements: region structure
+      // from the canonical composition (or raw evidence for legacy
+      // blueprints) and image mass from the deterministic screenshot
+      // extraction channel when available — the reference image mass is
+      // NEVER seeded from the candidate. Metrics without a measured value on
+      // both sides are skipped, and an unmeasurable reference profile yields
+      // INSUFFICIENT_REFERENCE_EVIDENCE instead of a similarity percentage.
       const homeDesktop = evidenceBundle.bundle.captures.find(
         (capture) => capture.page === "home" && capture.viewportWidth === 1440
       );
+      const referenceImageMass = frozen.evidence.extraction?.imageMassRatio ?? null;
       const referenceProfile = compositionFullyMeasured
         ? geometryFromRegions(
             canonicalComposition.map((region) => ({
@@ -588,7 +590,7 @@ export async function runBuildPipeline(
               height: region.heightPx ?? 0,
               viewportHeightRatio: region.viewportHeightRatio!,
             })),
-            homeDesktop?.geometry.imageMassRatio ?? 0.38
+            referenceImageMass
           )
         : geometryFromRegions(
             frozen.evidence.regions.flatMap((region) =>
@@ -596,10 +598,18 @@ export async function runBuildPipeline(
                 ? [{ id: region.id, height: region.height, viewportHeightRatio: region.viewportHeightRatio }]
                 : []
             ),
-            homeDesktop?.geometry.imageMassRatio ?? 0.38
+            referenceImageMass
           );
-      const candidateProfile = homeDesktop?.geometry ?? geometryFromRegions([], 0.38);
-      const geometryComparison = compareGeometry(referenceProfile, candidateProfile);
+      const candidateProfile = homeDesktop?.geometry ?? null;
+      const geometryComparison = candidateProfile
+        ? compareGeometry(referenceProfile, candidateProfile)
+        : {
+            status: "INSUFFICIENT_REFERENCE_EVIDENCE" as const,
+            metrics: [],
+            similarityScore: null,
+            measuredCoverage: 0,
+            materialDeviations: [],
+          };
 
       const qaA = await runQaAStage(env, {
         buildId: ctx.buildId,
@@ -609,7 +619,10 @@ export async function runBuildPipeline(
         context: {
           businessName: facts.businessName,
           geometryComparison,
-          evidenceSummary: `${evidenceBundle.bundle.captures.length} standardized captures (home 1440/768/390, inner pages desktop+mobile); geometry similarity ${geometryComparison.similarityScore}`,
+          evidenceSummary:
+            geometryComparison.status === "MEASURED"
+              ? `${evidenceBundle.bundle.captures.length} standardized captures (home 1440/768/390, inner pages desktop+mobile); geometry similarity ${geometryComparison.similarityScore} (measurement coverage ${Math.round(geometryComparison.measuredCoverage * 100)}%)`
+              : `${evidenceBundle.bundle.captures.length} standardized captures (home 1440/768/390, inner pages desktop+mobile); geometry comparator: INSUFFICIENT_REFERENCE_EVIDENCE (reference measurements absent — no similarity may be claimed)`,
           signatureTraitIds: blueprint.blueprint.signatureTraits.map((trait) => trait.id),
           canonicalRegions: canonicalComposition.map((region) => ({
             order: region.order,

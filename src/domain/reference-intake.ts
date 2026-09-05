@@ -35,6 +35,21 @@ import {
   type StructuredObservation,
 } from "./reference-evidence-schema";
 import { evaluateReferenceEvidenceSufficiency, type EvidenceSufficiencyVerdict } from "./reference-sufficiency";
+import { extractScreenshotEvidence, type ScreenshotExtraction } from "./visual-evidence-extraction";
+import { decodePng, downscaleRgb, encodePng, sliceRgbRows } from "../lib/png-codec";
+
+// Normalized visual-input bounds (issue #41): model-facing artifacts are
+// bounded-width downscales; very tall pages become ordered vertical slices
+// so no model input exceeds the height budget. Composition is never altered.
+const NORMALIZED_VISUAL_WIDTH = 1024;
+const MAX_NORMALIZED_SLICE_HEIGHT = 6000;
+
+async function sha256HexBytes(bytes: Uint8Array): Promise<string> {
+  const digest = await crypto.subtle.digest("SHA-256", bytes);
+  return Array.from(new Uint8Array(digest))
+    .map((byte) => byte.toString(16).padStart(2, "0"))
+    .join("");
+}
 
 export type ReferenceIntakeErrorCode =
   | "GENERATION_NOT_FOUND"
@@ -287,6 +302,54 @@ export async function runReferenceIntake(
     `reference/screenshot.${extension}`
   );
 
+  // ── Deterministic screenshot evidence extraction (issue #41) ──────────────
+  // Pixels become measured facts BEFORE any AI interpretation. Runs on the
+  // canonical screenshot regardless of input mode: for SCREENSHOT_ONLY this
+  // is THE structure channel (bands become the evidence regions); for URL
+  // captures it is the independent second channel beside DOM measurements.
+  const extraction = await extractScreenshotEvidence(canonicalBytes, canonicalScreenshotR2Key);
+  const extractionBands = extraction.coverage.decoded ? extraction.bands : [];
+
+  // ── Normalized visual inputs (Reference Visual Package, issue #41) ───────
+  // Deterministic model-consumable representations of the canonical
+  // screenshot: one bounded-width full page plus ordered vertical slices for
+  // very tall pages. Composition is never rearranged — slicing preserves
+  // spatial order, hashes bind every artifact to the canonical source.
+  const visualWrites: Array<{ key: string; content: Uint8Array; mimeType: string }> = [];
+  const visualInputs: NonNullable<ReferenceEvidence["visualInputs"]> = [];
+  {
+    const decoded = await decodePng(canonicalBytes);
+    if (decoded.ok) {
+      const normalized = downscaleRgb(decoded.png, Math.min(decoded.png.width, NORMALIZED_VISUAL_WIDTH));
+      const pieces: Array<{ kind: "full-page" | "slice"; image: { width: number; height: number; rgb: Uint8Array }; sliceIndex?: number }> =
+        normalized.height <= MAX_NORMALIZED_SLICE_HEIGHT
+          ? [{ kind: "full-page", image: normalized }]
+          : Array.from({ length: Math.ceil(normalized.height / MAX_NORMALIZED_SLICE_HEIGHT) }, (_, index) => ({
+              kind: "slice" as const,
+              sliceIndex: index + 1,
+              image: sliceRgbRows(normalized, index * MAX_NORMALIZED_SLICE_HEIGHT, (index + 1) * MAX_NORMALIZED_SLICE_HEIGHT),
+            }));
+      let sliceIndex = 0;
+      for (const piece of pieces) {
+        sliceIndex += 1;
+        const png = await encodePng(piece.image);
+        const key = buildVersionEvidenceKey(
+          input.buildId,
+          input.buildVersionNumber,
+          piece.kind === "full-page" ? "reference/visual/full-page.png" : `reference/visual/slice-${sliceIndex}.png`
+        );
+        visualWrites.push({ key, content: png, mimeType: "image/png" });
+        visualInputs.push({
+          kind: piece.kind,
+          artifact: key,
+          sha256: await sha256HexBytes(png),
+          width: piece.image.width,
+          height: piece.image.height,
+        });
+      }
+    }
+  }
+
   // Live-vs-screenshot conflicts: the frozen screenshot wins; every recorded
   // discrepancy is annotated with that precedence.
   const discrepancies: unknown[] = (captureOutput?.discrepancies ?? []).map((entry) => ({
@@ -330,7 +393,16 @@ export async function runReferenceIntake(
     screenshotId: canonicalScreenshotR2Key,
     screenshotMetadata,
     captures: captureArtifacts,
-    regions: captureOutput?.regions ?? [],
+    // SCREENSHOT_ONLY: the extracted pixel bands ARE the measured region
+    // structure (issue #41). URL captures keep DOM-measured regions; the
+    // pixel channel rides the extraction field as the independent channel.
+    regions: captureOutput?.regions ?? extractionBands.map((band) => ({
+      id: band.id,
+      startY: band.startY,
+      endY: band.endY,
+      height: band.height,
+      viewportHeightRatio: band.viewportHeightRatio,
+    })),
     measuredElements: [
       ...(captureOutput?.measuredElements ?? []),
       // The canonical Reference Screenshot itself is a measured artifact
@@ -349,10 +421,55 @@ export async function runReferenceIntake(
         confidence: "HIGH",
         source: "SCREENSHOT",
       },
+      // Screenshot-only: extracted surface bands, image masses and colour
+      // roles are machine-measured facts (issue #41).
+      ...(captureOutput
+        ? []
+        : [
+            ...extractionBands.map((band) => ({
+              selectorHint: `#${band.id}`,
+              role: `surface-band:${band.bandClass}`,
+              boundingBox: {
+                x: 0,
+                y: band.startY,
+                width: screenshotMetadata.pixelWidth ?? 0,
+                height: band.height,
+              },
+              computed: {
+                dominantColour: band.dominantColour,
+                luminance: band.luminance,
+                inkDensity: band.inkDensity,
+              },
+              confidence: "HIGH" as const,
+              source: "SCREENSHOT" as const,
+            })),
+            ...extraction.imageMasses.map((mass, index) => ({
+              selectorHint: `#shot-image-mass-${index + 1}`,
+              role: "image-mass",
+              boundingBox: mass.boundingBox,
+              computed: { density: mass.density },
+              confidence: "HIGH" as const,
+              source: "SCREENSHOT" as const,
+            })),
+            ...(extraction.coverage.decoded
+              ? [{
+                  selectorHint: "screenshot",
+                  role: "colour-roles",
+                  computed: {
+                    background: extraction.colourRoles.background,
+                    accents: extraction.colourRoles.accents.join(" | "),
+                  },
+                  confidence: "HIGH" as const,
+                  source: "SCREENSHOT" as const,
+                }]
+              : []),
+          ]),
     ],
     responsiveObservations: captureOutput?.responsiveObservations ?? [],
     motionObservations: captureOutput?.motionObservations ?? [],
     discrepancies,
+    extraction,
+    ...(visualInputs.length > 0 ? { visualInputs } : {}),
   };
   if (!Value.Check(ReferenceEvidenceSchema, evidence)) {
     throw new ReferenceIntakeError("EVIDENCE_SCHEMA_INVALID", "Assembled Reference Evidence failed its versioned schema");
@@ -404,7 +521,7 @@ export async function runReferenceIntake(
   await putImmutableObjectTolerant(env, canonicalScreenshotR2Key, canonicalBytes, {
     httpMetadata: { contentType: canonicalMime },
   });
-  for (const write of captureWrites) {
+  for (const write of [...captureWrites, ...visualWrites]) {
     await putImmutableObjectTolerant(env, write.key, write.content, {
       httpMetadata: { contentType: write.mimeType },
     });

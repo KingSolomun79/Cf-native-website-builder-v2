@@ -523,3 +523,47 @@ and recorded; capture fan-out R2 cost retention-managed; real-Playwright
 staging verification deferred to the #46 production retest).
 
 **Commit:** 7c4483ec6584ffa8ddd7f8f871f2891de89f6f31
+
+## 2026-09-05 — #41 Reference Visual Package + deterministic evidence extraction (issue C)
+
+**Change:** the reference pixels can no longer disappear from the pipeline.
+New dependency-free PNG codec (`src/lib/png-codec.ts`, platform Compression
+Streams; bounded inflate + 40MP ceiling — decompression-bomb guard). New
+deterministic extraction (`visual-evidence-extraction.ts`): row-band
+segmentation of the canonical screenshot (two-sided window boundary
+detection), per-band dominant surface colour/luminance/PIXEL-level ink
+density (full-res stride sampling; block averages would smooth texture away),
+image-mass rectangles, surface sequence, colour roles, image-mass ratio —
+UNKNOWN (null) wherever pixels cannot support a value. Evidence schema v2
+(additive optional `extraction` + hash-bound `visualInputs`; v1 artifacts stay
+valid). Intake extracts for EVERY input mode: screenshot-only bands become
+the measured region structure (screenshot-only + extraction = valid per
+#39's mapping); URL captures keep DOM regions with the pixel channel beside
+them. Normalized model-consumable visual inputs (1024-wide full page, ordered
+vertical slices over 6000px) persisted to build-scoped R2 with SHA-256
+provenance — the Reference Visual Package.
+
+**Comparator truthfulness:** `geometryFromRegions` loses ALL fabricated
+defaults (0.9 / 0.83 / 0.22 / asymmetric / synthetic surface sequence);
+unmeasured metrics are null and are skipped pairwise; the reference image
+mass comes from the extraction channel — the self-compare seeding
+(candidate's own capture mass into the reference profile) is deleted; an
+empty reference profile yields status
+`INSUFFICIENT_REFERENCE_EVIDENCE` with `similarityScore: null` — the exact
+RankForge vacuous-75% path is inverted into a loud failure. QA-A evidence
+summary reports similarity only with measurement coverage.
+
+**Tests:** new `tests/v2-visual-evidence.test.ts` (9): codec round-trip,
+downscale, extraction determinism + band/image-mass/colour assertions,
+undecodable + too-small UNKNOWN semantics, comparator truthfulness (empty
+reference -> no similarity; pairwise measured-only metrics; UNKNOWN fields),
+intake integration (screenshot-only + decodable screenshot -> SUFFICIENT with
+extracted bands, package artifacts hash-verified in R2). Intake test suite
+bumped to evidence version "2".
+
+**Gates:** full suite 35 files / 259 tests passing; typecheck clean; wrangler
+dry-run pass; CSO:
+docs/security/2026-09-05-v2-issue41-visual-package-cso.md — SECURITY OK FOR
+CURRENT SCOPE (watch: coverage reported but not gating until #44).
+
+**Commit:** (sha recorded post-commit)
