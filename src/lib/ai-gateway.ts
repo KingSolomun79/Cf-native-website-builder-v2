@@ -484,8 +484,7 @@ async function persistVisionDiagnostics(
 
 export async function generateVisionWithGateway(
   env: Env,
-  imageBase64: string,
-  imageMimeType: string,
+  images: Array<{ base64: string; mimeType: string }>,
   analysisPrompt: string,
   meta: GatewayMeta,
   options?: { maxTokens?: number; jsonMode?: boolean; diagnosticR2Key?: string; stage?: string; visionInput?: VisionInputArtifact; requester?: VisionChatRequester }
@@ -511,8 +510,8 @@ export async function generateVisionWithGateway(
         messages: [{
           role: "user",
           content: [
-            { type: "image_url", image_url: { url: `data:${imageMimeType};base64,${imageBase64}` } },
-            { type: "text", text: analysisPrompt },
+            ...images.map((image) => ({ type: "image_url" as const, image_url: { url: `data:${image.mimeType};base64,${image.base64}` } })),
+            { type: "text" as const, text: analysisPrompt },
           ],
       }],
         max_tokens: options?.maxTokens ?? 4096,

@@ -34,7 +34,7 @@ import {
   type ImageGenerationProvider,
 } from "./image-pipeline";
 import { assembleBuildVersionCandidate, deployPreview, type PreviewDeployer } from "./assembly";
-import { buildStandardEvidenceBundle, compareGeometry, geometryFromRegions, type GeometryComparison, type QaCaptureFn } from "./qa-evidence";
+import { buildStandardEvidenceBundle, compareGeometry, geometryFromRegions, evaluateReferenceMacroFidelity, type GeometryComparison, type QaCaptureFn } from "./qa-evidence";
 import { createProductionQaCapture } from "./qa-capture";
 import { runQaAStage, runQaBStage, type QaAReport, type QaBReport, type QaFinding } from "./qa-stages";
 import { assignReleaseReady, ReleaseGateError } from "./release";
@@ -652,6 +652,11 @@ export async function runBuildPipeline(
             materialDeviations: [],
           };
 
+      // Multimodal QA-A (issue #44): reference visual package + candidate
+      // home capture attached through the vision seam when they exist.
+      const homeDesktopCapture = evidenceBundle.bundle.captures.find(
+        (capture) => capture.page === "home" && capture.viewportWidth === 1440
+      );
       const qaA = await runQaAStage(env, {
         buildId: ctx.buildId,
         siteGenerationId: ctx.siteGenerationId,
@@ -674,6 +679,9 @@ export async function runBuildPipeline(
           adaptationContractQaExceptions: frozen.adaptationContract?.qaExceptions ?? [],
         },
         evidenceR2Key: evidenceBundle.artifactR2Key,
+        referenceVisualInputs: frozen.evidence.visualInputs,
+        candidateHomeCaptureR2Key: homeDesktopCapture?.artifactR2Key,
+        visionGenerate: deps.visionGenerate,
         generate: deps.generate,
       });
       const qaB = await runQaBStage(env, {
@@ -691,13 +699,25 @@ export async function runBuildPipeline(
         generate: deps.generate,
       });
 
+      // Deterministic direct-fidelity gate (issue #44): non-averageable —
+      // appended to the QA-A hard gates so no aggregate score can compensate.
+      // An unmeasured reference FAILS closed.
+      const macroFidelity = evaluateReferenceMacroFidelity(geometryComparison);
+      const qaAForRelease = {
+        ...qaA.report,
+        hardGates: [
+          ...qaA.report.hardGates,
+          { id: macroFidelity.gateId, passed: macroFidelity.verdict === "PASS" },
+        ],
+      };
+
       let release: Awaited<ReturnType<typeof assignReleaseReady>>;
       try {
         release = await assignReleaseReady(env, {
           buildId: ctx.buildId,
           buildVersionId: ctx.buildVersionId,
           siteGenerationId: ctx.siteGenerationId,
-          qaA: qaA.report,
+          qaA: qaAForRelease,
           qaB: qaB.report,
           qaBuildVersionId: ctx.buildVersionId,
           geometryComparison,
@@ -714,7 +734,7 @@ export async function runBuildPipeline(
           throw error;
         }
       }
-      return { qaA: qaA.report, qaB: qaB.report, release };
+      return { qaA: qaAForRelease, qaB: qaB.report, release, macroFidelity };
       });
     };
 

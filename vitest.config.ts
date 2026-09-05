@@ -86,6 +86,7 @@ export default defineWorkersConfig({
       "tests/v2-visual-evidence.test.ts",
       "tests/v2-blueprint-coverage.test.ts",
       "tests/v2-generator-visual-context.test.ts",
+      "tests/v2-macro-fidelity.test.ts",
       "tests/v2-blueprint-stages.test.ts",
       "tests/v2-region-semantics.test.ts",
       "tests/v2-site-generator.test.ts",

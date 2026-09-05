@@ -198,8 +198,7 @@ export function createProductionVisionGenerate(
     const { generateVisionWithGateway } = await import("../lib/ai-gateway");
     const result = await (deps.gateway ?? generateVisionWithGateway)(
       env,
-      base64,
-      "image/png",
+      [{ base64, mimeType: "image/png" }],
       `${systemPrompt}\n\n${userPrompt}`,
       {
         job_id: `analysis-${primary.sha256.slice(0, 12)}`,

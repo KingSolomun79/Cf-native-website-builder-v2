@@ -175,7 +175,49 @@ export async function buildStandardEvidenceBundle(
   return { ...stored, bundle };
 }
 
-// ── Geometry comparator ─────────────────────────────────────────────────────
+// ── Direct reference fidelity gate (issue #44) ──────────────────────────────
+
+export interface ReferenceMacroFidelity {
+  gateId: "REFERENCE_MACRO_FIDELITY";
+  verdict: "PASS" | "FAIL";
+  /** Deterministic reason; FAIL is a non-averageable release blocker. */
+  reason: string;
+  materialDeviations: string[];
+}
+
+/**
+ * Hard, non-averageable gate comparing the actual Reference evidence DIRECTLY
+ * with the generated candidate (not Blueprint vs candidate). Built on the
+ * deterministic geometry comparator: an unmeasured reference fails closed
+ * (INSUFFICIENT_REFERENCE_EVIDENCE can never produce a pass), and any
+ * material deviation from the measured reference fails regardless of the
+ * QA-A aggregate score. Pixel identity is never required — content and
+ * imagery are intentionally replaced.
+ */
+export function evaluateReferenceMacroFidelity(comparison: GeometryComparison): ReferenceMacroFidelity {
+  if (comparison.status === "INSUFFICIENT_REFERENCE_EVIDENCE") {
+    return {
+      gateId: "REFERENCE_MACRO_FIDELITY",
+      verdict: "FAIL",
+      reason: "INSUFFICIENT_REFERENCE_EVIDENCE: the reference measurements behind this comparison do not exist, so direct fidelity cannot be demonstrated",
+      materialDeviations: [],
+    };
+  }
+  if (comparison.materialDeviations.length > 0) {
+    return {
+      gateId: "REFERENCE_MACRO_FIDELITY",
+      verdict: "FAIL",
+      reason: `candidate deviates materially from the measured Reference: ${comparison.materialDeviations.join("; ")}`,
+      materialDeviations: comparison.materialDeviations,
+    };
+  }
+  return {
+    gateId: "REFERENCE_MACRO_FIDELITY",
+    verdict: "PASS",
+    reason: `direct reference fidelity holds across all ${comparison.metrics.length} measured comparisons (coverage ${Math.round(comparison.measuredCoverage * 100)}%)`,
+    materialDeviations: [],
+  };
+}
 
 export interface GeometryComparisonMetric {
   id: string;

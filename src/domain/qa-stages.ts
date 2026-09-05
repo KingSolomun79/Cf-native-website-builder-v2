@@ -21,6 +21,7 @@
 import { Type, type Static } from "@sinclair/typebox";
 import type { Env } from "../env.d";
 import { runSchemaValidatedAiStage, type RawAiGenerate } from "./ai-boundary";
+import { getObject } from "../lib/assets";
 import type { GeometryComparison } from "./qa-evidence";
 
 export const QA_A_SCHEMA_VERSION = "qa-a/1";
@@ -233,6 +234,51 @@ EVIDENCE SUMMARY: ${input.evidenceSummary}
 ADAPTATION CONTRACT QA EXCEPTIONS: ${JSON.stringify(input.adaptationContractQaExceptions)}`;
 }
 
+// Production multimodal QA-A call: attaches the reference visual package
+// AND the candidate's home-desktop capture to one comparative vision call
+// (issue #44 — restores the retained prompt's squint-test behavior).
+export function createProductionQaVisionGenerate(
+  env: Env,
+  referenceVisualInputs: NonNullable<import("./reference-evidence-schema").ReferenceEvidence["visualInputs"]>,
+  candidateHomeCaptureR2Key?: string
+): RawAiGenerate {
+  return async (systemPrompt, userPrompt) => {
+    const primary =
+      referenceVisualInputs.find((input) => input.kind === "full-page") ?? referenceVisualInputs[0];
+    const images: Array<{ base64: string; mimeType: string }> = [];
+    const load = async (key: string): Promise<Uint8Array> => {
+      const body = await getObject(env, key);
+      if (!body) throw new Error(`QA-A visual input ${key} is missing from storage`);
+      return new Uint8Array(await new Response(body).arrayBuffer());
+    };
+    const toBase64 = (bytes: Uint8Array): string => {
+      let binary = "";
+      const CHUNK = 0x8000;
+      for (let i = 0; i < bytes.length; i += CHUNK) {
+        binary += String.fromCharCode(...bytes.subarray(i, i + CHUNK));
+      }
+      return btoa(binary);
+    };
+    images.push({ base64: toBase64(await load(primary.artifact)), mimeType: "image/png" });
+    if (candidateHomeCaptureR2Key) {
+      images.push({ base64: toBase64(await load(candidateHomeCaptureR2Key)), mimeType: "image/png" });
+    }
+    const { generateVisionWithGateway } = await import("../lib/ai-gateway");
+    const result = await generateVisionWithGateway(
+      env,
+      images,
+      `${systemPrompt}\n\n${userPrompt}`,
+      {
+        job_id: `qa-a-${primary.sha256.slice(0, 12)}`,
+        site_id: "qa-a-visual-content",
+        stage: "qa-a-visual-content",
+      },
+      { stage: "qa-a-visual-content", maxTokens: 4096 }
+    );
+    return { content: result.content, provider: result.provider, model: result.model };
+  };
+}
+
 export async function runQaAStage(
   env: Env,
   input: {
@@ -243,8 +289,19 @@ export async function runQaAStage(
     context: Parameters<typeof buildQaAUserPrompt>[0];
     evidenceR2Key: string;
     generate?: RawAiGenerate;
+    /** Multimodal QA-A (issue #44): reference visual inputs + the candidate's
+     *  home-desktop capture artifact key, attached through the vision path. */
+    referenceVisualInputs?: NonNullable<import("./reference-evidence-schema").ReferenceEvidence["visualInputs"]>;
+    candidateHomeCaptureR2Key?: string;
+    visionGenerate?: RawAiGenerate;
   }
 ): Promise<{ report: QaAReport; provenance: import("./ai-boundary").AiProvenance }> {
+  const visualInputs = input.referenceVisualInputs ?? [];
+  const generate =
+    input.visionGenerate ??
+    (visualInputs.length > 0
+      ? createProductionQaVisionGenerate(env, visualInputs, input.candidateHomeCaptureR2Key)
+      : input.generate);
   const run = await runSchemaValidatedAiStage<QaAReport>(env, {
     stage: "qa-a-visual-content",
     schema: QaAReportSchema,
@@ -254,10 +311,24 @@ export async function runQaAStage(
     siteGenerationId: input.siteGenerationId,
     buildVersionId: input.buildVersionId,
     buildVersionNumber: input.buildVersionNumber,
-    inputArtifactIds: [input.evidenceR2Key],
+    inputArtifactIds: [
+      input.evidenceR2Key,
+      ...visualInputs.map((input) => input.artifact),
+      ...(input.candidateHomeCaptureR2Key ? [input.candidateHomeCaptureR2Key] : []),
+    ],
     temperature: 0.2,
-    generate: input.generate,
+    generate,
   });
+  // Hard-gate enumeration integrity (issue #44): the model may not invent,
+  // omit or duplicate hard gates. Anything but the canonical set, exactly
+  // once, is a QA stage failure — never silent acceptance.
+  const reported = run.value.hardGates.map((gate) => gate.id).sort();
+  const canonical = [...QA_A_HARD_GATE_IDS].sort();
+  if (reported.length !== canonical.length || reported.some((id, index) => id !== canonical[index])) {
+    throw new Error(
+      `QA-A hard-gate enumeration invalid: reported [${reported.join(", ")}] but the canonical set is [${canonical.join(", ")}]`
+    );
+  }
   return { report: run.value, provenance: run.provenance };
 }
 

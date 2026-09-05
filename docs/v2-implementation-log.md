@@ -639,3 +639,26 @@ docs/security/2026-09-05-v2-issue43-generator-context-cso.md — SECURITY OK
 FOR CURRENT SCOPE.
 
 **Commit:** a116f48582d7c0ea62c9e8dfcc7358e136cddb9d
+
+## 2026-09-05 — #44 direct reference fidelity gate + multimodal QA-A + gate integrity (issue F)
+
+**Change:** (a) evaluateReferenceMacroFidelity — deterministic, non-averageable
+REFERENCE_MACRO_FIDELITY hard gate comparing reference evidence DIRECTLY with
+the candidate (via the truthful comparator): INSUFFICIENT_REFERENCE_EVIDENCE
+fails closed; any material measured deviation fails regardless of the QA-A
+score. Injected into the release evaluation as an extra hard-gate conjunct;
+the stored/reported QA-A carries it. (b) Multimodal QA-A: reference visual
+package + candidate home-desktop capture attached via the vision seam
+(generateVisionWithGateway now carries multiple images; production adapter
+createProductionQaVisionGenerate; pipeline threads deps.visionGenerate;
+provenance records both artifacts). (c) Hard-gate enumeration integrity:
+reported hardGates must equal QA_A_HARD_GATE_IDS exactly — invented/omitted/
+duplicated ids fail the QA stage (the RankForge invented-gates path).
+
+**Gates:** full suite 38 files / 277 tests passing (new
+tests/v2-macro-fidelity.test.ts: PASS/FAIL/fail-closed/non-averageable/gate
+integrity). Typecheck clean; wrangler dry-run pass; CSO:
+docs/security/2026-09-05-v2-issue44-macro-fidelity-cso.md — SECURITY OK FOR
+CURRENT SCOPE.
+
+**Commit:** (sha recorded post-commit)
