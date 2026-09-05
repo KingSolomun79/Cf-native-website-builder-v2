@@ -286,6 +286,41 @@ describe("Visual Blueprint stage", () => {
     ).rejects.toMatchObject({ code: "IDENTITY_ERASURE" });
   });
 
+  it("repairs an identity-erasing blueprint with ONE informed regeneration carrying the rejection (production retest 2026-09-05)", async () => {
+    const pipeline = await newPipeline();
+    const { analysis, r2Key } = await runAnalysis(pipeline);
+
+    const erasing = JSON.parse(JSON.stringify(BLUEPRINT_JSON)) as VisualBlueprint;
+    erasing.signatureTraits = [
+      erasing.signatureTraits[0],
+      erasing.signatureTraits[2],
+      { id: "bp-secondary", description: "Secondary supporting rhythm", sourceTraitId: "trait-alternating-surfaces" },
+    ];
+    let repairCalls = 0;
+    const produced = await runVisualBlueprintStage(env, {
+      ...contextOf(pipeline),
+      analysis,
+      analysisR2Key: r2Key,
+      facts: FACTS,
+      adaptationContract: null,
+      evidenceRegions: await evidenceRegionsOf(pipeline),
+      generate: async (_system, user) => {
+        if (user.includes("Blueprint repair directives")) {
+          repairCalls += 1;
+          expect(user).toContain("IDENTITY_ERASURE");
+          expect(user).toContain("trait-asymmetric-grid");
+          return { content: JSON.stringify(BLUEPRINT_JSON), provider: "test", model: "test-model-b" };
+        }
+        return { content: JSON.stringify(erasing), provider: "test", model: "test-model-b" };
+      },
+    });
+
+    expect(repairCalls).toBe(1);
+    expect(produced.blueprint.signatureTraits.map((trait) => trait.sourceTraitId)).toContain("trait-asymmetric-grid");
+    const stored = await getBuildStageArtifact<VisualBlueprint>(env, pipeline.buildVersionId, "visual_blueprint");
+    expect(stored!.value.signatureTraits.map((trait) => trait.sourceTraitId)).toContain("trait-asymmetric-grid");
+  });
+
   it("rejects Reference content copied into the Blueprint as Business content", async () => {
     const pipeline = await newPipeline({ referenceUrl: "https://editorialhouse.example.com/" });
     const { analysis, r2Key } = await runAnalysis(pipeline);

@@ -13,7 +13,7 @@
 import { Type, type Static } from "@sinclair/typebox";
 import { Value } from "@sinclair/typebox/value";
 import type { Env } from "../env.d";
-import { runSchemaValidatedAiStage, type RawAiGenerate } from "./ai-boundary";
+import { runSchemaValidatedAiStage, type RawAiGenerate, type RunSchemaValidatedAiStageOptions } from "./ai-boundary";
 import { appendBuildWorkflowEvent } from "./lifecycle";
 import { getBuildStageArtifact, storeBuildStageArtifact, type StoredStageArtifact } from "./stage-artifacts";
 import type { ReferenceAnalysis } from "./reference-analysis";
@@ -443,16 +443,16 @@ export async function runVisualBlueprintStage(
   env: Env,
   input: RunVisualBlueprintInput
 ): Promise<VisualBlueprintProduced> {
-  const run = await runSchemaValidatedAiStage<VisualBlueprint>(env, {
+  const userPrompt = buildBlueprintUserPrompt({
+    analysis: input.analysis,
+    facts: input.facts,
+    adaptationContract: input.adaptationContract,
+    evidenceRegions: input.evidenceRegions,
+  });
+  const stageOptions: Omit<RunSchemaValidatedAiStageOptions, "userPrompt"> = {
     stage: "visual-blueprint-generator",
     schema: VisualBlueprintSchema,
     schemaVersion: VISUAL_BLUEPRINT_SCHEMA_VERSION,
-    userPrompt: buildBlueprintUserPrompt({
-      analysis: input.analysis,
-      facts: input.facts,
-      adaptationContract: input.adaptationContract,
-      evidenceRegions: input.evidenceRegions,
-    }),
     buildId: input.buildId,
     siteGenerationId: input.siteGenerationId,
     buildVersionId: input.buildVersionId,
@@ -460,25 +460,64 @@ export async function runVisualBlueprintStage(
     inputArtifactIds: [input.analysisR2Key],
     temperature: 0.4,
     generate: input.generate,
-  });
+  };
 
-  const identity = validateBlueprintIdentityPreservation(run.value, input.analysis);
+  // Bounded informed blueprint repair (production retest 2026-09-05): the
+  // cross-validations below are deterministic and their findings are
+  // actionable, but the engine's blind retries re-prompt identically and the
+  // model keeps dropping a DIFFERENT trait each attempt. One targeted
+  // regeneration carrying the exact rejection reasons closes that loop;
+  // a second failure stays terminal.
+  const firstRun = await runSchemaValidatedAiStage<VisualBlueprint>(env, { ...stageOptions, userPrompt });
+  const firstRejection = validateProducedBlueprint(firstRun.value, input);
+  if (!firstRejection) {
+    return persistBlueprint(env, input, firstRun);
+  }
+
+  const repairPrompt = `${userPrompt}
+
+## Blueprint repair directives
+Your previously produced Blueprint was REJECTED by deterministic validation:
+- ${firstRejection.code}: ${firstRejection.message}
+
+Regenerate the COMPLETE blueprint fixing exactly these problems. Every identity-defining analysis trait must be carried into signatureTraits via its exact sourceTraitId and realized in the region topology (business-content substitution belongs inside the region/adaptation text — it must not remove or erase the trait's visual role). Do not drop or rename any required id.`;
+  const repairRun = await runSchemaValidatedAiStage<VisualBlueprint>(env, { ...stageOptions, userPrompt: repairPrompt });
+  const repairRejection = validateProducedBlueprint(repairRun.value, input);
+  if (repairRejection) {
+    throw new VisualBlueprintError(repairRejection.code, repairRejection.message);
+  }
+  return persistBlueprint(env, input, repairRun);
+}
+
+// Runs the deterministic blueprint gates; null means the blueprint is accepted.
+function validateProducedBlueprint(
+  blueprint: VisualBlueprint,
+  input: RunVisualBlueprintInput
+): { code: "IDENTITY_ERASURE" | "REFERENCE_CONTENT_DETECTED" | "BLUEPRINT_INCONSISTENT"; message: string } | null {
+  const identity = validateBlueprintIdentityPreservation(blueprint, input.analysis);
   if (!identity.valid) {
-    throw new VisualBlueprintError("IDENTITY_ERASURE", identity.problems.join("; "));
+    return { code: "IDENTITY_ERASURE", message: identity.problems.join("; ") };
   }
-  const lint = lintBlueprintForReferenceContent(run.value, { referenceUrl: input.referenceUrl });
+  const lint = lintBlueprintForReferenceContent(blueprint, { referenceUrl: input.referenceUrl });
   if (!lint.clean) {
-    throw new VisualBlueprintError("REFERENCE_CONTENT_DETECTED", lint.findings.join("; "));
+    return { code: "REFERENCE_CONTENT_DETECTED", message: lint.findings.join("; ") };
   }
-  const consistency = validateBlueprintConsistency(run.value);
+  const consistency = validateBlueprintConsistency(blueprint);
   if (!consistency.valid) {
-    throw new VisualBlueprintError("BLUEPRINT_INCONSISTENT", consistency.problems.join("; "));
+    return { code: "BLUEPRINT_INCONSISTENT", message: consistency.problems.join("; ") };
   }
-  const provenance = validateBlueprintRegionProvenance(run.value, input.evidenceRegions);
+  const provenance = validateBlueprintRegionProvenance(blueprint, input.evidenceRegions);
   if (!provenance.valid) {
-    throw new VisualBlueprintError("BLUEPRINT_INCONSISTENT", provenance.problems.join("; "));
+    return { code: "BLUEPRINT_INCONSISTENT", message: provenance.problems.join("; ") };
   }
+  return null;
+}
 
+async function persistBlueprint(
+  env: Env,
+  input: RunVisualBlueprintInput,
+  run: Awaited<ReturnType<typeof runSchemaValidatedAiStage<VisualBlueprint>>>
+): Promise<VisualBlueprintProduced> {
   const stored = await storeBuildStageArtifact(env, {
     buildId: input.buildId,
     buildVersionId: input.buildVersionId,
