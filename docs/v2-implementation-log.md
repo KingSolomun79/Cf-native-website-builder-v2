@@ -661,4 +661,4 @@ integrity). Typecheck clean; wrangler dry-run pass; CSO:
 docs/security/2026-09-05-v2-issue44-macro-fidelity-cso.md — SECURITY OK FOR
 CURRENT SCOPE.
 
-**Commit:** (sha recorded post-commit)
+**Commit:** c2479bb1a515b500ddefd882fe6e1131a869b7c2
