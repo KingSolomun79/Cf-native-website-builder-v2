@@ -10,6 +10,7 @@ import type { BuildPipelineDeps } from "../../src/domain/build-pipeline";
 import type { RawAiGenerate } from "../../src/domain/ai-boundary";
 import type { ImageGenerationProvider } from "../../src/domain/image-pipeline";
 import type { PreviewDeployer } from "../../src/domain/assembly";
+import type { ReferenceCaptureFn } from "../../src/domain/reference-intake";
 import { putObject } from "../../src/lib/assets";
 import { QA_A_HARD_GATE_IDS, QA_B_MANDATORY_GATE_IDS, type QaAReport, type QaBReport } from "../../src/domain/qa-stages";
 import { buildPng } from "./png";
@@ -294,10 +295,53 @@ export function createPipelineScripts(
     previewUrl: `https://${workerName}.wazibizwebsites.workers.dev/`,
   });
 
+  // Reference URL capture with measured design-structure evidence (issue #39):
+  // dimensions-only evidence is INSUFFICIENT by design, so pipeline fixtures
+  // model the valid screenshot+URL mode with a real measured capture.
+  const capture: ReferenceCaptureFn = async () => ({
+    canonicalScreenshot: {
+      content: buildPng({ width: 1440, height: 3200 }),
+      mimeType: "image/png",
+      pixelWidth: 1440,
+      pixelHeight: 3200,
+      likelyCssViewportWidth: 1440,
+    },
+    captures: [
+      { viewportWidth: 1440, viewportHeight: 900, content: buildPng({ width: 1440, height: 900 }), mimeType: "image/png" },
+    ],
+    regions: REGIONS.map((region, index) => ({
+      id: region.id,
+      startY: index * 800,
+      endY: index * 800 + region.height,
+      height: region.height,
+      viewportHeightRatio: region.viewportHeightRatio,
+    })),
+    measuredElements: [
+      {
+        selectorHint: "header nav",
+        role: "navigation",
+        boundingBox: { x: 0, y: 0, width: 1440, height: 88 },
+        confidence: "HIGH" as const,
+        source: "DOM" as const,
+      },
+      {
+        selectorHint: "h1",
+        role: "typography",
+        computed: { fontFamily: "'Editorial Serif'", fontSize: "72px", fontWeight: "700" },
+        confidence: "MEDIUM" as const,
+        source: "COMPUTED_STYLE" as const,
+      },
+    ],
+    responsiveObservations: [{ kind: "viewport_matrix", viewports: ["desktop", "mobile"] }],
+    motionObservations: [],
+    discrepancies: [],
+  });
+
   return {
     generate,
     imageProvider,
     previewDeployer,
+    capture,
     qaCapture: () => async (spec) =>
       spec.map((entry) => ({
         page: entry.page,

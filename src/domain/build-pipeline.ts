@@ -22,7 +22,7 @@
 import { nowIso } from "../lib/crypto";
 import type { Env } from "../env.d";
 import { appendBuildWorkflowEvent, createInitialBuild } from "./lifecycle";
-import { runReferenceIntake, getFrozenReferenceEvidence } from "./reference-intake";
+import { runReferenceIntake, getFrozenReferenceEvidence, type ReferenceCaptureFn } from "./reference-intake";
 import { runReferenceAnalysisStage } from "./reference-analysis";
 import { runVisualBlueprintStage, canonicalRegionComposition } from "./visual-blueprint";
 import { produceImplementationContract } from "./implementation-planner";
@@ -64,6 +64,9 @@ export interface BuildPipelineDeps {
   previewDeployer?: PreviewDeployer;
   /** Built per Preview deployment; defaults to the browser-backed capture. */
   qaCapture?: (previewUrl: string) => QaCaptureFn;
+  /** Reference URL capture; defaults to the production browser capture.
+   *  Only invoked when the Site Generation carries a Reference URL. */
+  capture?: ReferenceCaptureFn;
   /** Durable step executor (the workflow's WorkflowStep). Each stage runs as
    *  its own step so a mid-flight isolate eviction retries only that stage;
    *  every stage is idempotent (artifact reuse / spend-resume) by design.
@@ -294,6 +297,7 @@ export async function runBuildPipeline(
       buildId,
       buildVersionId: version.buildVersionId,
       buildVersionNumber: version.buildVersionNumber,
+      capture: deps.capture,
     });
     const frozen = await getFrozenReferenceEvidence(env, input.siteGenerationId);
     if (!frozen) throw new Error("frozen evidence package missing after intake");
@@ -310,6 +314,30 @@ export async function runBuildPipeline(
       return {
         terminal: "HUMAN_REVIEW_REQUIRED",
         reasons: [`UNSUPPORTED Reference: ${frozenPackage.suitabilityReasons.join("; ")}`],
+        siteGenerationId: input.siteGenerationId, siteId, buildId,
+        releaseReadyBuildVersionId: null, artifactManifestHash: null, previewUrl: null,
+        qaA: null, qaB: null, repairApplied: false,
+      };
+    }
+
+    // Evidence-sufficiency guard (issue #39): dimensions-only evidence cannot
+    // describe the Reference's design identity, so the build fails closed
+    // instead of generating a Blueprint from defaults. Fixing the inputs means
+    // a NEW Site Generation with a usable screenshot/capture — never a silent
+    // mode switch. Root cause per the PRD §45 taxonomy: EVIDENCE_EXTRACTION.
+    if (frozen.evidenceSufficiency.sufficiency === "INSUFFICIENT") {
+      const reason = `INSUFFICIENT_REFERENCE_EVIDENCE (root cause: EVIDENCE_EXTRACTION): ${frozen.evidenceSufficiency.reasons.join("; ")}`;
+      await appendBuildWorkflowEvent(env, {
+        buildId,
+        buildVersionId: version.buildVersionId,
+        fromState: "REFERENCE_EVIDENCE",
+        toState: "HUMAN_REVIEW_REQUIRED",
+        stage: "reference_evidence_sufficiency",
+        detail: reason.slice(0, 400),
+      });
+      return {
+        terminal: "HUMAN_REVIEW_REQUIRED",
+        reasons: [reason],
         siteGenerationId: input.siteGenerationId, siteId, buildId,
         releaseReadyBuildVersionId: null, artifactManifestHash: null, previewUrl: null,
         qaA: null, qaB: null, repairApplied: false,

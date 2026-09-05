@@ -34,6 +34,7 @@ import {
   type ReferenceSuitability,
   type StructuredObservation,
 } from "./reference-evidence-schema";
+import { evaluateReferenceEvidenceSufficiency, type EvidenceSufficiencyVerdict } from "./reference-sufficiency";
 
 export type ReferenceIntakeErrorCode =
   | "GENERATION_NOT_FOUND"
@@ -105,6 +106,11 @@ export interface FrozenReferencePackage {
   inputMode: "SCREENSHOT_ONLY" | "URL_ONLY" | "SCREENSHOT_AND_URL";
   evidenceR2Key: string;
   canonicalScreenshotR2Key: string;
+  /** Deterministic verdict frozen with the package (issue #39). Null only for
+   *  packages frozen before the sufficiency guard existed; those are
+   *  evaluated lazily by getFrozenReferenceEvidence without rewriting frozen
+   *  evidence. */
+  evidenceSufficiency: EvidenceSufficiencyVerdict | null;
   alreadyFrozen: boolean;
 }
 
@@ -119,7 +125,14 @@ interface ReferencePackageRow {
   input_mode: FrozenReferencePackage["inputMode"];
   evidence_r2_key: string;
   canonical_screenshot_r2_key: string;
+  evidence_sufficiency: string | null;
+  evidence_sufficiency_verdict_json: string | null;
   frozen_at: string;
+}
+
+function sufficiencyVerdictFromRow(row: ReferencePackageRow): EvidenceSufficiencyVerdict | null {
+  if (!row.evidence_sufficiency_verdict_json) return null;
+  return JSON.parse(row.evidence_sufficiency_verdict_json) as EvidenceSufficiencyVerdict;
 }
 
 function packageFromRow(row: ReferencePackageRow, alreadyFrozen: boolean): FrozenReferencePackage {
@@ -133,6 +146,7 @@ function packageFromRow(row: ReferencePackageRow, alreadyFrozen: boolean): Froze
     inputMode: row.input_mode,
     evidenceR2Key: row.evidence_r2_key,
     canonicalScreenshotR2Key: row.canonical_screenshot_r2_key,
+    evidenceSufficiency: sufficiencyVerdictFromRow(row),
     alreadyFrozen,
   };
 }
@@ -366,6 +380,19 @@ export async function runReferenceIntake(
     adaptationContract = contract;
   }
 
+  // Deterministic evidence-sufficiency verdict (issue #39): information-free
+  // evidence must fail closed instead of reaching blueprint generation. The
+  // verdict is evaluated BEFORE freeze and frozen with the package; a missing
+  // blocking dimension stays INSUFFICIENT unless the Adaptation Contract
+  // explicitly declares it (evidence_missing:<dimension>), which yields
+  // PARTIAL for the downstream coverage contract to treat as uncovered.
+  // Evidence-missing declarations may also arrive on a contract supplied for
+  // an otherwise SUPPORTED reference (the SWL branch above leaves
+  // `adaptationContract` null there), so consult the submitted contract too.
+  const evidenceSufficiency = evaluateReferenceEvidenceSufficiency(evidence, {
+    adaptationContract: adaptationContract ?? input.adaptationContract ?? null,
+  });
+
   const evidenceJson = JSON.stringify(evidence);
   const evidenceR2Key = buildVersionEvidenceKey(input.buildId, input.buildVersionNumber, "reference/evidence.json");
   const checksum = await sha256Hex(evidenceJson);
@@ -387,8 +414,9 @@ export async function runReferenceIntake(
   await env.DB.prepare(
     `INSERT INTO reference_evidence_packages (
        id, site_generation_id, build_id, build_version_id, suitability, suitability_reasons_json,
-       adaptation_contract_json, input_mode, evidence_r2_key, canonical_screenshot_r2_key, checksum, frozen_at
-     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+       adaptation_contract_json, input_mode, evidence_r2_key, canonical_screenshot_r2_key, checksum, frozen_at,
+       evidence_sufficiency, evidence_sufficiency_verdict_json
+     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   )
     .bind(
       packageId,
@@ -402,7 +430,9 @@ export async function runReferenceIntake(
       evidenceR2Key,
       canonicalScreenshotR2Key,
       checksum,
-      frozenAt
+      frozenAt,
+      evidenceSufficiency.sufficiency,
+      JSON.stringify(evidenceSufficiency)
     )
     .run();
 
@@ -420,7 +450,7 @@ export async function runReferenceIntake(
     fromState: "REFERENCE_CHECK",
     toState: "REFERENCE_EVIDENCE",
     stage: "reference_evidence",
-    detail: `Reference Evidence frozen (suitability ${decision.suitability}${adaptationContract ? `, Adaptation Contract ${adaptationContract.version}` : ""})`,
+    detail: `Reference Evidence frozen (suitability ${decision.suitability}, evidence sufficiency ${evidenceSufficiency.sufficiency}${adaptationContract ? `, Adaptation Contract ${adaptationContract.version}` : ""})`,
   });
 
   return {
@@ -431,6 +461,7 @@ export async function runReferenceIntake(
     inputMode,
     evidenceR2Key,
     canonicalScreenshotR2Key,
+    evidenceSufficiency,
     alreadyFrozen: false,
   };
 }
@@ -443,6 +474,10 @@ export interface FrozenReferenceEvidence {
   suitabilityReasons: string[];
   adaptationContract: AdaptationContract | null;
   evidence: ReferenceEvidence;
+  /** Verdict frozen with the package, or — for packages frozen before the
+   *  sufficiency guard existed — the same versioned evaluation computed on
+   *  read (frozen evidence itself is never rewritten). */
+  evidenceSufficiency: EvidenceSufficiencyVerdict;
   evidenceR2Key: string;
   canonicalScreenshotR2Key: string;
   frozenAt: string;
@@ -462,14 +497,17 @@ export async function getFrozenReferenceEvidence(
   if (!evidenceBody) return null;
   const evidence = adaptIfValid(JSON.parse(await new Response(evidenceBody).text()));
   if (!evidence) return null;
+  const adaptationContract = row.adaptation_contract_json
+    ? (JSON.parse(row.adaptation_contract_json) as AdaptationContract)
+    : null;
   return {
     packageId: row.id,
     suitability: row.suitability,
     suitabilityReasons: JSON.parse(row.suitability_reasons_json) as string[],
-    adaptationContract: row.adaptation_contract_json
-      ? (JSON.parse(row.adaptation_contract_json) as AdaptationContract)
-      : null,
+    adaptationContract,
     evidence,
+    evidenceSufficiency:
+      sufficiencyVerdictFromRow(row) ?? evaluateReferenceEvidenceSufficiency(evidence, { adaptationContract }),
     evidenceR2Key: row.evidence_r2_key,
     canonicalScreenshotR2Key: row.canonical_screenshot_r2_key,
     frozenAt: row.frozen_at,

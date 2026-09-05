@@ -449,3 +449,40 @@ website-factory-assets present and untouched. V2 has no V1 fallback path.
 wrangler dry-run pass. CSO final verdict (with production addendum):
 docs/security/2026-09-04-v2-issue38-confirmation-resolution-cso.md — SECURITY
 OK FOR CURRENT SCOPE.
+
+## 2026-09-05 — #39 evidence-sufficiency guard (REFERENCE_BOUND fidelity remediation, issue A)
+
+Forensic diagnosis accepted (RankForge/Morabeza: a dimensions-only evidence
+package reached Release Ready at 92 while consuming no reference pixels).
+Implementation order: scoped issues #39-#46; #39 lands first.
+
+**Change:** deterministic, versioned evidence-sufficiency evaluation
+(`reference-sufficiency.ts`, `REFERENCE_SUFFICIENCY_VERSION=1`). Blocking
+dimensions `region_structure` + `measured_elements` (the synthetic
+canonical-screenshot anchor never satisfies them). Undeclared missing blocking
+dimension -> INSUFFICIENT -> build-pipeline terminal HUMAN_REVIEW_REQUIRED with
+root cause EVIDENCE_EXTRACTION; Adaptation Contract declarations
+(`evidence_missing:<dimension>`) -> PARTIAL (proceeds; downstream #42 coverage
+must treat them as uncovered). Verdict computed pre-freeze, persisted on the
+immutable package (migration 0031: nullable `evidence_sufficiency` enum mirror
++ `evidence_sufficiency_verdict_json`), legacy pre-#39 rows evaluated lazily on
+read without rewriting frozen evidence. Screenshot-only + dimensions-only is
+now insufficient by design; screenshot-only + extracted evidence (#41) will be
+valid. ORIGINAL_DESIGN untouched.
+
+**Fleet migration:** pipeline fixtures moved from dimensions-only
+SCREENSHOT_ONLY to SCREENSHOT_AND_URL with a measured reference-capture
+fixture (`createPipelineScripts().capture` seam added to `BuildPipelineDeps`,
+production default unchanged). Fixture reference host changed to
+`meridian-atelier.example.com` (the blueprint reference-content lint would
+otherwise trip on the host token `reference` appearing in blueprint prose).
+
+**Gates:** full suite 33 files / 243 tests passing (new suite
+`tests/v2-reference-sufficiency.test.ts` pins the frozen RankForge evidence
+shape as INSUFFICIENT and proves no AI stage runs on it). Typecheck clean.
+Wrangler dry-run pass. CSO:
+docs/security/2026-09-05-v2-issue39-evidence-sufficiency-cso.md — SECURITY OK
+FOR CURRENT SCOPE (watch item: #42 must treat declared-missing dimensions as
+uncovered).
+
+**Commit:** (sha recorded post-commit)

@@ -23,7 +23,10 @@ async function startGeneration(screenshotKey: string): Promise<string> {
     payload: {
       buildMode: "REFERENCE_BOUND",
       facts: { businessName: PIPELINE_SCRIPTS_BUSINESS, contactEmail: "ops@wazibizwebsites.example" },
-      reference: { screenshotR2Key: screenshotKey },
+      // Screenshot+URL: issue #39 makes dimensions-only evidence INSUFFICIENT,
+      // so pipeline fixtures carry a measured reference capture (see
+      // createPipelineScripts' capture seam).
+      reference: { screenshotR2Key: screenshotKey, url: "https://meridian-atelier.example.com/" },
     },
   });
   return started.siteGenerationId;

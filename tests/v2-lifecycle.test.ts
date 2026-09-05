@@ -49,7 +49,7 @@ function submissionPayload(overrides: Record<string, unknown> = {}): Record<stri
       country: "Kenya",
     },
     reference: {
-      url: "https://reference.example.com/",
+      url: "https://meridian-atelier.example.com/",
       screenshotR2Key: "references/uploads/abc123.png",
     },
     ...overrides,
@@ -83,12 +83,15 @@ async function postSubmission(
   });
 }
 
-// Screenshot-only submission with a persisted Reference PNG so the workflow's
+// Screenshot+URL submission with a persisted Reference PNG so the workflow's
 // full pipeline (issue #30 wiring) runs without live browser/provider calls.
-async function postScreenshotOnlySubmission(app: Hono<{ Bindings: Env }>, env: Env): Promise<string> {
+// The URL supplies measured capture evidence (issue #39: dimensions-only
+// evidence is INSUFFICIENT by design); the capture itself comes from the
+// scripted deps.
+async function postScreenshotSubmission(app: Hono<{ Bindings: Env }>, env: Env): Promise<string> {
   const key = `references/lifecycle/${generateId()}.png`;
   await persistPipelineScreenshot(env, key);
-  const response = await postSubmission(app, env, { reference: { screenshotR2Key: key } });
+  const response = await postSubmission(app, env, { reference: { screenshotR2Key: key, url: "https://meridian-atelier.example.com/" } });
   const body = (await response.json()) as { siteGenerationId: string };
   return body.siteGenerationId;
 }
@@ -143,7 +146,7 @@ describe("V2 domain lifecycle backbone", () => {
     expect(view!.siteGeneration.onboardingSubmissionId).toBe(body.onboardingSubmissionId);
     expect(view!.submission.buildMode).toBe("REFERENCE_BOUND");
     expect(view!.submission.facts.businessName).toBe("Rift Valley Roasters");
-    expect(view!.submission.reference?.url).toBe("https://reference.example.com/");
+    expect(view!.submission.reference?.url).toBe("https://meridian-atelier.example.com/");
     expect(view!.submission.checksum).toMatch(/^[0-9a-f]{64}$/);
     expect(view!.builds).toEqual([]);
   });
@@ -165,7 +168,7 @@ describe("V2 domain lifecycle backbone", () => {
   });
 
   it("creates the first Build and initial immutable Build Version through the primary workflow boundary", async () => {
-    const siteGenerationId = await postScreenshotOnlySubmission(app, env);
+    const siteGenerationId = await postScreenshotSubmission(app, env);
 
     const start = await postJson(app, env, `/api/v2/site-generations/${siteGenerationId}/builds`, {});
     expect(start.status).toBe(202);
@@ -205,7 +208,7 @@ describe("V2 domain lifecycle backbone", () => {
   });
 
   it("rejects a second initial Build for the same Site Generation and reports 409 from the route", async () => {
-    const siteGenerationId = await postScreenshotOnlySubmission(app, env);
+    const siteGenerationId = await postScreenshotSubmission(app, env);
     await runWebsiteBuildWorkflow(env, siteGenerationId);
 
     await expect(createInitialBuild(env, { siteGenerationId })).rejects.toMatchObject({
@@ -233,7 +236,7 @@ describe("V2 domain lifecycle backbone", () => {
   });
 
   it("enforces Build Version immutability at the storage boundary", async () => {
-    const siteGenerationId = await postScreenshotOnlySubmission(app, env);
+    const siteGenerationId = await postScreenshotSubmission(app, env);
     const result = await runWebsiteBuildWorkflow(env, siteGenerationId);
 
     await expect(
@@ -262,8 +265,8 @@ describe("V2 domain lifecycle backbone", () => {
     });
 
     // A Build Version from one Build cannot be attached to another Build's events.
-    const first = await runWebsiteBuildWorkflow(env, await postScreenshotOnlySubmission(app, env));
-    const second = await runWebsiteBuildWorkflow(env, await postScreenshotOnlySubmission(app, env));
+    const first = await runWebsiteBuildWorkflow(env, await postScreenshotSubmission(app, env));
+    const second = await runWebsiteBuildWorkflow(env, await postScreenshotSubmission(app, env));
     await expect(
       appendBuildWorkflowEvent(env, {
         buildId: second.buildId,
@@ -300,7 +303,7 @@ describe("V2 domain lifecycle backbone", () => {
   });
 
   it("exposes only canonical V2 lifecycle vocabulary on the observable seams", async () => {
-    const siteGenerationId = await postScreenshotOnlySubmission(app, env);
+    const siteGenerationId = await postScreenshotSubmission(app, env);
     const build = await runWebsiteBuildWorkflow(env, siteGenerationId);
 
     const generationResponse = await app.request(
