@@ -9,6 +9,7 @@ import { createBuildForSiteGeneration } from "../src/routes/v2.build-create";
 import { getBuild } from "../src/routes/v2.build-get";
 import { WebsiteBuildWorkflow } from "../src/workflows/website-build-workflow";
 import {
+  adoptExistingInitialBuild,
   appendBuildWorkflowEvent,
   createInitialBuild,
   getSiteGenerationView,
@@ -175,6 +176,23 @@ describe("V2 domain lifecycle backbone", () => {
       },
     });
     expect(malformed.status).toBe(400);
+  });
+
+  it("adopts the existing initial Build on a restart instead of failing forever", async () => {
+    const first = ((await (await postSubmission(app, env)).json()) as { siteGenerationId: string });
+    const created = await createInitialBuild(env, { siteGenerationId: first.siteGenerationId });
+
+    await expect(createInitialBuild(env, { siteGenerationId: first.siteGenerationId })).rejects.toMatchObject({
+      code: "INITIAL_BUILD_ALREADY_EXISTS",
+    });
+
+    const adopted = await adoptExistingInitialBuild(env, first.siteGenerationId);
+    expect(adopted).toEqual({
+      buildId: created.buildId,
+      buildVersionId: created.buildVersionId,
+      buildVersionNumber: 1,
+    });
+    expect(adopted).toEqual(created);
   });
 
   it("starts a replacement Site Generation on the same stable Site from a later submission, leaving the earlier submission untouched", async () => {

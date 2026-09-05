@@ -42,8 +42,19 @@ export class WebsiteBuildWorkflow extends WorkflowEntrypoint<Env, WebsiteBuildPa
       "1.0 resolve Build and immutable Build Version 1",
       async () => {
         if (buildId) return { buildId };
-        const { createInitialBuild } = await import("../domain/lifecycle");
-        return createInitialBuild(this.env, { siteGenerationId });
+        const { createInitialBuild, adoptExistingInitialBuild } = await import("../domain/lifecycle");
+        try {
+          return await createInitialBuild(this.env, { siteGenerationId });
+        } catch (error) {
+          // Engine/operator restart of an in-flight generation: the initial
+          // Build already exists — adopt it so the restart resumes the
+          // pipeline on its frozen artifacts instead of erroring forever.
+          if ((error as { code?: string }).code === "INITIAL_BUILD_ALREADY_EXISTS") {
+            const existing = await adoptExistingInitialBuild(this.env, siteGenerationId);
+            if (existing) return existing;
+          }
+          throw error;
+        }
       }
     );
 

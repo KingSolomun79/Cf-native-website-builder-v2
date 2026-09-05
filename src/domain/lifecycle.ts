@@ -331,6 +331,26 @@ export async function createInitialBuild(
   return { buildId, buildVersionId, buildVersionNumber: 1 };
 }
 
+// Recovery seam (production retest 2026-09-05): an engine or operator restart
+// of an in-flight generation re-enters step 1, where createInitialBuild
+// correctly refuses to create a second initial Build. Adopting the existing
+// initial Build keeps the restart safe — every downstream stage reuses its
+// frozen artifacts idempotently.
+export async function adoptExistingInitialBuild(
+  env: Env,
+  siteGenerationId: string
+): Promise<InitialBuildCreated | null> {
+  const row = await env.DB.prepare(
+    `SELECT b.id AS build_id, v.id AS build_version_id
+     FROM builds b JOIN build_versions v ON v.build_id = b.id AND v.version_number = 1
+     WHERE b.site_generation_id = ? AND b.kind = 'initial'`
+  )
+    .bind(siteGenerationId)
+    .first<{ build_id: string; build_version_id: string }>();
+  if (!row) return null;
+  return { buildId: row.build_id, buildVersionId: row.build_version_id, buildVersionNumber: 1 };
+}
+
 // ── Automated Repair version primitive ──────────────────────────────────────
 
 export interface CreateNextBuildVersionInput {
