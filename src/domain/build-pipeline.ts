@@ -957,9 +957,22 @@ export async function runBuildPipeline(
         break;
       }
       if (resolved.status === "HUMAN_REVIEW_REQUIRED") {
+        // Repair escalation classification (issue #45): a direct macro
+        // fidelity gate that still fails after repair is a BLUEPRINT-LEVEL
+        // fidelity defect, not implementation drift — automation stops and
+        // the human review carries the classification.
+        const macroStillFailing = confirmation.qaA.hardGates.some(
+          (gate) => gate.id === "REFERENCE_MACRO_FIDELITY" && !gate.passed
+        );
+        const classified = macroStillFailing
+          ? [
+              ...resolved.reasons,
+              "BLUEPRINT_REVIEW_REQUIRED: direct reference fidelity still fails after the bounded repair batch despite a coverage-valid Blueprint — classified as a blueprint-level fidelity defect, not implementation drift",
+            ]
+          : resolved.reasons;
         outcome = {
           terminal: "HUMAN_REVIEW_REQUIRED",
-          reasons: resolved.reasons,
+          reasons: classified,
           siteGenerationId: input.siteGenerationId, siteId, buildId,
           releaseReadyBuildVersionId: null, artifactManifestHash: null,
           previewUrl: regenerated.previewUrl,

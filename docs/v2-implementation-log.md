@@ -662,3 +662,28 @@ docs/security/2026-09-05-v2-issue44-macro-fidelity-cso.md — SECURITY OK FOR
 CURRENT SCOPE.
 
 **Commit:** c2479bb1a515b500ddefd882fe6e1131a869b7c2
+
+## 2026-09-05 — #45 secondary correctness defects (issue G)
+
+**Change:** (1) Page-aware inner-page composition: about/services/contact
+realize page-appropriate compositions from the Blueprint's shared
+innerPageVocabulary (About narrative; Services offer-led with a repeated
+content band; Contact short and form-led) instead of receiving the identical
+full vocabulary list; unknown vocabularies fall back to a deterministic
+per-page rotation — pages stay distinct without inventing design language.
+(2) Blueprint-prompt template interpolation regression: fixed in #42 (the
+coverage mandate superseded the broken literal); covered by the #42 prompt
+tests. (3) Repair escalation classification: when the direct
+REFERENCE_MACRO_FIDELITY gate still fails after the bounded repair batch, the
+HUMAN_REVIEW_REQUIRED outcome now carries the explicit BLUEPRINT_REVIEW_REQUIRED
+classification (blueprint-level fidelity defect, not implementation drift) —
+repair budget unchanged.
+
+**Tests:** planner composition exercised through the existing generator/
+pipeline suites (page-aware regions flow into page prompts); escalation
+classification covered by the #44 macro-gate conjunct tests plus the
+resolution seam. Full suite 38 files / 277 tests passing; typecheck clean;
+wrangler dry-run pass. CSO: no new surfaces (deterministic planner + outcome
+classification) — covered by the #44 CSO scope.
+
+**Commit:** (sha recorded post-commit)

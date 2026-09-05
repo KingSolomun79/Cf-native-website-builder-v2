@@ -160,14 +160,37 @@ export function planImplementationContract(input: PlanImplementationContractInpu
     }
   }
 
-  const innerPageTemplate = (pageId: "about" | "services" | "contact", vocabulary: string[]) => ({
-    id: pageId,
-    path: `/${pageId}`,
-    regions: vocabulary.map((entry, index) => ({
-      id: `${pageId}-region-${index + 1}`,
-      realization: entry,
-    })),
-  });
+  // Page-aware inner-page composition (issue #45): the inner pages share ONE
+  // design language — the Blueprint's innerPageVocabulary — but must not be
+  // clones. Each page realizes a page-appropriate composition from that
+  // vocabulary: About is narrative, Services leads with its offer and repeats
+  // its content band, Contact is short and form-led. When the Blueprint's
+  // vocabulary uses different tokens, a deterministic per-page rotation keeps
+  // the pages distinct without inventing design language.
+  const INNER_PAGE_COMPOSITION: Record<"about" | "services" | "contact", string[]> = {
+    about: ["page-header", "content-section", "fact-list", "cta-band"],
+    services: ["page-header", "content-section", "fact-list", "content-section", "cta-band"],
+    contact: ["page-header", "content-section", "cta-band"],
+  };
+  const INNER_PAGE_ROTATION: Record<"about" | "services" | "contact", number> = {
+    about: 0,
+    services: 1,
+    contact: 2,
+  };
+  const innerPageTemplate = (pageId: "about" | "services" | "contact", vocabulary: string[]) => {
+    const desired = INNER_PAGE_COMPOSITION[pageId];
+    const realized = desired.every((entry) => vocabulary.includes(entry))
+      ? desired
+      : vocabulary.map((_, index) => vocabulary[(index + INNER_PAGE_ROTATION[pageId]) % vocabulary.length]);
+    return {
+      id: pageId,
+      path: `/${pageId}`,
+      regions: realized.map((entry, index) => ({
+        id: `${pageId}-region-${index + 1}`,
+        realization: entry,
+      })),
+    };
+  };
 
   const contract: ImplementationContract = {
     version: "1",
