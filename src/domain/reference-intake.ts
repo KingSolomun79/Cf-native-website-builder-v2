@@ -246,7 +246,9 @@ export async function runReferenceIntake(
 
   let captureOutput: ReferenceCaptureOutput | null = null;
   if (hasUrl) {
-    const capture = input.capture ?? defaultProductionCapture;
+    // Production default binds the Worker environment (issue #40); tests may
+    // inject a deterministic capture through input.capture.
+    const capture = input.capture ?? createProductionReferenceCapture(env);
     try {
       captureOutput = await capture({ referenceUrl: reference.url!, hasSuppliedScreenshot: hasScreenshot });
     } catch (error) {
@@ -515,101 +517,334 @@ export async function getFrozenReferenceEvidence(
 }
 
 // ── Production capture adapter ──────────────────────────────────────────────
-// Deterministic browser capture through the typed no-evaluate boundary
-// (src/lib/browser-adapter.ts). Loaded lazily so test environments without a
-// BROWSER binding only pay for it when a URL actually needs capturing.
+// Modern multi-signal reference capture (issue #40). A single stitched
+// full-page screenshot is NOT a capture strategy for modern sites: cookie
+// banners, newsletter popups, scroll lock, lazy loading, sticky headers,
+// smooth-scroll libraries, transform-based scroll and reveal animations all
+// corrupt it. The bounded deterministic sequence is:
+//
+//   load -> dismiss bounded blocking overlays where safe -> wait for
+//   images/assets -> exercise real scrolling with settle waits (reveal states
+//   settle, lazy content loads) -> viewport checkpoints at section boundaries
+//   -> post-sweep layout (the flattened truth) -> canonical full-page capture
+//   -> bounded mobile pass.
+//
+// Designs that cannot be deterministically flattened are RECORDED (see
+// flatteningSignal -> unreliable_scroll_flattening limitation, which flows
+// into Reference Suitability), never papered over with invented evidence.
+// The Worker environment is REQUIRED at factory time and validated before
+// launch: `launch(undefined)` is unreachable by construction (issue #40).
 
-import { playwrightAdapter } from "../lib/browser-adapter";
+import { playwrightAdapter, type BrowserAdapter, type BrowserPage, type RawLayout } from "../lib/browser-adapter";
 import { REFERENCE_VIEWPORTS } from "../lib/viewports";
 import { withBrowser } from "../lib/browser-lifecycle";
 
-const defaultProductionCapture: ReferenceCaptureFn = async ({ referenceUrl }) => {
-  const session = await playwrightAdapter.launch(undefined);
-  return withBrowser(session, async (browser) => {
-    const desktop = REFERENCE_VIEWPORTS[0];
-    const page = await browser.newPage({ viewport: desktop, reducedMotion: false });
+const MAX_OVERLAY_DISMISSALS = 3;
+const MAX_SCROLL_CHECKPOINTS = 8;
+const SWEEP_SETTLE_MS = 350;
+const MOBILE_NAV_TIMEOUT_MS = 30_000;
+
+// Generic overlay-dismissal probes (no site-specific scripts). Each probe is
+// gated behind a cheap typed countMatches so a selector that matches nothing
+// costs one evaluate, never a click timeout.
+const OVERLAY_DISMISS_SELECTORS = [
+  "[id*=cookie i] button, [class*=cookie i] button, [aria-label*=cookie i] button",
+  "[id*=consent i] button, [class*=consent i] button, [id*=gdpr i] button",
+  "[aria-label*='accept all' i], [aria-label*='allow all' i]",
+  "[class*=popup i] [class*=close i], [class*=modal i] [class*=close i], [aria-label*='close' i]",
+];
+
+export interface ProductionCaptureDeps {
+  /** Test seam; defaults to the Playwright production adapter. */
+  adapter?: BrowserAdapter;
+}
+
+/**
+ * Binds the Worker environment into the production capture path. The returned
+ * closure validates the BROWSER binding before every launch so a production
+ * URL capture fails with a precise error instead of `launch(undefined)`.
+ */
+export function createProductionReferenceCapture(env: Env, deps: ProductionCaptureDeps = {}): ReferenceCaptureFn {
+  return async ({ referenceUrl }) => {
+    if (!env || !env.BROWSER) {
+      throw new ReferenceIntakeError(
+        "REFERENCE_CAPTURE_FAILED",
+        "Production Reference capture requires the BROWSER binding (issue #40); refusing to launch without it"
+      );
+    }
+    const adapter = deps.adapter ?? playwrightAdapter;
+    const session = await adapter.launch(env);
+    return withBrowser(session, (browser) => captureReferenceSignals(browser, referenceUrl));
+  };
+}
+
+interface OverlayDismissalReport {
+  probes: number;
+  clicked: string[];
+  notes: string[];
+}
+
+// Bounded, best-effort: every failure is recorded as a note, never fatal.
+async function dismissBoundedOverlays(page: BrowserPage): Promise<OverlayDismissalReport> {
+  const report: OverlayDismissalReport = { probes: 0, clicked: [], notes: [] };
+  for (const selector of OVERLAY_DISMISS_SELECTORS) {
+    if (report.probes >= MAX_OVERLAY_DISMISSALS) break;
     try {
-      await page.goto(referenceUrl, { timeoutMs: 45_000, waitUntil: "networkidle" });
-      await page.assignEvidenceIds();
-      await page.waitForImages(10_000);
-      const layout = await page.extractLayout();
-      const interactions = await page.discoverInteractables();
-      const fullPageScreenshot = await page.screenshot({ fullPage: true });
+      const matches = await page.countMatches(selector);
+      if (matches === 0) continue;
+      await page.click(selector);
+      report.probes += 1;
+      report.clicked.push(selector);
+      await page.settle(400);
+    } catch (error) {
+      report.notes.push(`overlay dismiss probe failed for '${selector}': ${(error as Error).message}`);
+    }
+  }
+  return report;
+}
 
-      const viewportHeight = desktop.height;
-      const regions: ReferenceEvidence["regions"] = layout.sections.map((section) => ({
-        id: `region-${section.order}`,
-        startY: section.bounds.y,
-        endY: section.bounds.y + section.bounds.height,
-        height: section.bounds.height,
-        viewportHeightRatio: Number((section.bounds.height / viewportHeight).toFixed(3)),
+export interface ScrollSweepResult {
+  checkpoints: Array<{ label: string; png: Uint8Array }>;
+  notes: string[];
+}
+
+// Real scrolling with settle waits: reveals settle, lazy content loads, and
+// each section boundary yields an independent viewport checkpoint so capture
+// never depends on one stitched screenshot.
+async function scrollSweep(page: BrowserPage, layout: RawLayout): Promise<ScrollSweepResult> {
+  const result: ScrollSweepResult = { checkpoints: [], notes: [] };
+  for (const section of layout.sections.slice(0, MAX_SCROLL_CHECKPOINTS)) {
+    const selector = section.evidenceId ? `[data-cf-evidence-id="${section.evidenceId}"]` : section.tag;
+    try {
+      await page.scrollTo(selector);
+      await page.settle(SWEEP_SETTLE_MS);
+      result.checkpoints.push({
+        label: `checkpoint-${section.order}-${section.tag}`,
+        png: await page.screenshot({ fullPage: false }),
+      });
+    } catch (error) {
+      result.notes.push(`scroll checkpoint failed at section ${section.order}: ${(error as Error).message}`);
+    }
+  }
+  return result;
+}
+
+/**
+ * Generic flattening signal: did the page's section topology change materially
+ * by exercising real scroll? Scroll-transform / smooth-scroll layouts have no
+ * single static rendering. Topology COLLAPSE under scroll (sections vanish,
+ * e.g. a scroll-jacked track being transformed) or an extreme reflow means the
+ * canonical full-page capture cannot be trusted alone. Modest growth from
+ * lazy-loading during the sweep is normal settling, not instability.
+ */
+export function flatteningSignal(
+  preSweep: RawLayout,
+  postSweep: RawLayout
+): { unstable: boolean; detail: string } {
+  const before = preSweep.sections.length;
+  const after = postSweep.sections.length;
+  if (before === 0) return { unstable: false, detail: "no sections measured pre-sweep" };
+  if (after < before) {
+    return {
+      unstable: true,
+      detail: `section topology collapsed under scrolling (${before} -> ${after} sections); static flattening is unreliable`,
+    };
+  }
+  if ((after - before) / before > 0.5) {
+    return {
+      unstable: true,
+      detail: `section topology reflowed materially under scrolling (${before} -> ${after} sections); static flattening is unreliable`,
+    };
+  }
+  return { unstable: false, detail: `section topology stable under scroll (${before} sections)` };
+}
+
+type BrowserSessionLike = Awaited<ReturnType<BrowserAdapter["launch"]>>;
+
+async function captureMobilePass(
+  browser: BrowserSessionLike,
+  referenceUrl: string
+): Promise<{ ok: true; layout: RawLayout; fullPage: Uint8Array } | { ok: false; error: string }> {
+  const mobile = REFERENCE_VIEWPORTS[2];
+  const page = await browser.newPage({ viewport: mobile, reducedMotion: false });
+  try {
+    await page.goto(referenceUrl, { timeoutMs: MOBILE_NAV_TIMEOUT_MS, waitUntil: "networkidle" });
+    await page.assignEvidenceIds();
+    await page.waitForImages(8_000);
+    await dismissBoundedOverlays(page);
+    const layout = await page.extractLayout();
+    const fullPage = await page.screenshot({ fullPage: true });
+    return { ok: true, layout, fullPage };
+  } catch (error) {
+    return { ok: false, error: (error as Error).message };
+  } finally {
+    await page.close();
+  }
+}
+
+async function captureReferenceSignals(
+  browser: BrowserSessionLike,
+  referenceUrl: string
+): Promise<ReferenceCaptureOutput> {
+  const desktop = REFERENCE_VIEWPORTS[0];
+  const page = await browser.newPage({ viewport: desktop, reducedMotion: false });
+  try {
+    await page.goto(referenceUrl, { timeoutMs: 45_000, waitUntil: "networkidle" });
+    await page.assignEvidenceIds();
+    await page.waitForImages(10_000);
+
+    const preSweepLayout = await page.extractLayout();
+    const overlay = await dismissBoundedOverlays(page);
+    const sweepLayout = overlay.clicked.length > 0 ? await page.extractLayout() : preSweepLayout;
+    const sweep = await scrollSweep(page, sweepLayout);
+    const layout = await page.extractLayout();
+
+    const interactions = await page.discoverInteractables();
+    const canonicalFullPage = await page.screenshot({ fullPage: true });
+    const mobile = await captureMobilePass(browser, referenceUrl);
+
+    const viewportHeight = desktop.height;
+    const regions: ReferenceEvidence["regions"] = layout.sections.map((section) => ({
+      id: `region-${section.order}`,
+      startY: section.bounds.y,
+      endY: section.bounds.y + section.bounds.height,
+      height: section.bounds.height,
+      viewportHeightRatio: Number((section.bounds.height / viewportHeight).toFixed(3)),
+      boundingBox: section.bounds,
+    }));
+
+    const measuredElements: ReferenceEvidence["measuredElements"] = [
+      ...layout.sections.map((section) => ({
+        selectorHint: section.evidenceId ? `[data-cf-evidence-id="${section.evidenceId}"]` : section.tag,
+        role: section.role ?? section.tag,
         boundingBox: section.bounds,
-      }));
+        confidence: "HIGH" as const,
+        source: "DOM" as const,
+      })),
+      ...layout.typography.slice(0, 24).map((typeStyle) => ({
+        selectorHint: typeStyle.element,
+        role: "typography",
+        computed: {
+          fontFamily: typeStyle.fontFamily,
+          fontSize: typeStyle.fontSize,
+          fontWeight: typeStyle.fontWeight,
+          lineHeight: typeStyle.lineHeight,
+          letterSpacing: typeStyle.letterSpacing,
+          textTransform: typeStyle.textTransform,
+        },
+        confidence: "MEDIUM" as const,
+        source: "COMPUTED_STYLE" as const,
+      })),
+      // Surface/colour and rhythm observations ride the measured-elements
+      // channel (issue #40): the adapter already measures them; stop dropping
+      // them at the capture boundary.
+      {
+        selectorHint: "body",
+        role: "surface",
+        computed: {
+          background: layout.colors.background ?? null,
+          text: layout.colors.text ?? null,
+          accents: layout.colors.accents.join(" | "),
+        },
+        confidence: "HIGH" as const,
+        source: "COMPUTED_STYLE" as const,
+      },
+      ...(layout.spacing
+        ? [{
+            selectorHint: layout.spacing.evidenceId
+              ? `[data-cf-evidence-id="${layout.spacing.evidenceId}"]`
+              : "section",
+            role: "spacing",
+            computed: {
+              sectionPadding: layout.spacing.sectionPadding,
+              sectionMargin: layout.spacing.sectionMargin,
+              rhythm: layout.spacing.rhythm,
+            },
+            confidence: "MEDIUM" as const,
+            source: "COMPUTED_STYLE" as const,
+          }]
+        : []),
+      ...layout.images.slice(0, 12).map((image) => ({
+        selectorHint: image.evidenceId ? `[data-cf-evidence-id="${image.evidenceId}"]` : "img",
+        role: "image",
+        computed: {
+          naturalWidth: image.naturalWidth,
+          naturalHeight: image.naturalHeight,
+          displayedWidth: image.displayedWidth,
+          alt: image.alt,
+        },
+        confidence: "MEDIUM" as const,
+        source: "DOM" as const,
+      })),
+    ];
 
-      const measuredElements: ReferenceEvidence["measuredElements"] = [
-        ...layout.sections.map((section) => ({
-          selectorHint: section.evidenceId ? `[data-cf-evidence-id="${section.evidenceId}"]` : section.tag,
-          role: section.role ?? section.tag,
-          boundingBox: section.bounds,
-          confidence: "HIGH" as const,
-          source: "DOM" as const,
-        })),
-        ...layout.typography.slice(0, 24).map((typeStyle) => ({
-          selectorHint: typeStyle.element,
-          role: "typography",
-          computed: {
-            fontFamily: typeStyle.fontFamily,
-            fontSize: typeStyle.fontSize,
-            fontWeight: typeStyle.fontWeight,
-            lineHeight: typeStyle.lineHeight,
-            letterSpacing: typeStyle.letterSpacing,
-            textTransform: typeStyle.textTransform,
-          },
-          confidence: "MEDIUM" as const,
-          source: "COMPUTED_STYLE" as const,
-        })),
-      ];
+    const motionObservations: StructuredObservation[] = [];
+    const canvasCount = await page.countMatches("canvas");
+    if (canvasCount > 0 && layout.sections.length === 0) {
+      motionObservations.push({ kind: "canvas_webgl_primary", detail: `${canvasCount} canvas element(s) with no semantic sections` });
+    }
+    const videoCount = await page.countMatches("video");
+    if (videoCount > 0 && layout.sections.length === 0) {
+      motionObservations.push({ kind: "dominant_video", detail: `${videoCount} video element(s) with no semantic sections` });
+    }
+    if (interactions.sticky.length > 3) {
+      motionObservations.push({ kind: "complex_stateful_interaction", detail: `${interactions.sticky.length} sticky elements` });
+    }
+    if (interactions.revealCandidates.length > 12) {
+      motionObservations.push({ kind: "heavy_parallax", detail: `${interactions.revealCandidates.length} reveal/parallax candidates` });
+    }
+    const flattening = flatteningSignal(preSweepLayout, layout);
+    if (flattening.unstable) {
+      motionObservations.push({ kind: "unreliable_scroll_flattening", detail: flattening.detail });
+    }
 
-      const motionObservations: StructuredObservation[] = [];
-      const canvasCount = await page.countMatches("canvas");
-      if (canvasCount > 0 && layout.sections.length === 0) {
-        motionObservations.push({ kind: "canvas_webgl_primary", detail: `${canvasCount} canvas element(s) with no semantic sections` });
-      }
-      const videoCount = await page.countMatches("video");
-      if (videoCount > 0 && layout.sections.length === 0) {
-        motionObservations.push({ kind: "dominant_video", detail: `${videoCount} video element(s) with no semantic sections` });
-      }
-      if (interactions.sticky.length > 3) {
-        motionObservations.push({ kind: "complex_stateful_interaction", detail: `${interactions.sticky.length} sticky elements` });
-      }
-      if (interactions.revealCandidates.length > 12) {
-        motionObservations.push({ kind: "heavy_parallax", detail: `${interactions.revealCandidates.length} reveal/parallax candidates` });
-      }
+    const discrepancies: unknown[] = [
+      ...overlay.notes.map((note) => ({ kind: "overlay_dismissal", detail: note })),
+      ...(overlay.clicked.length > 0
+        ? [{ kind: "overlay_dismissed", detail: `dismissed ${overlay.clicked.length} blocking overlay(s): ${overlay.clicked.join(", ")}` }]
+        : []),
+      ...sweep.notes.map((note) => ({ kind: "scroll_sweep", detail: note })),
+      { kind: "flattening_check", detail: flattening.detail },
+    ];
 
-      const canonical = {
-        content: fullPageScreenshot,
+    const captures: ReferenceCaptureOutput["captures"] = [
+      { viewportWidth: desktop.width, viewportHeight: desktop.height, content: canonicalFullPage, mimeType: "image/png" },
+      ...sweep.checkpoints.map((checkpoint) => ({
+        viewportWidth: desktop.width,
+        viewportHeight: desktop.height,
+        content: checkpoint.png,
+        mimeType: "image/png",
+      })),
+    ];
+    if (mobile.ok) {
+      captures.push({ viewportWidth: REFERENCE_VIEWPORTS[2].width, content: mobile.fullPage, mimeType: "image/png" });
+    } else {
+      discrepancies.push({ kind: "mobile_capture_unavailable", detail: mobile.error });
+    }
+
+    return {
+      canonicalScreenshot: {
+        content: canonicalFullPage,
         mimeType: "image/png",
         pixelWidth: desktop.width,
         pixelHeight: undefined as number | undefined,
         likelyCssViewportWidth: desktop.width,
-      };
-
-      return {
-        canonicalScreenshot: canonical,
-        captures: [
-          { viewportWidth: desktop.width, viewportHeight: desktop.height, content: fullPageScreenshot, mimeType: "image/png" },
-        ],
-        regions,
-        measuredElements,
-        responsiveObservations: [
-          { kind: "viewport_matrix", viewports: REFERENCE_VIEWPORTS.map((viewport) => viewport.name) },
-          { kind: "viewport_meta", content: layout.viewportMeta },
-        ],
-        motionObservations,
-        discrepancies: [],
-      };
-    } finally {
-      await page.close();
-    }
-  });
-};
+      },
+      captures,
+      regions,
+      measuredElements,
+      responsiveObservations: [
+        { kind: "viewport_matrix", viewports: REFERENCE_VIEWPORTS.map((viewport) => viewport.name) },
+        { kind: "viewport_meta", content: layout.viewportMeta },
+        { kind: "viewport_checkpoints", count: sweep.checkpoints.length },
+        mobile.ok
+          ? { kind: "mobile_capture", viewport: REFERENCE_VIEWPORTS[2].name, sections: mobile.layout.sections.length, navItems: mobile.layout.nav.length }
+          : { kind: "mobile_capture", viewport: REFERENCE_VIEWPORTS[2].name, unavailable: true },
+      ],
+      motionObservations,
+      discrepancies,
+    };
+  } finally {
+    await page.close();
+  }
+}

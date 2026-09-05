@@ -189,6 +189,10 @@ const LIMITATION_KINDS: Record<string, string> = {
   complex_slider: "complex specialized slider/carousel",
   heavy_parallax: "heavy parallax choreography",
   exotic_typography: "proprietary/unavailable reference font (REFERENCE_FONT_UNAVAILABLE)",
+  // Issue #40: the page's static composition changed materially under real
+  // scrolling (scroll-transform/smooth-scroll layout). Checkpoint captures
+  // carry the truth; the flattening limitation must be declared, not hidden.
+  unreliable_scroll_flattening: "static flattening unreliable under scroll (scroll-transform layout); viewport checkpoints are the composition authority",
 };
 
 export function deriveSuitabilitySignals(observations: StructuredObservation[]): SuitabilitySignal[] {

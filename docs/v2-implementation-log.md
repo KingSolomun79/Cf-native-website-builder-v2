@@ -486,3 +486,40 @@ FOR CURRENT SCOPE (watch item: #42 must treat declared-missing dimensions as
 uncovered).
 
 **Commit:** 6d309dca0ce146e0e064000bb274b02956d25057
+
+## 2026-09-05 — #40 production reference capture + modern capture contract (issue B)
+
+**Change:** `defaultProductionCapture` (zero-arg, `playwrightAdapter.launch(undefined)`
+on every production URL intake — the P0 crash of 9c27006e) replaced by
+`createProductionReferenceCapture(env)`: the Worker environment is bound at
+factory time and validated pre-launch, making `launch(undefined)` unreachable
+by construction. The capture itself is now a bounded multi-signal sequence:
+load -> bounded overlay dismissal (≤3 clicks, each gated by typed countMatches,
+cookie/consent/close selectors only, recorded in discrepancies) -> wait
+images/assets -> real scroll sweep with settle waits -> viewport checkpoints at
+section boundaries (≤8) -> post-sweep layout (flattened truth) -> canonical
+full-page capture -> bounded mobile pass (375×812; failure recorded, not
+fatal). Adapter-measured surface colours, spacing and image inventory now ride
+the measuredElements channel instead of being dropped. New limitation kind
+`unreliable_scroll_flattening`: topology collapse / extreme reflow under real
+scroll -> SUPPORTED_WITH_LIMITATIONS (Adaptation Contract mandatory);
+modest lazy-load growth stays non-flagged. Screenshot-authority semantics
+unchanged.
+
+**Tests:** new `tests/v2-reference-capture.test.ts` (7): production-wiring seam
+(launch receives the env — the test that would have caught the original
+defect), pre-launch BROWSER guard, intake default path env-bound (fails closed
+without BROWSER), multi-signal sequence against the fixture adapter (probes,
+sweep, checkpoints, mobile, page/session hygiene, surface/spacing measurement,
+flattening_check discrepancy), flatteningSignal unit rules, and
+suitability integration (scroll-transform capture -> SWL + mandatory contract).
+Fixture adapter gained an optional `sections` scenario override (defaults
+unchanged).
+
+**Gates:** full suite 34 files / 250 tests passing; typecheck clean; wrangler
+dry-run pass; CSO: docs/security/2026-09-05-v2-issue40-production-capture-cso.md
+— SECURITY OK FOR CURRENT SCOPE (watch: automated third-party clicks bounded ≤3
+and recorded; capture fan-out R2 cost retention-managed; real-Playwright
+staging verification deferred to the #46 production retest).
+
+**Commit:** (sha recorded post-commit)

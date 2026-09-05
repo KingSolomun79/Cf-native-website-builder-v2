@@ -40,6 +40,8 @@ export interface FixtureScenario {
   reducedMotionRemovesMotion?: boolean;
   navItemCount?: { desktop: number; mobile: number };
   contrastSamples?: RawLayout["contrastSamples"];
+  /** Overrides the extracted section list (multi-section capture scenarios). */
+  sections?: RawLayout["sections"];
   // When true, goto throws a network error (inaccessible URL).
   inaccessible?: boolean;
 }
@@ -226,7 +228,7 @@ class FixturePage implements BrowserPage {
       lang: "en",
       description: "fixture",
       viewportMeta: "width=device-width",
-      sections: [{ order: 0, tag: "header", role: "banner", heading: "Fixture", text: "Fixture", bounds: { x: 0, y: 0, width: 1440, height: 200 }, evidenceId: "cf-section-0" }],
+      sections: this.scenario.sections ?? [{ order: 0, tag: "header", role: "banner", heading: "Fixture", text: "Fixture", bounds: { x: 0, y: 0, width: 1440, height: 200 }, evidenceId: "cf-section-0" }],
       typography: [{ element: "body", fontFamily: "Arial", fontSize: "16px", fontWeight: "400", lineHeight: "1.5", letterSpacing: "normal", textTransform: "none", evidenceId: "cf-body" }],
       colors: { background: "rgb(255,255,255)", text: "rgb(17,17,17)", accents: ["rgb(0,123,255)"] },
       nav: Array.from({ length: this.scenario.navItemCount?.[this.viewportName as "desktop" | "mobile"] ?? 4 }, (_, i) => ({ href: `/p${i}`, text: `P${i}`, external: false, evidenceId: `cf-nav-${i}` })),
