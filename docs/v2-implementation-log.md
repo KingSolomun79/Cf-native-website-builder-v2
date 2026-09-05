@@ -485,4 +485,4 @@ docs/security/2026-09-05-v2-issue39-evidence-sufficiency-cso.md — SECURITY OK
 FOR CURRENT SCOPE (watch item: #42 must treat declared-missing dimensions as
 uncovered).
 
-**Commit:** (sha recorded post-commit)
+**Commit:** 6d309dca0ce146e0e064000bb274b02956d25057
