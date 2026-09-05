@@ -36,6 +36,7 @@ import {
   QaAConfirmationReportSchema,
   QaBConfirmationReportSchema,
   type QaAReport,
+  type QaAReportAugmented,
   type QaBReport,
   type QaFinding,
   type QaAConfirmationReport,
@@ -140,7 +141,7 @@ export function assertRepairPlanWithinBounds(plan: FixPlan): void {
 // ── Fix Coordinator (exactly one coordinated main batch) ────────────────────
 
 export function buildFixCoordinatorUserPrompt(input: {
-  qaA: QaAReport;
+  qaA: QaAReportAugmented;
   qaB: QaBReport;
   priorBlockerDomains?: string[];
 }): string {
@@ -162,7 +163,7 @@ export interface RunFixCoordinatorInput {
   buildId: string;
   buildVersionId: string;
   buildVersionNumber: number;
-  qaA: QaAReport;
+  qaA: QaAReportAugmented;
   qaB: QaBReport;
   evidenceR2Keys?: string[];
   generate?: RawAiGenerate;

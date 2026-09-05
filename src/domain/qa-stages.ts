@@ -64,6 +64,21 @@ const ScoreSchema = Type.Integer({ minimum: 0, maximum: 100 });
 const GateSchema = Type.Object({ id: Type.String({ minLength: 1 }), passed: Type.Boolean() }, { additionalProperties: false });
 export type QaGate = Static<typeof GateSchema>;
 
+// Production retest 2026-09-05: a free-string gate id let the model invent
+// plausible near-miss gate names, and every attempt died on the enumeration
+// integrity check. The stage OUTPUT schemas constrain ids to the canonical
+// literals, so the model's output contract enumerates the exact allowed
+// values and the schema-repair attempt quotes the violation. The
+// enumeration-integrity check below stays as the exactly-once belt.
+const QaAGateSchema = Type.Object(
+  { id: Type.Union(QA_A_HARD_GATE_IDS.map((id) => Type.Literal(id))), passed: Type.Boolean() },
+  { additionalProperties: false }
+);
+const QaBGateSchema = Type.Object(
+  { id: Type.Union(QA_B_MANDATORY_GATE_IDS.map((id) => Type.Literal(id))), passed: Type.Boolean() },
+  { additionalProperties: false }
+);
+
 export const FindingSchema = Type.Object(
   {
     severity: SeveritySchema,
@@ -102,7 +117,7 @@ export const QaAReportSchema = Type.Object(
     visualScore: ScoreSchema,
     contentScore: ScoreSchema,
     fabrication: Type.Boolean(),
-    hardGates: Type.Array(GateSchema, { minItems: 1 }),
+    hardGates: Type.Array(QaAGateSchema, { minItems: 1 }),
     findings: Type.Array(FindingSchema),
   },
   { additionalProperties: false }
@@ -113,7 +128,7 @@ export const QaBReportSchema = Type.Object(
   {
     version: Type.String({ minLength: 1 }),
     technicalScore: ScoreSchema,
-    gates: Type.Array(GateSchema, { minItems: 1 }),
+    gates: Type.Array(QaBGateSchema, { minItems: 1 }),
     findings: Type.Array(FindingSchema),
   },
   { additionalProperties: false }
@@ -126,7 +141,7 @@ export const QaAConfirmationReportSchema = Type.Object(
     visualScore: ScoreSchema,
     contentScore: ScoreSchema,
     fabrication: Type.Boolean(),
-    hardGates: Type.Array(GateSchema, { minItems: 1 }),
+    hardGates: Type.Array(QaAGateSchema, { minItems: 1 }),
     findings: Type.Array(ConfirmationFindingSchema),
   },
   { additionalProperties: false }
@@ -137,12 +152,20 @@ export const QaBConfirmationReportSchema = Type.Object(
   {
     version: Type.String({ minLength: 1 }),
     technicalScore: ScoreSchema,
-    gates: Type.Array(GateSchema, { minItems: 1 }),
+    gates: Type.Array(QaBGateSchema, { minItems: 1 }),
     findings: Type.Array(ConfirmationFindingSchema),
   },
   { additionalProperties: false }
 );
 export type QaBConfirmationReport = Static<typeof QaBConfirmationReportSchema>;
+
+// The deterministic REFERENCE_MACRO_FIDELITY gate (issue #44) is appended
+// programmatically AFTER the model's report passes enumeration integrity —
+// the model itself must never report it, so it is deliberately absent from
+// the schema enum.
+export type QaAReportAugmented = Omit<QaAReport, "hardGates"> & {
+  hardGates: Array<QaAReport["hardGates"][number] | { id: "REFERENCE_MACRO_FIDELITY"; passed: boolean }>;
+};
 
 // ── Release evaluation (pure) ───────────────────────────────────────────────
 
@@ -168,7 +191,7 @@ export function isReleaseBlocker(finding: EvaluableQaFinding): boolean {
 // QA-A release condition. Hard-gate failures are separate conjuncts: no
 // aggregate score can average them away. Findings marked RESOLVED (possible
 // only in confirmation reports) are excluded from the blocker reasons.
-export function evaluateQaARelease(report: QaAReport | QaAConfirmationReport): ReleaseGateVerdict {
+export function evaluateQaARelease(report: QaAReport | QaAConfirmationReport | QaAReportAugmented): ReleaseGateVerdict {
   const findings = report.findings as EvaluableQaFinding[];
   const reasons: string[] = [];
   if (report.visualScore < 90) reasons.push(`visual fidelity ${report.visualScore} < 90`);
@@ -222,6 +245,8 @@ export function buildQaAUserPrompt(input: {
   adaptationContractQaExceptions: string[];
 }): string {
   return `Evaluate this Release Candidate against the Reference and the Visual Blueprint. Judge rendered visual fidelity and content quality, verify every hard composition gate, and list exact findings with severity (P0/P1/P2/P3) and evidence references. Treat declared Adaptation Contract QA exceptions as intentional; a high score may never compensate a failed hard gate.
+
+HARD GATE IDS (production retest 2026-09-05): report hardGates with EXACTLY these ids, each exactly once, no synonyms: ${JSON.stringify(QA_A_HARD_GATE_IDS)}.
 
 CANONICAL REGION AUTHORITY (issue #37 semantics): the CANONICAL BLUEPRINT REGION TOPOLOGY below is the binding comparison target for PAGE_SILHOUETTE_REGION_ORDER and FIRST_VIEWPORT_MATERIALLY_CORRECT — judge the generated canonical region sequence, identity and first-viewport composition against THIS topology. The raw Reference Evidence segmentation is observational; raw evidence measurements remain the authority for measured fidelity (proportions, mass, viewport ratios) but never define a second region topology the generated page must match. Harmless internal wrappers inside one canonical region are not region-order violations; a missing, renamed, reordered or substituted canonical region is.
 
@@ -339,6 +364,8 @@ export function buildQaBUserPrompt(input: {
   imageManifestSummary: string;
 }): string {
   return `Perform the browser/technical review of this Release Candidate Preview. Verify all four pages load, internal navigation, mobile menu, responsive mechanics, overflow, keyboard/focus accessibility, the central Form Service contract (${input.formServiceEndpoint}), runtime/console/network cleanliness, image manifest resolution with no temporary provider URLs, metadata/canonical/OG, truthful JSON-LD, crawlability and Implementation Contract integrity. Technical Preflight already ${input.preflightPassed ? "passed" : "FAILED"}. List exact findings with severity and evidence references.
+
+MANDATORY GATE IDS: report gates with EXACTLY these ids, each exactly once, no synonyms: ${JSON.stringify(QA_B_MANDATORY_GATE_IDS)}.
 
 EVIDENCE SUMMARY: ${input.evidenceSummary}
 IMAGE MANIFEST: ${input.imageManifestSummary}`;

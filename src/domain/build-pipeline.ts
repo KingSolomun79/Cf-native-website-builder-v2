@@ -36,7 +36,7 @@ import {
 import { assembleBuildVersionCandidate, deployPreview, type PreviewDeployer } from "./assembly";
 import { buildStandardEvidenceBundle, compareGeometry, geometryFromRegions, evaluateReferenceMacroFidelity, type GeometryComparison, type QaCaptureFn } from "./qa-evidence";
 import { createProductionQaCapture } from "./qa-capture";
-import { runQaAStage, runQaBStage, type QaAReport, type QaBReport, type QaFinding } from "./qa-stages";
+import { runQaAStage, runQaBStage, type QaAReport, type QaAReportAugmented, type QaBReport, type QaFinding } from "./qa-stages";
 import { assignReleaseReady, ReleaseGateError } from "./release";
 import { getBuildStageArtifact } from "./stage-artifacts";
 import type { ReferenceAnalysis } from "./reference-analysis";
@@ -122,7 +122,7 @@ export interface BuildPipelineOutcome {
   releaseReadyBuildVersionId: string | null;
   artifactManifestHash: string | null;
   previewUrl: string | null;
-  qaA: QaAReport | null;
+  qaA: QaAReportAugmented | null;
   qaB: QaBReport | null;
   repairApplied: boolean;
 }
@@ -211,7 +211,7 @@ async function loadRepairPlanForVersion(env: Env, buildId: string, buildVersionI
 // evaluation verdict, immutable once stored.
 interface FrozenQaReport {
   schemaVersion: string;
-  qaA: QaAReport;
+  qaA: QaAReportAugmented;
   qaB: QaBReport;
   geometryComparison: GeometryComparison | null;
   releaseBlockers: QaFinding[];
@@ -624,7 +624,7 @@ export async function runBuildPipeline(
       ctx: VersionContext,
       previewUrl: string,
       acceptedImageCount: number
-    ): Promise<{ qaA: QaAReport; qaB: QaBReport; release: Awaited<ReturnType<typeof assignReleaseReady>> }> => {
+    ): Promise<{ qaA: QaAReportAugmented; qaB: QaBReport; release: Awaited<ReturnType<typeof assignReleaseReady>>; macroFidelity?: Awaited<ReturnType<typeof evaluateReferenceMacroFidelity>> }> => {
       // The evidence capture (9 browser page loads) and the QA verdicts
       // (QA-A/QA-B/release) run as SEPARATE steps: one combined step exceeds
       // the isolate eviction window and gets killed mid-flight on retry.
@@ -1022,13 +1022,13 @@ export async function runBuildPipeline(
         break;
       }
       if (resolved.status === "HUMAN_REVIEW_REQUIRED") {
-        // Repair escalation classification (issue #45): a direct macro
-        // fidelity gate that still fails after repair is a BLUEPRINT-LEVEL
-        // fidelity defect, not implementation drift — automation stops and
-        // the human review carries the classification.
-        const macroStillFailing = confirmation.qaA.hardGates.some(
-          (gate) => gate.id === "REFERENCE_MACRO_FIDELITY" && !gate.passed
-        );
+        // The repaired version's QA is the bounded confirmation (no fresh
+        // deterministic re-measurement — that is the repair budget design),
+        // so the latest DETERMINISTIC macro verdict available is the first
+        // version's comparator result: if the direct reference fidelity gate
+        // failed there and realization repair did not clear the release, the
+        // defect is blueprint-level, not implementation drift (issue #45).
+        const macroStillFailing = firstQa.macroFidelity?.verdict === "FAIL";
         const classified = macroStillFailing
           ? [
               ...resolved.reasons,

@@ -14,6 +14,7 @@ import {
   evaluateQaARelease,
   evaluateQaBRelease,
   type QaAReport,
+  type QaAReportAugmented,
   type QaBReport,
   type QaFinding,
 } from "./qa-stages";
@@ -33,7 +34,7 @@ export interface AssignReleaseReadyInput {
   buildId: string;
   buildVersionId: string;
   siteGenerationId: string;
-  qaA: QaAReport;
+  qaA: QaAReportAugmented;
   qaB: QaBReport;
   /** Build Version the QA reports were produced for (must match exactly). */
   qaBuildVersionId: string;

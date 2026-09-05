@@ -97,6 +97,10 @@ describe("QA-A hard-gate enumeration integrity (issue #44)", () => {
       ...report,
       hardGates: [{ id: "SIGNATURE_TRAITS_PRESERVED", passed: true }, ...report.hardGates.slice(1)],
     });
+    // An invented gate id is rejected at the SCHEMA layer since the output
+    // contract enumerates the canonical literals (production retest
+    // 2026-09-05): the model sees its violation in the structural repair
+    // attempt instead of a terminal enumeration error.
     await expect(
       runQaAStage(env, {
         buildId: created.buildId,
@@ -116,6 +120,35 @@ describe("QA-A hard-gate enumeration integrity (issue #44)", () => {
         generate: async (system, user, attempt) => {
           const response = await base.generate!(system, user, attempt);
           return { ...response, content: JSON.stringify(invented(JSON.parse(response.content) as QaAReport)) };
+        },
+      })
+    ).rejects.toThrow();
+
+    // The enumeration-integrity check stays the exactly-once backstop for
+    // schema-valid but duplicated sets.
+    const duplicated = (report: QaAReport): QaAReport => ({
+      ...report,
+      hardGates: [...report.hardGates, { ...report.hardGates[0] }],
+    });
+    await expect(
+      runQaAStage(env, {
+        buildId: created.buildId,
+        siteGenerationId: started.siteGenerationId,
+        buildVersionId: created.buildVersionId,
+        buildVersionNumber: 1,
+        context: {
+          businessName: "Gate Integrity Co",
+          geometryComparison: compareGeometry(measuredReference(), fullCandidate),
+          evidenceSummary: "test",
+          signatureTraitIds: ["bp-typography"],
+          canonicalRegions: [{ order: 1, id: "r1", purpose: "hero" }],
+          firstViewportRegionIds: ["r1"],
+          adaptationContractQaExceptions: [],
+        },
+        evidenceR2Key: "qa/evidence.json",
+        generate: async (system, user, attempt) => {
+          const response = await base.generate!(system, user, attempt);
+          return { ...response, content: JSON.stringify(duplicated(JSON.parse(response.content) as QaAReport)) };
         },
       })
     ).rejects.toThrow(/hard-gate enumeration invalid/);
