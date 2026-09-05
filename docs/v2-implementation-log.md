@@ -717,3 +717,130 @@ deterministic level.
 dry-run pass.
 
 **Commit:** 98e204169b72c93774ebaffed8dce4da69230386
+
+## 2026-09-05 — Production retest: REFERENCE_BOUND pipeline proven end-to-end; candidate remains fidelity-deficient (terminal HUMAN_REVIEW_REQUIRED)
+
+**Scope:** operator-authorized production retest per the 28-part runbook
+(fresh RankForge Kenya Site Generation, Reference morabeza.digital URL-only,
+glm-5.3-flash, V1 untouched).
+
+**Production state:** Worker cf-website-factory-v2 deployed at retest HEAD
+38211013 (Version 38211013-f551-4b67-bc4f-913c64532825); migration 0031
+applied to website_factory_v2 (verified additive, V2-only, forward-safe);
+D1/R2/BROWSER/IMAGES/EMAIL bindings confirmed; V1 Worker/DB/R2 never
+addressed.
+
+**Platform defects found and fixed during the retest (each: tests -> typecheck
+-> dry-run -> commit -> deploy):**
+1. 5d30dc2 — SUPPORTED_WITH_LIMITATIONS References (capture-observed
+   heavy_parallax on morabeza.digital) require a concrete Adaptation
+   Contract (PRD §10), but no production input path existed (build
+   0aecd755 FAILED ADAPTATION_CONTRACT_REQUIRED as evidence). The contract
+   now rides the immutable Onboarding Submission reference; intake
+   re-validates it (ADAPTATION_CONTRACT_INVALID fails closed).
+2. f5480dd — the analyzer vision call hung: abort covered fetch but
+   response.json() ran unbounded after clearTimeout; no diagnostics; the
+   generic step-retry storm outlived the outer step timeout with zero
+   recorded evidence (build 6e9ebfc1). Body reads now raced under the same
+   budget, per-Build vision diagnostics persist (tolerant put), the encoded
+   (base64) budget is enforced with a deterministic downscale ladder
+   (VISION_INPUT_OVERSIZE fails closed), and vision-seam exhaustion is a
+   terminal, observable pipeline state.
+3. 458e3ea — failure/empty vision responses contribute bounded body snippets
+   to diagnostics; this exposed the real root cause below.
+4. d6c7e0d — vision timeout raised 45s -> 120s (probe separating slow
+   completion from capability absence).
+5. (vision shaping) — THE ROOT CAUSE: the vision path sent max_tokens 4096
+   with thinking ENABLED, so the reasoning model burned the whole budget on
+   reasoning_content and returned EMPTY content with finish_reason "length"
+   — the exact ZAI-leg serving shape documented on the text path in #30,
+   never applied to vision. The vision path now disables thinking and
+   raises the token floor to 16384. Immediately after, the multimodal
+   analyzer produced a valid, evidence-anchored analysis in production.
+6. (assembly repair) — the generator rendered the footer as
+   <section class="footer-zone">; deterministic assembly validation rejected
+   it, but frozen page subkeys made blind retries eternal (build 2e06b688).
+   Validation findings now drive ONE informed per-page regeneration under a
+   new immutable subkey; final validation result is returned (was stale).
+7. (blueprint repair) — the richer analyzer trait set made the blueprint
+   model drop one identity-defining trait per attempt (each time a
+   different one; build e7d8efd5). IDENTITY_ERASURE rejections now drive
+   ONE informed regeneration carrying the exact rejection.
+8. (gate enums) — the QA-A model invented near-miss hard-gate ids
+   (NO_FABRICATION, MOBILE_VISUAL_IDENTITY, ...) and every attempt died on
+   the #44 enumeration check (build b62b7b30): the model had never been
+   given the canonical ids. Gate ids are now schema literals (the output
+   contract enumerates them; repair quotes violations); prompts state them;
+   the exactly-once check remains the backstop. REFERENCE_MACRO_FIDELITY is
+   typed as a post-model augmentation and the #45 escalation reads the
+   deterministic comparator verdict.
+9. (restart adoption) — operator restart of an in-flight instance re-ran
+   createInitialBuild and errored forever on
+   INITIAL_BUILD_ALREADY_EXISTS; step 1 now adopts the existing Build
+   (adoptExistingInitialBuild).
+
+**Retest result (build 2c8e73ec, generations of Build Versions 1-3):**
+- Capture (URL_ONLY, production BROWSER): PASS — canonical 1440x7660
+  screenshot, 8 desktop checkpoints + mobile pass, 12 stable sections,
+  heavy_parallax observed (14 candidates), flattening check stable.
+- Evidence sufficiency: SUFFICIENT (issue #39), SUPPORTED_WITH_LIMITATIONS
+  with the submitted Adaptation Contract frozen (issue #39 column live).
+- Visual package: normalized full-page 1024x5447 + SHA provenance.
+- Analyzer (multimodal): 10 signature traits, every one anchored to frozen
+  evidence; substantive visual interpretation (two-hue violet accents
+  rgb(142,45,226)/rgb(78,47,218), Figtree/Montserrat/Poppins triad,
+  1670px card-collection mass, light-to-dark page arc). Coverage gate:
+  PASS. glm-5.3-flash via zhipu throughout; 19 generator + 4 QA-A runs
+  carried reference visual inputs.
+- Images: 24 attempts, USD 1.20 (gate 3.00), 12 Accepted — target met.
+- QA told the truth: v1 visual 74/content 65 with a fabricated-facts flag;
+  Fix Coordinator batch -> v2 (visual 71; FIRST_VIEWPORT_MATERIALLY_CORRECT,
+  DOMINANT_TEXT_IMAGE_MASS, CRITICAL_SIGNATURE_TRAITS_PRESERVED failed);
+  Release Blocker Fix -> v3 confirmation visual 62/content 88, 4 hard gates
+  failed, 8 valid Release Blockers -> HUMAN_REVIEW_REQUIRED. Bounded repair
+  budget consumed exactly as designed; no unbounded loop.
+- Comparator truthfulness: findings cite measured values (first-viewport
+  ~0.3 vs required ~1.258 viewport-heights; image_mass_ratio 0.0 vs
+  reference 0.072). None of the deleted fabricated defaults returned.
+
+**Human visual verdict: LOW_FIDELITY** (this retest's objective was
+HIGH_FIDELITY). Macro structure partially preserved (dark hero band, light
+alternating surfaces, pill eyebrow labels, violet accent pair reserved for
+CTAs, dark close-out + footer bookend, correct canonical region ORDER), but
+the identity-defining first viewport is broken in v3: hero collapsed to
+~0.3 viewports with a truncated headline, a laptop-mockup collage instead
+of full-bleed dark-purple photography (image mass 0.0), services rendered
+as a single-column stack instead of the dense card collection, and the
+trust strip realized with FABRICATED client names ("Glap Thon", "Marivert",
+"6699", "Scap Thes", "Hopes") — a content fabrication the v3 confirmation
+scoring did not flag. No Approval, no Publication (Parts 21-22 stop
+conditions honored).
+
+**Classification (Part 23):** the remediation architecture functions —
+capture, evidence, sufficiency, analyzer, blueprint, coverage, fidelity
+gates, bounded repair and the honest HUMAN_REVIEW terminal all acted
+correctly, and automated QA broadly matched the human verdict. The remaining
+seam is GENERATION/REPAIR QUALITY: the generator/repair model does not yet
+reliably realize the Blueprint's over-viewport photographic hero, and the
+image pipeline accepted a mockup-collage hero that serves no reference role.
+Follow-up (scoped, not started): generator hero-realization directives +
+image-role acceptance gate for the first viewport; trust-strip fabrication
+detector (invented brand-name lint).
+
+**Positive fixture:** NOT CREATED (requires HIGH_FIDELITY candidate). The
+negative specimen 5320a229/2fde2e2f remains untouched; frozen artifacts of
+the retest builds remain in D1/R2 as evidence.
+
+**Smoke tooling:** scripts/rankforge-smoke.mjs replaced by the
+parameterized scripts/smoke-site.mjs + scripts/fixtures/
+rankforge-reference-bound.json (fictional facts only; no secrets, ids or
+client data embedded; WEBHOOK_SECRET still read from .dev.vars at runtime).
+
+**Gates:** full suite 40 files / 291 tests passing; typecheck clean; wrangler
+dry-run pass; production deployed at retest HEAD.
+
+**Commits:** 5d30dc2 (adaptation contract input path), f5480dd (bounded
+observable vision seam), 458e3ea (failure snippets), d6c7e0d (timeout
+probe), dbad9b2 (ZAI-leg vision shaping — root cause), ba33cfb (empty-body
+snippets), dd43d95 (informed assembly repair), c3f11b3 (informed blueprint
+repair), 2f08b93 (canonical gate enums), 8b187d3 (restart adoption).

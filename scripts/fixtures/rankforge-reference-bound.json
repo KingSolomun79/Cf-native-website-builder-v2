@@ -1,0 +1,40 @@
+{
+  "submission": {
+    "buildMode": "REFERENCE_BOUND",
+    "facts": {
+      "businessName": "RankForge Kenya",
+      "contactEmail": "hello@rankforgekenya.example",
+      "businessType": "SEO & Digital Growth Agency (B2B service agency)",
+      "businessDescription": "RankForge Kenya is a modern SEO and organic-growth agency based in Nairobi. The agency helps businesses improve search visibility, attract qualified organic traffic and turn their websites into stronger lead-generation channels. The company focuses on practical SEO strategy, technical improvements, content planning, local SEO and measurable organic-growth work rather than generic marketing packages.",
+      "idealClientProfile": "Kenyan SMEs, professional-service businesses, ecommerce businesses, hospitality and travel businesses, B2B companies, established local companies wanting stronger online acquisition, and regional East African brands. Typical decision makers: founder, managing director, marketing manager, ecommerce manager, commercial director. Website purpose: generate qualified leads from businesses that need stronger Google visibility.",
+      "city": "Nairobi",
+      "country": "Kenya",
+      "extraInformation": [
+        "Positioning: expert, modern, analytical, commercial, confident, minimal, premium but approachable. Positioning statement: SEO built around commercial growth, not vanity metrics. Supporting message: RankForge helps Kenyan businesses turn search visibility into a repeatable acquisition channel through technical SEO, content strategy and focused execution.",
+        "Services (exactly these six): SEO Strategy — search strategy built around business objectives, target customers, existing search visibility and realistic growth opportunities. Technical SEO — technical audits and implementation guidance covering crawlability, indexing, site architecture, page performance, metadata, internal linking and structured search-engine signals. Local SEO — local search optimisation for businesses targeting Nairobi, other Kenyan cities or multiple locations. SEO Content Strategy — keyword research, search-intent analysis, content architecture, landing-page planning and ongoing editorial strategy. Ecommerce SEO — organic-search optimisation for ecommerce stores, product/category architecture and commercial search visibility. SEO Audits — detailed assessment of technical issues, content gaps, search visibility and opportunities, followed by a prioritised action plan.",
+        "Customer problems the site may describe without statistics: website receives little qualified traffic; company does not rank for commercially important searches; competitors appear above them on Google; existing SEO activity lacks a clear strategy; content is published without clear search intent; website has technical SEO problems; local business is difficult to find through Google; marketing team lacks specialist SEO capacity; traffic exists but does not generate enough enquiries.",
+        "Process, four stages: 01 Diagnose — understand the website, search landscape, competitors and commercial priorities. 02 Prioritise — identify the improvements most likely to strengthen visibility and customer acquisition. 03 Execute — implement technical, structural and content improvements systematically. 04 Improve — measure search performance and continuously refine opportunities.",
+        "Home page direction: hero headline 'Get found when your customers are already searching.' with supporting copy about building stronger organic visibility through technical SEO, content strategy and focused search execution; primary CTA 'Request an SEO Consultation', secondary CTA 'Explore Our Services'; services preview; four-stage process; closing CTA 'Ready to make organic search work harder for your business?' with CTA 'Talk to RankForge'.",
+        "About page direction: establish expertise, approach and philosophy under a headline like 'SEO without the noise.' Explain that RankForge combines technical understanding, search behaviour, content strategy, commercial thinking and disciplined prioritisation. Principles: Commercial relevance — prioritise searches and improvements connected to actual business opportunities. Technical clarity — solve structural problems that make websites harder for search engines and users to understand. Useful content — create content around genuine customer questions and search intent. Continuous improvement — treat SEO as an evolving growth channel rather than a one-off checklist.",
+        "Contact page direction: headline like 'Let's talk about where search can take your business.' Contact form fields: Name, Company, Email, Phone, Website, 'What would you like help with?' (options: SEO Strategy, Technical SEO, Local SEO, Content Strategy, Ecommerce SEO, SEO Audit, Not sure yet), Message.",
+        "Strict content constraints: do not invent testimonials, customers, rankings, traffic growth, revenue results, years in business, founders, team members, certifications, awards, an office address or any quantitative claims. Do not promise guaranteed rankings or specific traffic/revenue increases. The Reference site is a design source only: never copy its name, text, branding, logo, imagery or business content."
+      ]
+    },
+    "reference": {
+      "url": "https://morabeza.digital/",
+      "adaptationContract": {
+        "version": "1",
+        "unsupportedFeatures": [
+          { "feature": "heavy_parallax", "reason": "Reference uses scroll-linked parallax choreography outside static-light generated-site dependencies" }
+        ],
+        "acceptedApproximations": [
+          {
+            "replaces": "heavy_parallax",
+            "substituteOutcome": "Macro composition, section rhythm and visual identity preserved statically; scroll-triggered reveal transitions and reduced-motion-safe depth cues substitute the parallax movement"
+          }
+        ],
+        "qaExceptions": []
+      }
+    }
+  }
+}
