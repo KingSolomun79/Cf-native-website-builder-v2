@@ -609,4 +609,4 @@ dry-run pass; CSO:
 docs/security/2026-09-05-v2-issue42-multimodal-coverage-cso.md — SECURITY OK
 FOR CURRENT SCOPE.
 
-**Commit:** (sha recorded post-commit)
+**Commit:** 3365d7f2169f16d57e6c1bf2207e36c7ea4bb9b6
