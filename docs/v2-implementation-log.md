@@ -566,4 +566,4 @@ dry-run pass; CSO:
 docs/security/2026-09-05-v2-issue41-visual-package-cso.md — SECURITY OK FOR
 CURRENT SCOPE (watch: coverage reported but not gating until #44).
 
-**Commit:** (sha recorded post-commit)
+**Commit:** 587ac6d1dea063e3ddfd47b5802af337c25cef4a
