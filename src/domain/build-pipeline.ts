@@ -67,6 +67,11 @@ export interface BuildPipelineDeps {
   /** Reference URL capture; defaults to the production browser capture.
    *  Only invoked when the Site Generation carries a Reference URL. */
   capture?: ReferenceCaptureFn;
+  /** Multimodal generate seam (issue #42/#43): used for the analyzer and
+   *  generation steps when normalized visual inputs exist. Defaults to the
+   *  production vision adapter (real gateway); tests inject deterministic
+   *  scripts. */
+  visionGenerate?: import("./ai-boundary").RawAiGenerate;
   /** Durable step executor (the workflow's WorkflowStep). Each stage runs as
    *  its own step so a mid-flight isolate eviction retries only that stage;
    *  every stage is idempotent (artifact reuse / spend-resume) by design.
@@ -361,6 +366,7 @@ export async function runBuildPipeline(
       evidence: frozen.evidence,
       evidenceR2Key: frozen.evidenceR2Key,
       visualInputs: frozen.evidence.visualInputs,
+      visionGenerate: deps.visionGenerate,
       generate: deps.generate,
       });
     });
@@ -488,6 +494,8 @@ export async function runBuildPipeline(
         siteId: ctx.siteId,
         buildId: ctx.buildId,
         buildVersionId: ctx.buildVersionId,
+        visualInputs: frozen.evidence.visualInputs,
+        visionGenerate: deps.visionGenerate,
         buildVersionNumber: ctx.buildVersionNumber,
         blueprint: blueprint.blueprint,
         blueprintR2Key: blueprint.artifactR2Key,

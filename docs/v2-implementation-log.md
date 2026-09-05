@@ -610,3 +610,32 @@ docs/security/2026-09-05-v2-issue42-multimodal-coverage-cso.md — SECURITY OK
 FOR CURRENT SCOPE.
 
 **Commit:** 3365d7f2169f16d57e6c1bf2207e36c7ea4bb9b6
+
+## 2026-09-05 — #43 generator visual-reference context (issue E)
+
+**Change:** the generator now SEES the reference it must faithfully realize.
+generateCompleteSite accepts visualInputs + a visionGenerate seam (pipeline
+threads deps.visionGenerate; production default = vision adapter). Every
+visual-output generation step — shared CSS, shared JS, Home, About, Services,
+Contact — carries: the attached normalized reference image (vision path),
+provenance-recorded visual artifact ids, the reference content-isolation
+clause (DO NOT copy copy/names/logos/testimonials/claims/contact/assets),
+and the reference-fidelity-over-generic-convention authority rule. The CSS
+step now receives the previously omitted identity fields (signatureTraits,
+homepageRegions, visualThesis, homepageFirstViewport). ORIGINAL_DESIGN and
+undecodable-evidence builds are byte-identical in prompt shape (no visual
+context block). Business-fact and fabrication gates remain authoritative;
+isolation is restated per-call because the model now sees reference pixels.
+
+**Tests:** new tests/v2-generator-visual-context.test.ts (3): decodable
+evidence -> every generation prompt contains the context/isolation/authority
+clauses + package metadata + provenance records reference/visual artifacts;
+CSS prompt regression (identity fields present); no-visual-inputs run ->
+prompts unchanged. All drive the FULL production pipeline to RELEASE_READY.
+
+**Gates:** full suite 37 files / 272 tests passing; typecheck clean; wrangler
+dry-run pass; CSO:
+docs/security/2026-09-05-v2-issue43-generator-context-cso.md — SECURITY OK
+FOR CURRENT SCOPE.
+
+**Commit:** (sha recorded post-commit)

@@ -24,6 +24,8 @@ import { getBuildStageArtifact, storeBuildStageArtifact, storeBuildStageArtifact
 import type { VisualBlueprint } from "./visual-blueprint";
 import type { ImplementationContract } from "./implementation-planner";
 import type { BusinessFacts } from "./lifecycle-schema";
+import type { ReferenceEvidence } from "./reference-evidence-schema";
+import { createProductionVisionGenerate } from "./reference-analysis";
 
 export const IMAGE_PLAN_SCHEMA_VERSION = "image-plan/1";
 
@@ -254,27 +256,31 @@ ${JSON.stringify(facts, null, 2)}`;
 }
 
 function cssPrompt(blueprint: VisualBlueprint, contract: ImplementationContract): string {
-  return `Generate the shared stylesheet 'site.css' for the four-page Site. Realize the Visual Blueprint tokens, typography roles, color roles, global grid/container logic (including asymmetric column ratios), spacing rhythm, surface language, header/navigation language, motion grammar (transitions only, no libraries) and the responsive contract with real @media rules. Reference-specific grids, overlaps, clipping and asymmetry must survive — do NOT normalize to a generic centered template. Class names may be domain-specific to this design; there is no universal layout template. Anti-fallback rules are binding.
+  return `Generate the shared stylesheet 'site.css' for the four-page Site. Realize the Visual Blueprint visual thesis, tokens, typography roles, color roles, global grid/container logic (including asymmetric column ratios), spacing rhythm, surface language, header/navigation language, motion grammar (transitions only, no libraries) and the responsive contract with real @media rules — and give the signature traits and homepage regions their distinct visual form (surface treatments, component geometry, spacing identity). Reference-specific grids, overlaps, clipping and asymmetry must survive — do NOT normalize to a generic centered template. Class names may be domain-specific to this design; there is no universal layout template. Anti-fallback rules are binding.
 
 CONTRACT FILES: shared CSS file name '${contract.files.sharedCss}'.
 BLUEPRINT:
 ${JSON.stringify(
-  {
-    tokens: blueprint.tokens,
-    globalGrid: blueprint.globalGrid,
-    spacingRhythm: blueprint.spacingRhythm,
-    typographyRoles: blueprint.typographyRoles,
-    colorRoles: blueprint.colorRoles,
-    surfaceLanguage: blueprint.surfaceLanguage,
-    headerNavigation: blueprint.headerNavigation,
-    motionGrammar: blueprint.motionGrammar,
-    responsiveContract: blueprint.responsiveContract,
-    antiFallbackRules: blueprint.antiFallbackRules,
-    accessibilityAdaptations: blueprint.accessibilityAdaptations,
-  },
-  null,
-  2
-)}`;
+    {
+      visualThesis: blueprint.visualThesis,
+      tokens: blueprint.tokens,
+      globalGrid: blueprint.globalGrid,
+      spacingRhythm: blueprint.spacingRhythm,
+      typographyRoles: blueprint.typographyRoles,
+      colorRoles: blueprint.colorRoles,
+      surfaceLanguage: blueprint.surfaceLanguage,
+      headerNavigation: blueprint.headerNavigation,
+      motionGrammar: blueprint.motionGrammar,
+      responsiveContract: blueprint.responsiveContract,
+      antiFallbackRules: blueprint.antiFallbackRules,
+      accessibilityAdaptations: blueprint.accessibilityAdaptations,
+      signatureTraits: blueprint.signatureTraits,
+      homepageFirstViewport: blueprint.homepageFirstViewport,
+      homepageRegions: blueprint.homepageRegions,
+    },
+    null,
+    2
+  )}`;
 }
 
 function jsPrompt(blueprint: VisualBlueprint): string {
@@ -363,6 +369,29 @@ export interface GenerateCompleteSiteInput {
    *  The Blueprint topology stays the only binding structure; these numbers
    *  are contextual measured evidence for each canonical region. */
   compositionTargets?: Array<{ regionId: string; viewportHeightRatio: number; evidenceSegmentCount: number }>;
+  /** Normalized visual inputs from the Reference Visual Package (issue #43):
+   *  in REFERENCE_BOUND the generator SEES the reference it must faithfully
+   *  realize. Absent for ORIGINAL_DESIGN and undecodable evidence. */
+  visualInputs?: NonNullable<ReferenceEvidence["visualInputs"]>;
+  /** Multimodal generate seam (issue #43); defaults to the production vision
+   *  adapter when visual inputs exist. */
+  visionGenerate?: RawAiGenerate;
+}
+
+// Reference context block (issue #43): the attached visual source is
+// supplementary ground truth for realizing the binding Blueprint — layout,
+// composition, style, proportion and visual grammar ONLY. Reference
+// content/branding isolation is restated on every generation call because the
+// model now sees reference pixels; Business Fact and fabrication gates stay
+// authoritative. Reference fidelity outranks generic design convention.
+function referenceContextBlock(visualInputs: NonNullable<ReferenceEvidence["visualInputs"]>): string {
+  return `
+
+REFERENCE VISUAL CONTEXT (issue #43): a normalized rendering of the canonical Reference Screenshot is ATTACHED to this call (${JSON.stringify(
+    visualInputs.map((input) => ({ kind: input.kind, width: input.width, height: input.height }))
+  )}). The binding Visual Blueprint and Implementation Contract remain the authority for WHAT to build; the attached image is supplementary visual ground truth for HOW faithfully to realize them — layout, composition, style, proportion, visual grammar, component geometry, surface rhythm and spacing identity.
+DO NOT copy from the Reference under any circumstances: written copy, business names, logos, testimonials, factual claims, contact information, images or assets. The Reference is a design source only; all content comes from the SUPPORTED BUSINESS FACTS and derived marketing language.
+REFERENCE FIDELITY OVERRIDES GENERIC CONVENTION: when generic web/SaaS/agency design conventions conflict with the Blueprint + reference visual context, the reference wins. An unusual reference design stays unusual.`;
 }
 
 export interface GeneratedSite extends AssembledSiteSource {
@@ -380,13 +409,26 @@ export async function generateCompleteSite(
   const repairBlock = input.repairDirectives
     ? `\n\nBOUNDED REPAIR DIRECTIVES (realization-only fixes from the Fix Coordinator; they may not contradict the fixed Blueprint/Contract/facts):\n${input.repairDirectives}`
     : "";
+  // Reference visual context (issue #43): when normalized visual inputs
+  // exist, every generation step receives the attached reference image via
+  // the vision path plus the isolation/authority clause. Without them
+  // (ORIGINAL_DESIGN, undecodable evidence) prompts are unchanged.
+  const visualInputs = input.visualInputs ?? [];
+  const referenceBlock = visualInputs.length > 0 ? referenceContextBlock(visualInputs) : "";
+  const visionSeam =
+    input.visionGenerate ??
+    (visualInputs.length > 0 ? createProductionVisionGenerate(env, visualInputs) : undefined);
   const stageInput = {
     buildId: input.buildId,
     siteGenerationId: input.siteGenerationId,
     buildVersionId: input.buildVersionId,
     buildVersionNumber: input.buildVersionNumber,
-    inputArtifactIds: [input.blueprintR2Key, input.contractR2Key],
-    generate: input.generate,
+    inputArtifactIds: [
+      input.blueprintR2Key,
+      input.contractR2Key,
+      ...visualInputs.map((input) => input.artifact),
+    ],
+    generate: visionSeam ?? input.generate,
     temperature: 0.35,
   };
 
@@ -418,8 +460,8 @@ export async function generateCompleteSite(
   };
 
   // 1. shared tokens/CSS  2. shared runtime JS — incremental steps.
-  const cssRun = await runOrReuse<SharedCss>("generated_shared_source", "site.css", SharedCssSchema, "generated-source/site-css/1", cssPrompt(input.blueprint, input.contract) + repairBlock);
-  const jsRun = await runOrReuse<SharedJs>("generated_shared_source", "site.js", SharedJsSchema, "generated-source/site-js/1", jsPrompt(input.blueprint) + repairBlock);
+  const cssRun = await runOrReuse<SharedCss>("generated_shared_source", "site.css", SharedCssSchema, "generated-source/site-css/1", cssPrompt(input.blueprint, input.contract) + referenceBlock + repairBlock);
+  const jsRun = await runOrReuse<SharedJs>("generated_shared_source", "site.js", SharedJsSchema, "generated-source/site-js/1", jsPrompt(input.blueprint) + referenceBlock + repairBlock);
 
   // 7 (computed early). deterministic Image Plan (stable Image Slots) — the
   // exact slot ids are enumerated in every page prompt so generated markup
@@ -433,7 +475,7 @@ export async function generateCompleteSite(
   const pages: Partial<Record<PageId, string>> = {};
   const pageRuns: Array<{ pageId: PageId; run: { value: PageHtml; artifactR2Key: string } }> = [];
   for (const pageId of PAGE_IDS) {
-    const run = await runOrReuse<PageHtml>("generated_page", pageId, PageHtmlSchema, `generated-source/page-${pageId}/1`, pagePrompt({ pageId, blueprint: input.blueprint, contract: input.contract, facts, slots: imagePlan.slots, compositionTargets: input.compositionTargets }) + repairBlock);
+    const run = await runOrReuse<PageHtml>("generated_page", pageId, PageHtmlSchema, `generated-source/page-${pageId}/1`, pagePrompt({ pageId, blueprint: input.blueprint, contract: input.contract, facts, slots: imagePlan.slots, compositionTargets: input.compositionTargets }) + referenceBlock + repairBlock);
     pages[pageId] = run.value.html;
     pageRuns.push({ pageId, run: { value: run.value, artifactR2Key: run.artifactR2Key } });
   }
