@@ -686,4 +686,4 @@ resolution seam. Full suite 38 files / 277 tests passing; typecheck clean;
 wrangler dry-run pass. CSO: no new surfaces (deterministic planner + outcome
 classification) — covered by the #44 CSO scope.
 
-**Commit:** (sha recorded post-commit)
+**Commit:** 7eab24277b2a798904e0afb051625daf2c004ef7
