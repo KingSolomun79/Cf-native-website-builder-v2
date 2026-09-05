@@ -256,6 +256,80 @@ describe("Reference intake and evidence freeze", () => {
     expect(read!.adaptationContract!.acceptedApproximations[0].replaces).toBe("complex_slider");
   });
 
+  it("satisfies the SUPPORTED_WITH_LIMITATIONS contract requirement from the Onboarding Submission reference", async () => {
+    // Production seam (2026-09-05 retest): the concrete Adaptation Contract
+    // demanded by PRD section 10 rides the immutable Onboarding Submission —
+    // no test-only injection needed.
+    const context = await newGeneration({
+      reference: {
+        url: "https://reference.example.com/",
+        adaptationContract: {
+          version: "1",
+          unsupportedFeatures: [{ feature: "heavy_parallax", reason: "scroll-linked parallax choreography" }],
+          acceptedApproximations: [
+            { replaces: "heavy_parallax", substituteOutcome: "static composition preserved; reduced-motion-safe scroll reveal substitutes parallax" },
+          ],
+          qaExceptions: [],
+        },
+      },
+      putScreenshot: null,
+    });
+    const frozen = await runReferenceIntake(env, {
+      ...intakeInput(context),
+      capture: captureFn(baseCapture({ motionObservations: [{ kind: "heavy_parallax" }] })),
+    });
+
+    expect(frozen.suitability).toBe("SUPPORTED_WITH_LIMITATIONS");
+    expect(frozen.adaptationContract!.unsupportedFeatures[0].feature).toBe("heavy_parallax");
+
+    const read = await getFrozenReferenceEvidence(env, context.siteGenerationId);
+    expect(read!.adaptationContract!.acceptedApproximations[0].replaces).toBe("heavy_parallax");
+  });
+
+  it("fails closed on a malformed Adaptation Contract frozen in a legacy submission payload", async () => {
+    const context = await newGeneration({ reference: { url: "https://reference.example.com/" }, putScreenshot: null });
+
+    // Submission immutability is trigger-enforced, so the legacy row (frozen
+    // before submission-time contract validation existed) is constructed
+    // directly. The intake error throws before any package write, so the
+    // build/version ids are never persisted.
+    const owner = await env.DB.prepare(
+      "SELECT business_id, site_id FROM onboarding_submissions WHERE id = (SELECT onboarding_submission_id FROM site_generations WHERE id = ?)"
+    )
+      .bind(context.siteGenerationId)
+      .first<{ business_id: string; site_id: string }>();
+    const submissionId = `sub-legacy-${Math.random().toString(36).slice(2)}`;
+    const generationId = `gen-legacy-${Math.random().toString(36).slice(2)}`;
+    await env.DB.prepare(
+      "INSERT INTO onboarding_submissions (id, business_id, site_id, build_mode, schema_version, payload_json, fact_snapshot_json, checksum, submitted_at) VALUES (?, ?, ?, 'REFERENCE_BOUND', 1, ?, '{}', 'legacy', '2026-09-05T00:00:00.000Z')"
+    )
+      .bind(
+        submissionId,
+        owner!.business_id,
+        owner!.site_id,
+        JSON.stringify({
+          buildMode: "REFERENCE_BOUND",
+          reference: { url: "https://reference.example.com/", adaptationContract: { version: "1" } },
+        })
+      )
+      .run();
+    await env.DB.prepare(
+      "INSERT INTO site_generations (id, site_id, onboarding_submission_id, build_mode, sequence_number, created_at, updated_at) VALUES (?, ?, ?, 'REFERENCE_BOUND', 2, '2026-09-05T00:00:00.000Z', '2026-09-05T00:00:00.000Z')"
+    )
+      .bind(generationId, owner!.site_id, submissionId)
+      .run();
+
+    await expect(
+      runReferenceIntake(env, {
+        siteGenerationId: generationId,
+        buildId: context.buildId,
+        buildVersionId: context.buildVersionId,
+        buildVersionNumber: 1,
+        capture: captureFn(baseCapture({ motionObservations: [{ kind: "heavy_parallax" }] })),
+      })
+    ).rejects.toMatchObject({ code: "ADAPTATION_CONTRACT_INVALID" });
+  });
+
   it("freezes UNSUPPORTED classification instead of hiding it as a limitation", async () => {
     const context = await newGeneration({ reference: { url: "https://reference.example.com/" }, putScreenshot: null });
     const frozen = await runReferenceIntake(env, {

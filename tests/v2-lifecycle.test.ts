@@ -151,6 +151,32 @@ describe("V2 domain lifecycle backbone", () => {
     expect(view!.builds).toEqual([]);
   });
 
+  it("accepts an Adaptation Contract on the Reference input, freezes it with the submission, and rejects malformed contracts", async () => {
+    const contract = {
+      version: "1",
+      unsupportedFeatures: [{ feature: "heavy_parallax", reason: "scroll-linked parallax choreography" }],
+      acceptedApproximations: [
+        { replaces: "heavy_parallax", substituteOutcome: "static composition preserved; reduced-motion-safe scroll reveal substitutes parallax" },
+      ],
+      qaExceptions: [],
+    };
+    const response = await postSubmission(app, env, {
+      reference: { url: "https://meridian-atelier.example.com/", adaptationContract: contract },
+    });
+    expect(response.status).toBe(201);
+    const body = (await response.json()) as { siteGenerationId: string };
+    const view = await getSiteGenerationView(env, body.siteGenerationId);
+    expect(view!.submission.reference?.adaptationContract).toEqual(contract);
+
+    const malformed = await postSubmission(app, env, {
+      reference: {
+        url: "https://meridian-atelier.example.com/",
+        adaptationContract: { version: "1", unsupportedFeatures: "heavy_parallax" },
+      },
+    });
+    expect(malformed.status).toBe(400);
+  });
+
   it("starts a replacement Site Generation on the same stable Site from a later submission, leaving the earlier submission untouched", async () => {
     const first = ((await (await postSubmission(app, env)).json()) as { siteId: string; onboardingSubmissionId: string; siteGenerationId: string });
 

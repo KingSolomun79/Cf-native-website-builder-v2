@@ -8,6 +8,7 @@
 
 import { Type, type Static } from "@sinclair/typebox";
 import { Value } from "@sinclair/typebox/value";
+import { AdaptationContractSchema } from "./reference-evidence-schema";
 
 export const ONBOARDING_SUBMISSION_SCHEMA_VERSION = 1;
 
@@ -56,10 +57,18 @@ const optionalTrimmedString = (maxLength: number) =>
 // of a Reference Screenshot, a Reference URL, or both (CONTEXT.md). Deep
 // suitability/evidence validation is the Reference intake stage (issue #7);
 // here we only pin the shape.
+//
+// adaptationContract (production retest 2026-09-05): the concrete
+// human-authored Adaptation Contract demanded by PRD section 10 for
+// SUPPORTED_WITH_LIMITATIONS References rides the immutable Onboarding
+// Submission — capture-observed limitations (e.g. heavy_parallax) are declared
+// and legalized here, before any Build exists. Intake re-validates it against
+// the frozen suitability decision.
 export const ReferenceInputSchema = Type.Object(
   {
     screenshotR2Key: Type.Optional(Type.String({ minLength: 1, maxLength: 512 })),
     url: Type.Optional(Type.String({ pattern: "^https?://", maxLength: 2048 })),
+    adaptationContract: Type.Optional(AdaptationContractSchema),
   },
   { additionalProperties: false }
 );

@@ -23,6 +23,7 @@ import type { OnboardingSubmissionRow } from "./lifecycle";
 import { buildVersionEvidenceKey } from "./artifact-keys";
 import {
   ADAPTATION_CONTRACT_VERSION,
+  AdaptationContractSchema,
   REFERENCE_EVIDENCE_VERSION,
   ReferenceEvidenceSchema,
   adaptIfValid,
@@ -58,6 +59,7 @@ export type ReferenceIntakeErrorCode =
   | "REFERENCE_SCREENSHOT_INVALID"
   | "REFERENCE_CAPTURE_FAILED"
   | "ADAPTATION_CONTRACT_REQUIRED"
+  | "ADAPTATION_CONTRACT_INVALID"
   | "EVIDENCE_SCHEMA_INVALID";
 
 export class ReferenceIntakeError extends Error {
@@ -169,7 +171,12 @@ function packageFromRow(row: ReferencePackageRow, alreadyFrozen: boolean): Froze
 async function loadSubmission(
   env: Env,
   siteGenerationId: string
-): Promise<{ submission: OnboardingSubmissionRow; reference: { screenshotR2Key?: string; url?: string }; buildMode: string }> {
+): Promise<{
+  submission: OnboardingSubmissionRow;
+  reference: { screenshotR2Key?: string; url?: string };
+  submittedContract: AdaptationContract | null;
+  buildMode: string;
+}> {
   const generation = await env.DB.prepare("SELECT * FROM site_generations WHERE id = ?")
     .bind(siteGenerationId)
     .first<{ id: string; onboarding_submission_id: string; build_mode: string }>();
@@ -184,9 +191,25 @@ async function loadSubmission(
   }
   const payload = JSON.parse(submission.payload_json) as {
     buildMode: string;
-    reference?: { screenshotR2Key?: string; url?: string };
+    reference?: { screenshotR2Key?: string; url?: string; adaptationContract?: unknown };
   };
-  return { submission, reference: payload.reference ?? {}, buildMode: payload.buildMode };
+  // The production source of the Adaptation Contract is the immutable
+  // Onboarding Submission (submission-time schema validation pins the shape).
+  // A malformed contract frozen before that validation existed must fail
+  // closed here rather than be silently dropped — silently dropping it would
+  // turn a declared legalization into a missing-contract failure.
+  let submittedContract: AdaptationContract | null = null;
+  const rawContract = payload.reference?.adaptationContract;
+  if (rawContract !== undefined) {
+    if (!Value.Check(AdaptationContractSchema, rawContract)) {
+      throw new ReferenceIntakeError(
+        "ADAPTATION_CONTRACT_INVALID",
+        "Adaptation Contract on the Onboarding Submission does not match the versioned schema"
+      );
+    }
+    submittedContract = rawContract;
+  }
+  return { submission, reference: payload.reference ?? {}, submittedContract, buildMode: payload.buildMode };
 }
 
 // Reads and validates the submitted Reference Screenshot before anything is
@@ -243,13 +266,17 @@ export async function runReferenceIntake(
     return packageFromRow(existing, true);
   }
 
-  const { reference, buildMode } = await loadSubmission(env, input.siteGenerationId);
+  const { reference, submittedContract, buildMode } = await loadSubmission(env, input.siteGenerationId);
   if (buildMode !== "REFERENCE_BOUND") {
     throw new ReferenceIntakeError(
       "NOT_REFERENCE_BOUND",
       `Reference intake only applies to REFERENCE_BOUND Site Generations (got '${buildMode}')`
     );
   }
+
+  // Effective contract: test/direct injections win, the submitted contract is
+  // the production source.
+  const suppliedContract = input.adaptationContract ?? submittedContract;
 
   const hasScreenshot = typeof reference.screenshotR2Key === "string" && reference.screenshotR2Key.length > 0;
   const hasUrl = typeof reference.url === "string" && reference.url.length > 0;
@@ -482,7 +509,7 @@ export async function runReferenceIntake(
 
   let adaptationContract: AdaptationContract | null = null;
   if (decision.suitability === "SUPPORTED_WITH_LIMITATIONS") {
-    const contract = input.adaptationContract;
+    const contract = suppliedContract;
     if (!contract) {
       throw new ReferenceIntakeError(
         "ADAPTATION_CONTRACT_REQUIRED",
@@ -509,7 +536,7 @@ export async function runReferenceIntake(
   // an otherwise SUPPORTED reference (the SWL branch above leaves
   // `adaptationContract` null there), so consult the submitted contract too.
   const evidenceSufficiency = evaluateReferenceEvidenceSufficiency(evidence, {
-    adaptationContract: adaptationContract ?? input.adaptationContract ?? null,
+    adaptationContract: adaptationContract ?? suppliedContract,
   });
 
   const evidenceJson = JSON.stringify(evidence);

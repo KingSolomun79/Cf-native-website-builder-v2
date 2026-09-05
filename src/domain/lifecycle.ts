@@ -165,11 +165,17 @@ export async function startSiteGeneration(
   }
   const payload = validation.value;
   const facts = normalizeBusinessFacts(payload.facts);
+  // The frozen reference keeps every validated field: the Adaptation Contract
+  // is part of the declared design origin and must survive normalization —
+  // intake re-validates it against the capture-observed limitations.
   const reference: ReferenceInput | undefined =
     payload.reference && (payload.reference.screenshotR2Key || payload.reference.url)
       ? {
           ...(payload.reference.screenshotR2Key ? { screenshotR2Key: payload.reference.screenshotR2Key } : {}),
           ...(payload.reference.url ? { url: payload.reference.url } : {}),
+          ...(payload.reference.adaptationContract
+            ? { adaptationContract: payload.reference.adaptationContract }
+            : {}),
         }
       : undefined;
 
