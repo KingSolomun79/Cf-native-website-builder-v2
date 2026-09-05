@@ -525,6 +525,16 @@ export async function generateVisionWithGateway(
       if (options?.jsonMode && route.provider !== "zhipu") {
         body.response_format = { type: "json_object" };
       }
+      // ZAI-leg serving shape for the canonical reasoning model — same live
+      // evidence as the text path (issue #30): reasoning_content draws from
+      // the same max_tokens budget, so a plain 4096 cap returns EMPTY content
+      // with finish_reason "length" (production retest 2026-09-05: the
+      // multimodal analyzer burned its whole budget on reasoning). Disable
+      // thinking and raise the token floor for direct structured output.
+      if (route.provider === "zhipu") {
+        body.max_tokens = Math.max(body.max_tokens ?? 0, 16384);
+        (body as ChatCompletionRequest & { thinking?: { type: "enabled" | "disabled" } }).thinking = { type: "disabled" };
+      }
 
       try {
         const response = await (options?.requester ?? callGatewayChat)(env, body, meta, route.provider, controller.signal, {
