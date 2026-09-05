@@ -302,7 +302,7 @@ function pagePrompt(input: {
   const slotsForPage = (page: PageId, all: ImageSlot[]) => all.filter((slot) => slot.page === page).map((slot) => slot.id);
   const page = contract.pages.find((candidate) => candidate.id === pageId)!;
   const base = `Generate the complete semantic HTML page '${page.path}' (document for page id '${pageId}'). Requirements:
-- <!DOCTYPE html>, <html lang>, semantic <header>/<nav>/<main>/<footer>, exactly ONE <h1>.
+- <!DOCTYPE html>, <html lang>, semantic <header>/<nav>/<main>/<footer>, exactly ONE <h1>. The literal elements <header>, <nav>, <main> and <footer> are REQUIRED and validated mechanically: when a region section wraps the page footer, the <footer> element itself must still exist inside it — a <section> in place of <footer> fails validation.
 - Include EXACTLY these tags in <head>/<body>: <link rel="stylesheet" href="site.css"> and <script src="site.js" defer></script>, plus the responsive viewport meta.
 - Navigation links to /, /about, /services, /contact exactly.
 - Every image is an unresolved placeholder: <img src="IMG:{slotId}" data-image-id="{slotId}" alt="..."> using ONLY the slot ids listed below.
@@ -494,8 +494,48 @@ export async function generateCompleteSite(
   // 8. deterministic cross-file assembly validation BEFORE anything flows
   // downstream.
   const validation = validateAssembledSite(source, { contract: input.contract, slots: imagePlan.slots });
+
+  // Bounded targeted assembly repair (production retest 2026-09-05): the
+  // frozen per-page subkeys are reused verbatim by engine retries, so a
+  // validation failure can never heal through blind re-runs. Deterministic
+  // findings instead drive ONE informed regeneration per affected page under
+  // a NEW immutable subkey, then the whole site is re-validated once.
   if (!validation.passed) {
-    throw new SiteGenerationValidationError(validation.findings);
+    const affected = new Set<PageId>();
+    for (const finding of validation.findings) {
+      const match = /^(home|about|services|contact):/.exec(finding.detail);
+      if (match) affected.add(match[1] as PageId);
+    }
+    if (affected.size > 0) {
+      const repairDirectives = `\n\n## Assembly repair directives
+Your previously generated page FAILED deterministic assembly validation. Regenerate the COMPLETE page so that every finding below is fixed. The literal semantic elements <header>, <nav>, <main> and <footer> are mechanically required (a region <section> may wrap the <footer> element, but the <footer> element itself must exist):
+${validation.findings.map((finding) => `- ${finding.id}: ${finding.detail}`).join("\n")}`;
+      for (const pageId of PAGE_IDS) {
+        if (!affected.has(pageId)) continue;
+        const pageRun = pageRuns.find((entry) => entry.pageId === pageId)!;
+        const repaired = await runSchemaValidatedAiStage<PageHtml>(env, {
+          ...stageInput,
+          stage: "website-generator",
+          schema: PageHtmlSchema as Parameters<typeof runSchemaValidatedAiStage>[1]["schema"],
+          schemaVersion: `generated-source/page-${pageId}/1`,
+          userPrompt: pagePrompt({ pageId, blueprint: input.blueprint, contract: input.contract, facts, slots: imagePlan.slots, compositionTargets: input.compositionTargets }) + referenceBlock + repairBlock + repairDirectives,
+        });
+        await storeBuildStageArtifact(env, {
+          buildId: input.buildId, buildVersionId: input.buildVersionId, siteGenerationId: input.siteGenerationId,
+          kind: "generated_page", subkey: `${pageId}.assembly-repair-1`, schemaVersion: `generated-source/page-${pageId}/1`,
+          value: repaired.value, provenance: repaired.provenance,
+        });
+        pageRun.run = { value: repaired.value, artifactR2Key: repaired.artifactR2Key };
+        source.pages[pageId] = repaired.value.html;
+      }
+    }
+  }
+
+  const finalValidation = validation.passed
+    ? validation
+    : validateAssembledSite(source, { contract: input.contract, slots: imagePlan.slots });
+  if (!finalValidation.passed) {
+    throw new SiteGenerationValidationError(finalValidation.findings);
   }
 
   // Generated source artifacts were persisted per subkey as they were
@@ -526,5 +566,5 @@ export async function generateCompleteSite(
     detail: "Deterministic cross-file assembly validation passed",
   });
 
-  return { ...source, imagePlan, validation, artifacts };
+  return { ...source, imagePlan, validation: finalValidation, artifacts };
 }

@@ -275,6 +275,52 @@ async function preparedContext(): Promise<{
 }
 
 describe("incremental four-page generation", () => {
+  it("repairs a deterministic assembly-validation failure with ONE informed page regeneration (production retest 2026-09-05)", async () => {
+    const context = await preparedContext();
+    // The production defect shape: the footer region is rendered as a
+    // <section class="footer-zone"> — footer CONTENT without the semantic
+    // <footer> element the assembly validator mechanically requires.
+    const footerlessHome = HOME_HTML.replace(/<footer>/i, '<section class="footer-zone">').replace(/<\/footer>/i, "</section>");
+    expect(footerlessHome.toLowerCase()).not.toContain("<footer");
+    const prompts: string[] = [];
+    let repairCalls = 0;
+    const generate: RawAiGenerate = async (_system, user) => {
+      prompts.push(user);
+      if (user.includes("Assembly repair directives")) {
+        repairCalls += 1;
+        expect(user).toContain("missing semantic <footer>");
+        return { content: JSON.stringify({ html: HOME_HTML }), provider: "test", model: "test-model-g" };
+      }
+      if (user.includes("shared stylesheet")) return { content: JSON.stringify({ css: SHARED_CSS }), provider: "test", model: "test-model-g" };
+      if (user.includes("minimal shared runtime")) return { content: JSON.stringify({ js: SHARED_JS }), provider: "test", model: "test-model-g" };
+      if (user.includes("page id 'home'")) return { content: JSON.stringify({ html: footerlessHome }), provider: "test", model: "test-model-g" };
+      if (user.includes("page id 'about'")) return { content: JSON.stringify({ html: ABOUT_HTML }), provider: "test", model: "test-model-g" };
+      if (user.includes("page id 'services'")) return { content: JSON.stringify({ html: SERVICES_HTML }), provider: "test", model: "test-model-g" };
+      return { content: JSON.stringify({ html: CONTACT_HTML }), provider: "test", model: "test-model-g" };
+    };
+
+    const site = await generateCompleteSite(env, {
+      siteGenerationId: context.siteGenerationId,
+      siteId: context.siteId,
+      buildId: context.buildId,
+      buildVersionId: context.buildVersionId,
+      buildVersionNumber: 1,
+      blueprint: BLUEPRINT,
+      blueprintR2Key: context.blueprintR2Key,
+      contract: context.contract,
+      contractR2Key: context.contractR2Key,
+      generate,
+    });
+
+    expect(repairCalls, `findings: ${JSON.stringify(site.validation.findings)}`).toBe(1);
+    expect(site.validation.passed, `findings: ${JSON.stringify(site.validation.findings)}`).toBe(true);
+    expect(site.pages.home.toLowerCase()).toContain("<footer");
+    const repairArtifact = await env.DB.prepare(
+      "SELECT id FROM build_stage_artifacts WHERE build_version_id = ? AND kind = 'generated_page' AND subkey = 'home.assembly-repair-1'"
+    ).bind(context.buildVersionId).first();
+    expect(repairArtifact).not.toBeNull();
+  });
+
   it("passes canonical measured composition targets to the home prompt when provided", async () => {
     const context = await preparedContext();
     const fullPrompts: string[] = [];
