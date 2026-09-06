@@ -352,23 +352,135 @@ function isFactSafeLabel(label: string, factWords: Set<string>): boolean {
   return words.every((word) => factWords.has(word) || GENERIC_TRUST_LABEL_WORDS.has(word));
 }
 
-// Collect short entity-carrying labels from a trust context's inner HTML:
-// list items, image alt texts and text-only elements.
-function collectTrustLabels(innerHtml: string): string[] {
-  const labels: string[] = [];
+// ── Issue #53: entity classification by text ROLE ───────────────────────────
+//
+// A trust-signaling region triggers INSPECTION, not blanket suspicion. The
+// semantic question is "is this text presented as the identity of a third-
+// party trust entity the Business Facts do not support?", never "is every
+// text node made of fact-vocabulary words?". The production false positives
+// ("Working with RankForge", "Who We Serve") were heading prose in trust-
+// role regions, not fabricated client identities.
+//
+// Roles (minimum representation compatible with the DOM walk):
+//   identity — logo-strip/name carriers: list items, image alt text,
+//              elements whose own attributes signal a trust presentation
+//              (class="client-logo"). Strict fact check — this is where
+//              fabricated entities live ("Glap Thon", "6699" as logo).
+//   heading  — h3-h6 prose. Title Case is normal heading style, not a brand
+//              mark; flagged only when it carries a proper-noun claim (an
+//              interior capitalized word that is neither function/common
+//              heading vocabulary nor fact/business vocabulary), or when the
+//              strict fact check fails.
+//   text     — span/p/div copy. Kept on the strict path (short entity-shaped
+//              fragments in a trust band are still identity claims), except
+//              that a bare decorative numeric mark is not a company.
+
+type TrustTextRole = "identity" | "heading" | "text";
+
+// Common verbs/nouns of descriptive headings — cannot constitute an entity
+// claim even when Title-Cased ("Who We Serve", "Our Approach"). Deliberately
+// narrow; every word must ALSO survive the shape gate, and any word not in
+// this set, the generic set, or the fact/business vocabulary still fails.
+const HEADING_COMMON_WORDS = new Set(
+  ("serve serves served serving approach work works working worked build builds building built " +
+    "grow grows growing grown improving improve improve")
+    .split(" ")
+    .filter(Boolean)
+);
+
+function bareWord(word: string): string {
+  return word.toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+
+// Capitalized words in ANY position (acronyms of <=5 letters excluded — the
+// shape gate already treats them as non-proper). This is the proper-noun
+// signal set used by every role-aware exemption below.
+function capitalizedWords(label: string): string[] {
+  const found: string[] = [];
+  for (const word of label.trim().split(/\s+/)) {
+    const bare = bareWord(word);
+    if (!bare || /^\d+$/.test(bare)) continue;
+    if (/^[A-Z]/.test(word) && !(bare === bare.toUpperCase() && bare.length <= 5)) found.push(bare);
+  }
+  return found;
+}
+
+// The Business name's distinguishing token — its longest word ("rankforge"
+// for "RankForge Kenya"). A label is a BUSINESS SELF-REFERENCE only when all
+// of its capitalized words are safe vocabulary AND the distinctive token is
+// present, so "Working with RankForge" is exempt while "Acme Kenya" (merely
+// borrowing the name's geographic word) is not.
+function businessNameDistinctiveToken(businessNameWords: Set<string>): string {
+  return [...businessNameWords].reduce((a, b) => (b.length > a.length ? b : a), "");
+}
+
+// A bare numeric/symbolic mark ("6699", "+", "*") presented as copy or a
+// heading is decoration, not a company — unless it sits in an identity slot
+// (li / alt / logo-class), where marks read as brand labels.
+function isDecorativeNumericMark(label: string): boolean {
+  const trimmed = label.trim();
+  return /^[\d\s.,+\-()#*·:']+$/.test(trimmed) && /\d/.test(trimmed);
+}
+
+// The single failing predicate for one collected label (issue #53). Returns
+// false when the label is safe. A trust region triggers INSPECTION; whether a
+// label is an entity claim depends on its presentation role:
+//   identity (li, img alt, logo-class elements) — strict #48 semantics:
+//     shape gate + every-word fact check. This is where fabricated entities
+//     live ("Glap Thon", "6699" rendered as a logo).
+//   heading (h3-h6 prose) — Title Case is heading style, not a brand mark:
+//     flagged only when a capitalized word is neither function/common-heading
+//     vocabulary nor fact/business vocabulary ("Digital Africa Awards" fails;
+//     "Who We Serve", "Our Approach" pass), or on strict fact-check failure.
+//   text (span/p/div copy) — strict, except a bare decorative numeric mark.
+// Business self-reference ("Working with RankForge") is safe in every role.
+function classifyTrustLabelFailure(
+  label: string,
+  role: TrustTextRole,
+  factWords: Set<string>,
+  businessNameWords: Set<string>
+): boolean {
+  if (!isEntityLikeLabel(label)) return false;
+  const caps = capitalizedWords(label);
+  const safe = caps.every(
+    (word) => GENERIC_TRUST_LABEL_WORDS.has(word) || HEADING_COMMON_WORDS.has(word) || factWords.has(word) || businessNameWords.has(word)
+  );
+  const distinctive = businessNameDistinctiveToken(businessNameWords);
+  if (safe && distinctive !== "" && caps.includes(distinctive)) return false; // business self-reference
+  if (role === "heading" && safe) return false; // descriptive heading, no proper-noun claim
+  if (role !== "identity" && isDecorativeNumericMark(label)) return false; // decorative mark
+  return !isFactSafeLabel(label, factWords);
+}
+
+// Collect short entity-carrying labels from a trust context's inner HTML,
+// each with its presentation ROLE (issue #53): list items, image alt texts
+// and text-only elements. The role decides how strictly the label is judged.
+function collectTrustLabels(innerHtml: string): Array<{ text: string; role: TrustTextRole }> {
+  const labels: Array<{ text: string; role: TrustTextRole }> = [];
   const stripTags = (html: string) => html.replace(/<[^>]+>/g, " ").replace(/&[a-z]+;/gi, " ").replace(/\s+/g, " ").trim();
   for (const match of innerHtml.matchAll(/<li\b[^>]*>([\s\S]*?)<\/li>/gi)) {
     const text = stripTags(match[1]);
-    if (text) labels.push(text);
+    if (text) labels.push({ text, role: "identity" });
   }
   for (const match of innerHtml.matchAll(/<img\b[^>]*>/gi)) {
     const alt = /alt=(?:"([^"]*)"|'([^']*)')/i.exec(match[0]);
     const text = (alt?.[1] ?? alt?.[2] ?? "").trim();
-    if (text) labels.push(text);
+    if (text) labels.push({ text, role: "identity" });
   }
-  for (const match of innerHtml.matchAll(/<(span|p|h3|h4|h5|h6|div)\b[^>]*>([^<]*)<\/\1>/gi)) {
-    const text = match[2].replace(/&[a-z]+;/gi, " ").replace(/\s+/g, " ").trim();
-    if (text) labels.push(text);
+  for (const match of innerHtml.matchAll(/<(span|p|h3|h4|h5|h6|div)\b([^>]*)>([^<]*)<\/\1>/gi)) {
+    const text = match[3].replace(/&[a-z]+;/gi, " ").replace(/\s+/g, " ").trim();
+    if (!text) continue;
+    const tagName = match[1].toLowerCase();
+    const attributes = match[2] ?? "";
+    // h3-h6 are heading prose; an element whose own attributes signal a
+    // trust/logo presentation (class="client-logo", aria-label="Our clients")
+    // is an identity slot regardless of tag; everything else is copy.
+    const role: TrustTextRole = /^h[3-6]$/.test(tagName)
+      ? "heading"
+      : TRUST_CONTEXT_PATTERN.test(attributes)
+        ? "identity"
+        : "text";
+    labels.push({ text, role });
   }
   return labels;
 }
@@ -395,7 +507,8 @@ export function lintTrustContexts(
   html: string,
   pageId: PageId,
   factWords: Set<string>,
-  trustRegionPurposes: Map<string, string>
+  trustRegionPurposes: Map<string, string>,
+  businessNameWords: Set<string> = new Set()
 ): TrustLabel[] {
   const violations = new Map<string, TrustLabel>();
   const contextRegions = new Set(trustRegionPurposes.keys());
@@ -412,8 +525,8 @@ export function lintTrustContexts(
 
   const consider = (innerHtml: string, context: string) => {
     for (const label of collectTrustLabels(innerHtml)) {
-      if (isEntityLikeLabel(label) && !isFactSafeLabel(label, factWords)) {
-        if (!violations.has(label)) violations.set(label, { text: label, context });
+      if (classifyTrustLabelFailure(label.text, label.role, factWords, businessNameWords)) {
+        if (!violations.has(label.text)) violations.set(label.text, { text: label.text, context });
       }
     }
   };
@@ -570,7 +683,10 @@ export function validateAssembledSite(
     }
     if (context.facts || trustRegionPurposes.size > 0) {
       const factWords = factVocabulary(context.facts);
-      for (const violation of lintTrustContexts(html, pageId, factWords, trustRegionPurposes)) {
+      const businessNameWords = new Set<string>(
+        (context.facts?.businessName ?? "").toLowerCase().split(/[^a-z0-9]+/).filter(Boolean)
+      );
+      for (const violation of lintTrustContexts(html, pageId, factWords, trustRegionPurposes, businessNameWords)) {
         findings.push({
           id: "FABRICATED_TRUST_ENTITY",
           detail: `${pageId}: trust label '${violation.text}' is not backed by the Business Facts (${violation.context}) — reproducing a Reference trust structure never licenses inventing its entities`,
@@ -729,6 +845,7 @@ function pagePrompt(input: {
 - Navigation links to /, /about, /services, /contact exactly.
 - Every image is an unresolved placeholder: <img src="IMG:{slotId}" data-image-id="{slotId}" alt="..."> using ONLY the slot ids listed below.
 - ${factsBlock(facts)}
+- TRUST-CONTEXT TRUTH RULE (binding, issue #48/#53): if the Blueprint realizes a Reference trust band (client-logo wall, testimonials, awards, press, credibility band), preserve its visual composition but populate it ONLY with Business-Fact-backed entities or fact-safe substitutes (service categories, audience categories from the ideal-client profile, locations, process terms, abstract non-entity marks), presented so they are never mistaken for clients, partners or endorsements. NEVER invent clients, partners, companies, awards, certifications, publications, reviewers or endorsements. Headings inside such regions must be descriptive ("Who We Serve", "Our approach") or Business-name self-references ("Working with ${facts.businessName}") — never unsupported third-party names.
 - Derived marketing copy may interpret these facts safely but must not invent unsupported facts. Fit copy to the Blueprint's measured region capacities — shorten or tighten copy rather than dropping required region geometry.${stylingContract}`;
 
   if (pageId === "home") {
@@ -948,7 +1065,9 @@ export async function generateCompleteSite(
     if (affected.size > 0) {
       const repairDirectives = `\n\n## Assembly repair directives
 Your previously generated page FAILED deterministic assembly validation. Regenerate the COMPLETE page so that every finding below is fixed. The literal semantic elements <header>, <nav>, <main> and <footer> are mechanically required (a region <section> may wrap the <footer> element, but the <footer> element itself must exist):
-${validation.findings.map((finding) => `- ${finding.id}: ${finding.detail}`).join("\n")}`;
+${validation.findings.map((finding) => `- ${finding.id}: ${finding.detail}`).join("\n")}
+
+BUSINESS TRUTH (binding, issue #48/#53 — inherited by every repair): fixing layout must never introduce unsupported facts. No invented clients, partners, companies, awards, certifications, publications, reviewers or endorsements, and no third-party identity labels inside trust-signaling regions (client bands, credibility bands, testimonials). Populate trust-like regions only with Business-Fact-backed entities or fact-safe substitutes (service categories, audience categories, locations, process terms, abstract marks); descriptive headings and the Business's own name are always safe.`;
       for (const pageId of PAGE_IDS) {
         if (!affected.has(pageId)) continue;
         const pageRun = pageRuns.find((entry) => entry.pageId === pageId)!;

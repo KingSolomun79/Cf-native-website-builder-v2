@@ -228,3 +228,82 @@ describe("generated imagery cannot carry fabricated identity (issue #48)", () =>
     expect(prompt).toContain("screenshot-like composition");
   });
 });
+
+// ── Issue #53: role-aware entity classification ─────────────────────────────
+//
+// The #48 principle is unchanged — invented third-party trust identities are
+// fabrication — but the lint must ask "is this text presented as the identity
+// of an unsupported third-party trust entity?", not "is every text node made
+// of fact-vocabulary words?". The production false positives were heading
+// prose inside Blueprint trust regions, not client names.
+
+const FACTS_WITHOUT_PARTNERS: BusinessFacts = {
+  ...FACTS,
+  extraInformation: "Services: SEO Strategy, Technical SEO, Local SEO.",
+};
+
+describe("role-aware trust-entity classification (issue #53)", () => {
+  it("PASSES descriptive and self-referential headings inside a trust-signaling region", () => {
+    const html = PAGE(`<section class="credibility-band" data-region="hero" aria-label="Trusted by">
+  <h3>Who We Serve</h3>
+  <h4>Working with RankForge</h4>
+  <h3>Our Approach</h3>
+  <h4>Built for growing teams</h4>
+  <h3>RankForge Kenya</h3>
+  <p>Search growth built around commercial outcomes.</p>
+</section>`);
+    const verdict = verdictFor(html, FACTS_WITHOUT_PARTNERS);
+    expect(truthFindings(verdict.findings)).toEqual([]);
+  });
+
+  it("PASSES fact-backed service and location labels in an identity slot", () => {
+    const html = PAGE(CLIENT_BAND(["SEO Strategy", "Technical SEO", "Nairobi", "Kenya"]));
+    expect(truthFindings(verdictFor(html, FACTS_WITHOUT_PARTNERS).findings)).toEqual([]);
+  });
+
+  it("PASSES a bare decorative numeric mark outside identity slots", () => {
+    const html = PAGE(`<section data-region="region_07"><p>6699</p><span>+ · ·</span></section>`);
+    expect(truthFindings(verdictFor(html, FACTS_WITHOUT_PARTNERS).findings)).toEqual([]);
+  });
+
+  it("FAILS unsupported third-party names in identity slots, including novel shapes (fail closed)", () => {
+    const html = PAGE(CLIENT_BAND(["Acme Kenya", "Marivert", "Northstar Group", "Zynthara Labs"]));
+    const findings = truthFindings(verdictFor(html, FACTS_WITHOUT_PARTNERS).findings);
+    for (const name of ["Acme Kenya", "Marivert", "Northstar Group", "Zynthara Labs"]) {
+      expect(findings.some((f) => f.detail.includes(`'${name}'`)), name).toBe(true);
+    }
+  });
+
+  it("FAILS award/press/person entity claims even when presented as trust-band headings", () => {
+    const html = PAGE(`<section class="logo-strip" aria-label="Trusted by">
+  <h3>Digital Africa Awards</h3>
+  <h4>Forbes Kenya</h4>
+  <h3>John Kamau</h3>
+</section>`);
+    const findings = truthFindings(verdictFor(html, FACTS_WITHOUT_PARTNERS).findings);
+    for (const name of ["Digital Africa Awards", "Forbes Kenya", "John Kamau"]) {
+      expect(findings.some((f) => f.detail.includes(`'${name}'`)), name).toBe(true);
+    }
+  });
+
+  it("the business self-reference exemption never swallows a third-party name", () => {
+    const html = PAGE(`<section class="logo-strip" aria-label="Trusted by"><h3>RankForge Partners with Microsoft</h3></section>`);
+    const findings = truthFindings(verdictFor(html, FACTS_WITHOUT_PARTNERS).findings);
+    expect(findings.some((f) => f.detail.includes("'RankForge Partners with Microsoft'"))).toBe(true);
+  });
+
+  it("still FAILS the frozen fabricated identities in identity slots (no #48 regression)", () => {
+    const verdict = verdictFor(PAGE(CLIENT_BAND(FROZEN_FABRICATED_NAMES)), FACTS_WITHOUT_PARTNERS);
+    const findings = truthFindings(verdict.findings);
+    for (const name of FROZEN_FABRICATED_NAMES) {
+      expect(findings.some((f) => f.detail.includes(`'${name}'`)), name).toBe(true);
+    }
+  });
+
+  it("numeric marks in IDENTITY slots stay blocked — presentation context decides", () => {
+    const html = PAGE(`<section class="logo-strip" aria-label="Our clients"><ul class="logo-wall"><li>6699</li><li><img src="assets/images/a.webp" alt="4455"></li></ul></section>`);
+    const findings = truthFindings(verdictFor(html, FACTS_WITHOUT_PARTNERS).findings);
+    const labels = findings.map((f) => /'([^']+)'/.exec(f.detail)?.[1]).sort();
+    expect(labels).toEqual(["4455", "6699"]);
+  });
+});

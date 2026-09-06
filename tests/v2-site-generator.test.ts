@@ -719,3 +719,39 @@ describe("informed assembly repair is idempotent under engine retries (issue #52
     expect(batches!.n).toBe(0);
   });
 });
+
+describe("the truth contract rides every generation and repair prompt (issue #53)", () => {
+  it("page generation prompts carry the trust-context truth rule", async () => {
+    const context = await preparedContext();
+    const prompts: string[] = [];
+    const base = repairSeam({});
+    const generate: RawAiGenerate = async (system, user) => {
+      prompts.push(user);
+      return base.generate(system, user);
+    };
+    const site = await runGeneration(context, generate);
+    expect(site.validation.passed).toBe(true);
+    const homePrompt = prompts.find((p) => p.includes("page id 'home'"))!;
+    expect(homePrompt).toContain("TRUST-CONTEXT TRUTH RULE (binding, issue #48/#53)");
+    expect(homePrompt).toContain("Working with Rift Valley Roasters");
+    expect(homePrompt).toContain("NEVER invent clients, partners, companies, awards");
+  });
+
+  it("the informed assembly repair prompt inherits the binding business-truth clause", async () => {
+    const context = await preparedContext();
+    const footerless = () =>
+      HOME_HTML.replace(/<footer>/i, '<section class="footer-zone">').replace(/<\/footer>/i, "</section>");
+    const prompts: string[] = [];
+    const base = repairSeam({ homeHtml: footerless() });
+    const generate: RawAiGenerate = async (system, user) => {
+      prompts.push(user);
+      return base.generate(system, user);
+    };
+    const site = await runGeneration(context, generate);
+    expect(site.validation.passed).toBe(true);
+    const repairPrompt = prompts.find((p) => p.includes("Assembly repair directives"))!;
+    expect(repairPrompt).toContain("BUSINESS TRUTH (binding, issue #48/#53");
+    expect(repairPrompt).toContain("No invented clients, partners, companies, awards");
+    expect(repairPrompt).toContain("fact-safe substitutes");
+  });
+});
