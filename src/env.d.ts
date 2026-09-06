@@ -37,6 +37,10 @@ export interface Env {
   // the bounded poll window for one task inside fetchResult.
   KIE_TASK_COST_USD?: string;
   KIE_POLL_TIMEOUT_MS?: string;
+  // Durable image lifecycle (issue #58): poll cadence and per-attempt
+  // provider wait bound for the submit -> sleep -> poll state machine.
+  KIE_POLL_INTERVAL_MS?: string;
+  KIE_ATTEMPT_TIMEOUT_MS?: string;
   WEBHOOK_SECRET: string;
 
   ZHIPU_API_KEY?: string;

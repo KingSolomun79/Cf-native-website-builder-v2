@@ -55,6 +55,13 @@ export class KieV2ImageProvider implements ImageGenerationProvider {
     return Number.isFinite(parsed) && parsed > 0 ? parsed : POLL_TIMEOUT_MS_DEFAULT;
   }
 
+  // Deterministic pre-submission cost estimate (issue #58 §17): the same
+  // configured estimate createTask reports, available BEFORE any remote task
+  // exists so the durable budget gate can reject without spending.
+  estimateCost(): number {
+    return this.costUsd;
+  }
+
   async createTask(task: ResolvedSlotTask): Promise<{ taskId: string; costUsd: number }> {
     const brief = task.promptText.length > 640 ? `${task.promptText.slice(0, 640)}...` : task.promptText;
     const assembledPrompt = [
@@ -109,6 +116,41 @@ export class KieV2ImageProvider implements ImageGenerationProvider {
       headers: { Authorization: `Bearer ${this.env.KIE_API_KEY}` },
     });
     return (await response.json()) as KieTaskRecord;
+  }
+
+  // ONE short status probe with no internal waiting (issue #58). Transport
+  // failures THROW so the durable poll step's bounded retry policy handles
+  // them; a provider job still running is the normal 'pending' state, never
+  // an error (Workflow retries are for failures — provider waiting is
+  // Workflow control flow).
+  async checkResult(taskId: string): Promise<ImageProviderFetchResult> {
+    let record: KieTaskRecord;
+    try {
+      record = await this.recordInfo(taskId);
+    } catch (error) {
+      throw new Error(`KIE status probe failed for task ${taskId}: ${(error as Error).message}`);
+    }
+
+    const state = record.data?.state;
+    if (state === "success") {
+      try {
+        const parsed = JSON.parse(record.data?.resultJson ?? "{}") as { resultUrls?: string[] };
+        const temporaryUrl = parsed.resultUrls?.[0];
+        if (!temporaryUrl) return { status: "failed" };
+        if (typeof record.data?.charge === "number" && record.data.charge > 0) {
+          console.info("kie_task_charge", { taskId, charge: record.data.charge });
+        }
+        const bytes = await this.download(temporaryUrl);
+        return bytes ? { status: "complete", bytes, temporaryUrl } : { status: "failed" };
+      } catch {
+        return { status: "failed" };
+      }
+    }
+    if (state === "fail") {
+      console.error(`KIE task ${taskId} failed: ${record.data?.failMsg ?? "unknown"}`);
+      return { status: "failed" };
+    }
+    return { status: "pending" };
   }
 
   // Called once immediately after createTask; polls the bounded window so the

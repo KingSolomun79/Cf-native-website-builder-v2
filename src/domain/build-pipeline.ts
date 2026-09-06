@@ -28,11 +28,11 @@ import { runVisualBlueprintStage, canonicalRegionComposition, evaluateBlueprintC
 import { produceImplementationContract } from "./implementation-planner";
 import { generateCompleteSite, type ImageSlot } from "./site-generator";
 import {
-  runImageGeneration,
   getAcceptedImageMap,
   expandSlotsToTarget,
   type ImageGenerationProvider,
 } from "./image-pipeline";
+import { runImageGenerationDurable } from "./image-orchestration";
 import { buildAssembledCandidate, deployPreview, freezeAssembledCandidate, type PreviewDeployer } from "./assembly";
 import { getObject } from "../lib/assets";
 import { buildStandardEvidenceBundle, compareGeometry, geometryFromRegions, evaluateReferenceMacroFidelity, type GeometryComparison, type QaCaptureFn } from "./qa-evidence";
@@ -120,6 +120,11 @@ export interface BuildPipelineDeps {
    *  every stage is idempotent (artifact reuse / spend-resume) by design.
    *  Tests use the passthrough default. */
   step?: <T>(name: string, fn: () => Promise<T>) => Promise<T>;
+  /** Durable wait for the image poll loop (issue #58): the workflow maps this
+   *  to step.sleep, so provider waiting pauses the instance instead of
+   *  occupying a running step. Defaults to an instant no-op (tests and
+   *  immediately-complete providers never wait). */
+  sleep?: (name: string, ms: number) => Promise<void>;
 }
 
 export type PipelineTerminalStatus =
@@ -593,7 +598,11 @@ export async function runBuildPipeline(
       const accepted = await getAcceptedImageMap(env, ctx.buildVersionId);
       const unresolved = plannedSlots.filter((slot) => !accepted.has(slot.id));
       if (unresolved.length > 0) {
-        await stepDo(`pipeline: image generation (v${ctx.buildVersionNumber})`, () => runImageGeneration(env, {
+        // Durable image lifecycle (issue #58): submission, polling and waiting
+        // are separate durable steps — a slow provider sleeps the Workflow
+        // (step.sleep) instead of occupying one long-running step, and a slow
+        // image can never own the fate of the surrounding pipeline stages.
+        await runImageGenerationDurable(env, {
           siteGenerationId: ctx.siteGenerationId,
           buildId: ctx.buildId,
           buildVersionId: ctx.buildVersionId,
@@ -602,7 +611,10 @@ export async function runBuildPipeline(
           provider: deps.imageProvider ?? new KieV2ImageProvider(env),
           generate: deps.generate,
           expandToTarget: false,
-        }));
+        }, {
+          stepDo,
+          ...(deps.sleep ? { sleep: deps.sleep } : {}),
+        });
       }
 
       const acceptedImageEntries = await getAcceptedImageMap(env, ctx.buildVersionId);

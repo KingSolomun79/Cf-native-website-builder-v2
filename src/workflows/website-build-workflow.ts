@@ -27,16 +27,20 @@ import type { BuildPipelineDeps } from "../domain/build-pipeline";
 import { stageInProgressRetryAfterMs } from "../domain/stage-execution";
 import { StageExecutionCollisionError } from "../domain/stage-execution";
 import { StageArtifactError } from "../domain/stage-artifacts";
+import { ImageBudgetExceededError } from "../domain/image-pipeline";
 
 // Terminal state/provenance corruption must not burn the workflow step retry
 // budget (issue #54 §11): a foreign artifact under an immutable slot cannot
 // heal through retries, so these errors fail the step non-retryably and the
-// failure becomes domain-visible (issue #56 reconciliation). Everything else —
-// including the transient STAGE_EXECUTION_IN_PROGRESS single-flight yield —
-// stays retryable under the step policy below.
+// failure becomes domain-visible (issue #56 reconciliation). The hard KIE
+// spend gate (issue #58) is equally deterministic — retries cannot lower the
+// ledger — so it also fails fast into the domain-visible terminal path.
+// Everything else — including the transient STAGE_EXECUTION_IN_PROGRESS
+// single-flight yield — stays retryable under the step policy below.
 export function toWorkflowStepError(error: unknown): unknown {
   if (
     error instanceof StageExecutionCollisionError ||
+    error instanceof ImageBudgetExceededError ||
     (error instanceof StageArtifactError && error.code === "REPAIR_ARTIFACT_MISMATCH")
   ) {
     return new NonRetryableError(error.message);
@@ -193,6 +197,12 @@ export class WebsiteBuildWorkflow extends WorkflowEntrypoint<Env, WebsiteBuildPa
               throw toWorkflowStepError(error);
             }
           },
+          // Durable image-poll waiting (issue #58 §11): provider PENDING
+          // sleeps the INSTANCE via step.sleep instead of occupying a running
+          // step — no Worker timers, no CPU-active polling. step.sleep does
+          // not count toward the Workflow step limit.
+          sleep: (name: string, ms: number) =>
+            step.sleep(name, `${Math.max(1, Math.ceil(ms / 1000))} seconds`) as never,
         },
       });
       return {

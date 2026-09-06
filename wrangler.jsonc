@@ -101,6 +101,14 @@
     "WAZIBIZ_SENDER_EMAIL": "notifications@wazibiz.ke",
     "KIE_API_URL": "https://api.kie.ai",
     "KIE_MODEL": "z-image",
+    // Durable image lifecycle (issue #58): the poll cadence and the per-attempt
+    // provider wait bound for the submit -> sleep -> poll state machine.
+    // Worst-case durable poll steps = 12 slots x 2 attempts x ceil(timeout /
+    // interval) = 24 x 30 = 720 step.do calls (step.sleep does NOT count
+    // toward the Workflow step limit) — inside the documented 10,000-step
+    // paid-plan default. Raising the timeout requires re-checking that budget.
+    "KIE_POLL_INTERVAL_MS": "30000",
+    "KIE_ATTEMPT_TIMEOUT_MS": "900000",
     "ZHIPU_API_URL": "https://api.z.ai/api/coding/paas/v4",
     "ZHIPU_GATEWAY_PROVIDER": "custom-zhipu",
     // One canonical LLM model for ALL V2 textual and multimodal calls

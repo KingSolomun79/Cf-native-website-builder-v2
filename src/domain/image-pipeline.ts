@@ -132,7 +132,18 @@ export type ImageProviderFetchResult =
 
 export interface ImageGenerationProvider {
   createTask(task: ResolvedSlotTask): Promise<{ taskId: string; costUsd: number }>;
+  /** Bounded-wait poll: resolves (or times out) after internally waiting for
+   *  the remote task. Legacy synchronous shape — the durable driver
+   *  (image-orchestration.ts, issue #58) uses checkResult instead. */
   fetchResult(taskId: string): Promise<ImageProviderFetchResult>;
+  /** ONE short status probe with no internal waiting (issue #58): transport
+   *  failures throw into the poll step's bounded retry policy; provider
+   *  PENDING is returned as the normal 'pending' state, never an error. */
+  checkResult?(taskId: string): Promise<ImageProviderFetchResult>;
+  /** Deterministic pre-submission cost estimate (issue #58 §17): lets the
+   *  durable budget gate reject BEFORE any remote task is created. Null when
+   *  the provider cannot estimate (the legacy post-createTask gate applies). */
+  estimateCost?(): number | null;
 }
 
 // ── Defect repair ordering ──────────────────────────────────────────────────
@@ -428,6 +439,12 @@ export async function runImageWave(env: Env, input: RunImageWaveInput): Promise<
 }
 
 // ── Full pipeline ───────────────────────────────────────────────────────────
+// NOTE (issue #58): the production pipeline now drives images through the
+// durable submit → sleep → poll state machine in image-orchestration.ts.
+// runImageGeneration/runImageWave remain the synchronous implementation for
+// the benchmark harness and focused ledger-semantics tests; the budget,
+// attempt and acceptance rules below are the authoritative semantics both
+// paths share.
 
 export interface RunImageGenerationInput {
   siteGenerationId: string;
