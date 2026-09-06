@@ -148,10 +148,18 @@ body { margin: 0; font-family: system-ui, sans-serif; background: var(--air); co
 .route-line { border-top: 2px solid var(--peak); }
 .section { padding-block: var(--section); }
 .surface-peak { background: var(--peak); color: var(--air); }
+/* Issue #47 realization binding: every canonical region carries a real rule
+   scoped to its data-region selector. */
+[data-region="ascent-hero"] { display: grid; grid-template-columns: 7fr 5fr; min-height: 86vh; align-items: center; }
+[data-region="tour-grid"] { padding-block: var(--section); display: grid; grid-template-columns: repeat(3, 1fr); gap: 2rem; }
+[data-region="fitting-story"] { padding-block: var(--section); background: var(--peak); color: var(--air); }
+[data-region="ride-cta"] { padding-block: 6rem; text-align: center; }
 [data-reveal] { opacity: 0; transform: translateY(1rem); transition: opacity .6s ease, transform .6s ease; }
 [data-reveal].is-visible { opacity: 1; transform: none; }
 @media (max-width: 768px) {
   .hero { grid-template-columns: 1fr; min-height: auto; }
+  [data-region="ascent-hero"] { grid-template-columns: 1fr; min-height: auto; }
+  [data-region="tour-grid"] { grid-template-columns: 1fr; }
   .route-line { border-top-width: 1px; }
 }
 @media (prefers-reduced-motion: reduce) { [data-reveal] { transition: none; } }

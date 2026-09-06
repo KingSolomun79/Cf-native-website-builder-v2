@@ -70,6 +70,17 @@ export type ImagePlan = Static<typeof ImagePlanSchema>;
 // image roles and homepage region mapping — deterministic, no AI. Enriched
 // prompt fields (shot type, lighting, ...) are added by the KIE image prompt
 // stage (issue #10); crop/remap/retries never change slot identity.
+// Issue #47: slot orientation is a compositional requirement derived from
+// the Blueprint role's own words — the failed production build hardcoded
+// landscape on both branches of this conditional and generated a 16:9
+// collage for a 2:3 portrait role.
+function orientationFromRole(rolePurpose: string): ImageSlot["orientation"] {
+  const text = rolePurpose.toLowerCase();
+  if (/portrait|vertical|2:3|3:4|9:16|headshot/.test(text)) return "portrait";
+  if (/square|1:1|avatar|icon tile/.test(text)) return "square";
+  return "landscape";
+}
+
 export function deriveImagePlan(blueprint: VisualBlueprint): ImagePlan {
   const slots: ImageSlot[] = [];
   const rolesById = new Map(blueprint.imageSystem.imageRoles.map((role) => [role.id, role]));
@@ -85,7 +96,7 @@ export function deriveImagePlan(blueprint: VisualBlueprint): ImagePlan {
       semanticRole: role.purpose,
       blueprintRole: role.id,
       priority: role.priority,
-      orientation: region.id.includes("hero") ? "landscape" : "landscape",
+      orientation: orientationFromRole(role.purpose),
       negativeSpaceForText: region.id.includes("hero"),
     });
   }
@@ -107,7 +118,7 @@ export function deriveImagePlan(blueprint: VisualBlueprint): ImagePlan {
       semanticRole: role.purpose,
       blueprintRole: role.id,
       priority: entry.suffix === "main" ? "HIGH" : "NORMAL",
-      orientation: entry.suffix === "atmosphere" ? "landscape" : "landscape",
+      orientation: orientationFromRole(role.purpose),
       negativeSpaceForText: false,
     });
   }
@@ -126,6 +137,114 @@ export interface AssembledSiteSource {
   pages: Record<PageId, string>;
   sharedCss: string;
   sharedJs: string;
+}
+
+// Issue #47: the class vocabulary the generated CSS actually defines. The
+// CSS call owns styling vocabulary; this inventory is injected verbatim into
+// every page prompt and used to detect orphaned HTML classes at assembly.
+export function extractCssClassInventory(css: string): string[] {
+  const classes = new Set<string>();
+  for (const match of css.matchAll(/\.([a-zA-Z_][a-zA-Z0-9_-]*)/g)) {
+    classes.add(match[1]);
+  }
+  return [...classes];
+}
+
+function extractHtmlClasses(html: string): Set<string> {
+  const classes = new Set<string>();
+  for (const match of html.matchAll(/class=(?:"([^"]*)"|'([^']*)')/g)) {
+    for (const cls of (match[1] ?? match[2] ?? "").split(/\s+/)) {
+      if (cls) classes.add(cls);
+    }
+  }
+  return classes;
+}
+
+// ── CSS rule extraction + realization classification (issue #47) ────────────
+
+export interface ParsedCssRule {
+  selectors: string[];
+  declarations: string[];
+  /** True when the rule sits inside an @media/@supports block. */
+  conditional: boolean;
+}
+
+function collectCssRules(fragment: string, conditional: boolean, out: ParsedCssRule[]): void {
+  let index = 0;
+  while (index < fragment.length) {
+    const open = fragment.indexOf("{", index);
+    if (open === -1) return;
+    const header = fragment.slice(index, open).trim();
+    let depth = 1;
+    let cursor = open + 1;
+    while (cursor < fragment.length && depth > 0) {
+      const character = fragment[cursor];
+      if (character === "{") depth += 1;
+      else if (character === "}") depth -= 1;
+      cursor += 1;
+    }
+    const body = fragment.slice(open + 1, cursor - 1);
+    if (header.startsWith("@")) {
+      // Only conditional rules carry binding weight for @media/@supports;
+      // @keyframes/@font-face bodies never scope canonical region selectors.
+      if (/^@(media|supports)\b/i.test(header)) collectCssRules(body, true, out);
+    } else {
+      const declarations = body
+        .split(";")
+        .map((declaration) => declaration.trim())
+        .filter((declaration) => declaration.includes(":"));
+      if (header.length > 0 && declarations.length > 0) {
+        out.push({
+          selectors: header.split(",").map((selector) => selector.trim()).filter(Boolean),
+          declarations,
+          conditional,
+        });
+      }
+    }
+    index = cursor;
+  }
+}
+
+// Deterministic, tolerant rule extraction for the generated plain-CSS
+// stylesheet: strips comments, walks @media/@supports bodies, and keeps every
+// rule that carries at least one real declaration.
+export function parseCssRules(css: string): ParsedCssRule[] {
+  const rules: ParsedCssRule[] = [];
+  collectCssRules(css.replace(/\/\*[\s\S]*?\*\//g, ""), false, rules);
+  return rules;
+}
+
+// Region binding selectors match modulo quote style and surrounding
+// whitespace: `[data-region="hero"]` realizes `[data-region='hero']` and
+// qualified/compound scopes like `section[data-region="hero"] .inner`. The
+// closing `"]` makes substring matching id-exact — a different region id can
+// never satisfy another region's binding.
+function selectorRealizesBinding(selector: string, binding: string): boolean {
+  const normalize = (value: string) => value.replace(/\s+/g, " ").replace(/["']/g, "").trim();
+  return normalize(selector).includes(normalize(binding));
+}
+
+// Deterministic classification of generated HTML classes that have no CSS
+// rule (issue #47 section E). A class the shared runtime references, or one
+// matching the reserved state conventions, is a behavior/state marker — NOT a
+// styling defect. Everything else is styling intent: generated markup has no
+// third-party classes, so an unrealized styling class is a vocabulary split
+// (the unknown bucket fails closed into this one).
+const BEHAVIOR_STATE_CLASS_PATTERN = /^(?:is|has|js)-/;
+const BEHAVIOR_STATE_CLASS_NAMES = new Set([
+  "active", "open", "visible", "hidden", "current", "selected",
+  "expanded", "collapsed", "loading", "nav-open",
+]);
+const NON_STYLING_HOOK_CLASS_NAMES = new Set(["no-js"]);
+
+export type GeneratedClassRole = "styling-intent" | "behavior-state" | "non-styling-hook";
+
+export function classifyGeneratedClass(cls: string, sharedJs: string): GeneratedClassRole {
+  if (BEHAVIOR_STATE_CLASS_PATTERN.test(cls) || BEHAVIOR_STATE_CLASS_NAMES.has(cls) || sharedJs.includes(cls)) {
+    return "behavior-state";
+  }
+  if (NON_STYLING_HOOK_CLASS_NAMES.has(cls)) return "non-styling-hook";
+  return "styling-intent";
 }
 
 const UNSUPPORTED_FACT_PATTERNS: Array<{ id: string; pattern: RegExp }> = [
@@ -224,6 +343,42 @@ export function validateAssembledSite(
     }
   }
 
+  // Issue #47: CSS/HTML realization binding. The failed production build
+  // generated a Blueprint-faithful stylesheet that the pages never used
+  // (split class vocabularies) — the 4-up grid, full-bleed hero and display
+  // typography rules all existed but nothing applied them. Two mechanical
+  // checks close that seam: every canonical region must have a real CSS rule
+  // scoped to its bound selector (a rule with declarations — not a bare
+  // mention), and every styling-intent class the pages use must exist in the
+  // CSS vocabulary. Behavior/state classes (JS hooks) are classified and
+  // exempt; unknown classes fail closed as styling intent.
+  if (context.contract.realization) {
+    const rules = parseCssRules(source.sharedCss);
+    for (const binding of context.contract.realization.regionStyleBinding) {
+      const realized = rules.some((rule) =>
+        rule.selectors.some((selector) => selectorRealizesBinding(selector, binding.cssSelector))
+      );
+      if (!realized) {
+        findings.push({
+          id: "REGION_STYLE_MISSING",
+          detail: `home: canonical region '${binding.regionId}' has no CSS rule scoped to '${binding.cssSelector}' (realization binding)`,
+        });
+      }
+    }
+    const cssClasses = new Set(extractCssClassInventory(source.sharedCss));
+    for (const pageId of PAGE_IDS) {
+      const html = source.pages[pageId] ?? "";
+      const orphaned = [...extractHtmlClasses(html)].filter((cls) => !cssClasses.has(cls));
+      const unrealized = orphaned.filter((cls) => classifyGeneratedClass(cls, source.sharedJs) === "styling-intent");
+      if (unrealized.length > 0) {
+        findings.push({
+          id: "ORPHANED_CLASS",
+          detail: `${pageId}: ${unrealized.length} styling-intent class${unrealized.length === 1 ? " has" : "es have"} no rule in site.css (CSS/HTML vocabulary contract): ${unrealized.slice(0, 8).join(", ")}`,
+        });
+      }
+    }
+  }
+
   // Contact form browser contract: platform endpoint, no browser-controlled
   // recipient/sender/template fields.
   const contact = source.pages.contact ?? "";
@@ -256,7 +411,22 @@ ${JSON.stringify(facts, null, 2)}`;
 }
 
 function cssPrompt(blueprint: VisualBlueprint, contract: ImplementationContract): string {
-  return `Generate the shared stylesheet 'site.css' for the four-page Site. Realize the Visual Blueprint visual thesis, tokens, typography roles, color roles, global grid/container logic (including asymmetric column ratios), spacing rhythm, surface language, header/navigation language, motion grammar (transitions only, no libraries) and the responsive contract with real @media rules — and give the signature traits and homepage regions their distinct visual form (surface treatments, component geometry, spacing identity). Reference-specific grids, overlaps, clipping and asymmetry must survive — do NOT normalize to a generic centered template. Class names may be domain-specific to this design; there is no universal layout template. Anti-fallback rules are binding.
+  // Issue #47: the CSS call owns the styling vocabulary. The binding block
+  // makes the canonical-region selectors non-negotiable and tells the model
+  // that the pages are generated against THIS stylesheet's class inventory —
+  // the failed production build wrote a faithful stylesheet whose classes
+  // the page calls never discovered.
+  const realizationBlock = contract.realization
+    ? `
+STYLING CONTRACT (binding, issue #47):
+- You own the styling vocabulary. The four pages are generated AFTER you, against YOUR class inventory — every styling class you expect the markup to use must be defined in this stylesheet, with clear reusable names.
+- The canonical homepage regions MUST be styled through their data-region attribute selectors. Include at least one rule for EACH of these selectors (layout, surface, spacing or component geometry as the Blueprint demands): ${contract.realization.regionStyleBinding.map((binding) => binding.cssSelector).join(", ")}.
+- Define the shared component classes the Blueprint's header/navigation, pills/badges, buttons, cards, splits and footer language need — the pages will use these names verbatim.
+- The first-viewport region(s) (${blueprint.homepageFirstViewport.regionIds.join(", ")}) MUST realize the Blueprint first-viewport geometry (full-bleed media role, viewport-height target, display type scale) in the rules scoped to their data-region selector.`
+    : "";
+  return `Generate the shared stylesheet 'site.css' for the four-page Site. Realize the Visual Blueprint visual thesis, tokens, typography roles, color roles, global grid/container logic (including asymmetric column ratios), spacing rhythm, surface language, header/navigation language, motion grammar (transitions only, no libraries) and the responsive contract with real @media rules — and give the signature traits and homepage regions their distinct visual form (surface treatments, component geometry, spacing identity). Reference-specific grids, overlaps, clipping and asymmetry must survive — do NOT normalize to a generic centered template. Class names may be domain-specific to this design; there is no universal layout template. Anti-fallback rules are binding.${realizationBlock}
+
+CONTENT CAPACITY (remediation Part 9): where the Blueprint records measured region proportions, the regions' geometry is binding — derived copy must fit the measured capacity (tighten or shorten copy rather than shrinking or restructuring a region).
 
 CONTRACT FILES: shared CSS file name '${contract.files.sharedCss}'.
 BLUEPRINT:
@@ -297,17 +467,25 @@ function pagePrompt(input: {
   facts: BusinessFacts;
   slots: ImageSlot[];
   compositionTargets?: Array<{ regionId: string; viewportHeightRatio: number; evidenceSegmentCount: number }>;
+  cssClassInventory?: string[];
 }): string {
   const { pageId, blueprint, contract, facts, slots } = input;
   const slotsForPage = (page: PageId, all: ImageSlot[]) => all.filter((slot) => slot.page === page).map((slot) => slot.id);
   const page = contract.pages.find((candidate) => candidate.id === pageId)!;
+  // Issue #47: the generated stylesheet's actual class inventory — the
+  // markup must style itself with THESE classes, not invent a second
+  // vocabulary the stylesheet has never heard of.
+  const stylingContract = input.cssClassInventory?.length
+    ? `
+- STYLING CONTRACT (binding): site.css has been generated and defines EXACTLY these styling classes: ${input.cssClassInventory.join(", ")}. Use ONLY these classes for styling (plus the canonical data-region attributes). Do NOT invent class names that are not in this list — an unstyled class is a validation failure. Canonical homepage regions are styled through their data-region attribute selectors; attach the matching classes for components inside them.`
+    : "";
   const base = `Generate the complete semantic HTML page '${page.path}' (document for page id '${pageId}'). Requirements:
 - <!DOCTYPE html>, <html lang>, semantic <header>/<nav>/<main>/<footer>, exactly ONE <h1>. The literal elements <header>, <nav>, <main> and <footer> are REQUIRED and validated mechanically: when a region section wraps the page footer, the <footer> element itself must still exist inside it — a <section> in place of <footer> fails validation.
 - Include EXACTLY these tags in <head>/<body>: <link rel="stylesheet" href="site.css"> and <script src="site.js" defer></script>, plus the responsive viewport meta.
 - Navigation links to /, /about, /services, /contact exactly.
 - Every image is an unresolved placeholder: <img src="IMG:{slotId}" data-image-id="{slotId}" alt="..."> using ONLY the slot ids listed below.
 - ${factsBlock(facts)}
-- Derived marketing copy may interpret these facts safely but must not invent unsupported facts.`;
+- Derived marketing copy may interpret these facts safely but must not invent unsupported facts. Fit copy to the Blueprint's measured region capacities — shorten or tighten copy rather than dropping required region geometry.${stylingContract}`;
 
   if (pageId === "home") {
     const compositionTargets = (input.compositionTargets ?? []).length
@@ -467,6 +645,9 @@ export async function generateCompleteSite(
   // 1. shared tokens/CSS  2. shared runtime JS — incremental steps.
   const cssRun = await runOrReuse<SharedCss>("generated_shared_source", "site.css", SharedCssSchema, "generated-source/site-css/1", cssPrompt(input.blueprint, input.contract) + referenceBlock + repairBlock);
   const jsRun = await runOrReuse<SharedJs>("generated_shared_source", "site.js", SharedJsSchema, "generated-source/site-js/1", jsPrompt(input.blueprint) + referenceBlock + repairBlock);
+  // Issue #47: pages are generated against the ACTUAL generated stylesheet —
+  // the class inventory closes the CSS/HTML vocabulary split at the source.
+  const cssClassInventory = extractCssClassInventory(cssRun.value.css);
 
   // 7 (computed early). deterministic Image Plan (stable Image Slots) — the
   // exact slot ids are enumerated in every page prompt so generated markup
@@ -479,8 +660,10 @@ export async function generateCompleteSite(
   // 3-6. one page at a time under the same fixed contracts.
   const pages: Partial<Record<PageId, string>> = {};
   const pageRuns: Array<{ pageId: PageId; run: { value: PageHtml; artifactR2Key: string } }> = [];
+  const pagePromptFor = (pageId: PageId) =>
+    pagePrompt({ pageId, blueprint: input.blueprint, contract: input.contract, facts, slots: imagePlan.slots, compositionTargets: input.compositionTargets, cssClassInventory }) + referenceBlock + repairBlock;
   for (const pageId of PAGE_IDS) {
-    const run = await runOrReuse<PageHtml>("generated_page", pageId, PageHtmlSchema, `generated-source/page-${pageId}/1`, pagePrompt({ pageId, blueprint: input.blueprint, contract: input.contract, facts, slots: imagePlan.slots, compositionTargets: input.compositionTargets }) + referenceBlock + repairBlock);
+    const run = await runOrReuse<PageHtml>("generated_page", pageId, PageHtmlSchema, `generated-source/page-${pageId}/1`, pagePromptFor(pageId));
     pages[pageId] = run.value.html;
     pageRuns.push({ pageId, run: { value: run.value, artifactR2Key: run.artifactR2Key } });
   }
@@ -518,7 +701,7 @@ ${validation.findings.map((finding) => `- ${finding.id}: ${finding.detail}`).joi
           stage: "website-generator",
           schema: PageHtmlSchema as Parameters<typeof runSchemaValidatedAiStage>[1]["schema"],
           schemaVersion: `generated-source/page-${pageId}/1`,
-          userPrompt: pagePrompt({ pageId, blueprint: input.blueprint, contract: input.contract, facts, slots: imagePlan.slots, compositionTargets: input.compositionTargets }) + referenceBlock + repairBlock + repairDirectives,
+          userPrompt: pagePromptFor(pageId) + repairDirectives,
         });
         await storeBuildStageArtifact(env, {
           buildId: input.buildId, buildVersionId: input.buildVersionId, siteGenerationId: input.siteGenerationId,
@@ -567,4 +750,116 @@ ${validation.findings.map((finding) => `- ${finding.id}: ${finding.detail}`).joi
   });
 
   return { ...source, imagePlan, validation: finalValidation, artifacts };
+}
+
+// ── Realization repair (issue #47, remediation Part 21) ────────────────────
+//
+// The deterministic realization precheck runs AFTER assembly/preview and
+// BEFORE expensive QA. When it finds gross realization errors, at most ONE
+// informed per-page regeneration is allowed: the frozen shared CSS/JS and
+// the unaffected pages are reused verbatim from the stage-artifact store,
+// only affected pages are regenerated under NEW immutable subkeys carrying
+// the measured findings as directives. Never consumes the QA repair budget.
+
+export interface RegeneratePagesForRealizationInput {
+  siteGenerationId: string;
+  siteId: string;
+  buildId: string;
+  buildVersionId: string;
+  buildVersionNumber: number;
+  blueprint: VisualBlueprint;
+  blueprintR2Key: string;
+  contract: ImplementationContract;
+  contractR2Key: string;
+  imagePlan: ImagePlan;
+  affected: PageId[];
+  /** Measured precheck findings — exact numbers, targets and tolerances. */
+  findingDirectives: string;
+  compositionTargets?: Array<{ regionId: string; viewportHeightRatio: number; evidenceSegmentCount: number }>;
+  visualInputs?: NonNullable<ReferenceEvidence["visualInputs"]>;
+  visionGenerate?: RawAiGenerate;
+  generate?: RawAiGenerate;
+}
+
+export interface RealizationRegenerationResult {
+  pages: Record<PageId, string>;
+  sharedCss: string;
+  sharedJs: string;
+  regenerated: PageId[];
+}
+
+export async function regeneratePagesForRealization(
+  env: Env,
+  input: RegeneratePagesForRealizationInput
+): Promise<RealizationRegenerationResult> {
+  const cssArtifact = await getBuildStageArtifact<SharedCss>(env, input.buildVersionId, "generated_shared_source", "site.css");
+  const jsArtifact = await getBuildStageArtifact<SharedJs>(env, input.buildVersionId, "generated_shared_source", "site.js");
+  if (!cssArtifact || !jsArtifact) {
+    throw new Error("realization repair requires the frozen shared source of the same Build Version");
+  }
+  const factsResult = await getEffectiveBusinessFacts(env, input.buildId);
+  const facts = factsResult.facts;
+  const visualInputs = input.visualInputs ?? [];
+  const referenceBlock = visualInputs.length > 0 ? referenceContextBlock(visualInputs) : "";
+  const cssClassInventory = extractCssClassInventory(cssArtifact.value.css);
+  const stageInput = {
+    buildId: input.buildId,
+    siteGenerationId: input.siteGenerationId,
+    buildVersionId: input.buildVersionId,
+    buildVersionNumber: input.buildVersionNumber,
+    inputArtifactIds: [input.blueprintR2Key, input.contractR2Key, ...visualInputs.map((entry) => entry.artifact)],
+    generate: input.visionGenerate ?? input.generate,
+    temperature: 0.35,
+  };
+
+  const pages: Partial<Record<PageId, string>> = {};
+  const regenerated: PageId[] = [];
+  for (const pageId of PAGE_IDS) {
+    if (input.affected.includes(pageId)) {
+      const subkey = `${pageId}.realization-repair-1`;
+      const existing = await getBuildStageArtifact<PageHtml>(env, input.buildVersionId, "generated_page", subkey);
+      let pageValue: PageHtml;
+      if (existing) {
+        // Workflow-retry safety: the frozen repair artifact for this Build
+        // Version is reused verbatim (its schema is PageHtml, not a run).
+        pageValue = existing.value;
+      } else {
+        const run = await runSchemaValidatedAiStage<PageHtml>(env, {
+          ...stageInput,
+          stage: "website-generator",
+          schema: PageHtmlSchema as Parameters<typeof runSchemaValidatedAiStage>[1]["schema"],
+          schemaVersion: `generated-source/page-${pageId}/1`,
+          userPrompt:
+            pagePrompt({ pageId, blueprint: input.blueprint, contract: input.contract, facts, slots: input.imagePlan.slots, compositionTargets: input.compositionTargets, cssClassInventory }) +
+            referenceBlock +
+            `\n\n## Realization repair directives (issue #47)
+The previously generated page was assembled and RENDERED, and a deterministic realization precheck measured these gross deviations from the binding Blueprint/Contract. Regenerate the COMPLETE page fixing every measured deviation. The numbers below are frozen measurements and binding targets — realize the stated geometry, do not reinterpret it:
+${input.findingDirectives}`,
+        });
+        pageValue = run.value;
+        await storeBuildStageArtifact(env, {
+          buildId: input.buildId, buildVersionId: input.buildVersionId, siteGenerationId: input.siteGenerationId,
+          kind: "generated_page", subkey, schemaVersion: `generated-source/page-${pageId}/1`, value: run.value, provenance: run.provenance,
+        });
+      }
+      pages[pageId] = pageValue.html;
+      regenerated.push(pageId);
+      continue;
+    }
+    const frozen = await getBuildStageArtifact<PageHtml>(env, input.buildVersionId, "generated_page", pageId);
+    if (!frozen) throw new Error(`realization repair missing frozen page artifact for '${pageId}'`);
+    pages[pageId] = frozen.value.html;
+  }
+
+  const source: AssembledSiteSource = { pages: pages as Record<PageId, string>, sharedCss: cssArtifact.value.css, sharedJs: jsArtifact.value.js };
+  const validation = validateAssembledSite(source, { contract: input.contract, slots: input.imagePlan.slots });
+  if (!validation.passed) {
+    throw new SiteGenerationValidationError(validation.findings);
+  }
+  await appendBuildWorkflowEvent(env, {
+    buildId: input.buildId, buildVersionId: input.buildVersionId,
+    fromState: "SITE_GENERATION", toState: "SITE_VALIDATION", stage: "realization_repair",
+    detail: `Realization repair regenerated ${regenerated.join(", ")} from measured precheck findings (one bounded round, no QA repair budget consumed)`,
+  });
+  return { pages: source.pages, sharedCss: source.sharedCss, sharedJs: source.sharedJs, regenerated };
 }

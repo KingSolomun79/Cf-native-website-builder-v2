@@ -89,7 +89,13 @@ body { margin: 0; font-family: system-ui, sans-serif; background: var(--paper); 
 .hero { display: grid; grid-template-columns: 5fr 7fr; min-height: 88vh; align-items: center; }
 .section { padding-block: clamp(4rem, 10vh, 8rem); }
 .surface-ink { background: var(--ink); color: var(--paper); }
-@media (max-width: 768px) { .hero { grid-template-columns: 1fr; } }
+/* Issue #47 realization binding: every canonical region carries a real rule
+   scoped to its data-region selector. */
+[data-region="r1"] { min-height: 92vh; display: grid; grid-template-columns: 5fr 7fr; align-items: center; }
+[data-region="r2"] { padding-block: var(--section-pad, 6rem); background: var(--paper); }
+[data-region="r3"] { padding-block: clamp(4rem, 10vh, 8rem); background: var(--ink); color: var(--paper); display: grid; grid-template-columns: repeat(4, 1fr); gap: 2rem; }
+[data-region="r4"] { padding-block: 6rem; text-align: center; }
+@media (max-width: 768px) { .hero { grid-template-columns: 1fr; } [data-region="r1"] { grid-template-columns: 1fr; } [data-region="r3"] { grid-template-columns: 1fr; } }
 @media (prefers-reduced-motion: reduce) { * { transition: none; } }
 `;
 

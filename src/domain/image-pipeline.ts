@@ -22,6 +22,7 @@ import { appendBuildWorkflowEvent } from "./lifecycle";
 import { buildVersionAssetKey } from "./artifact-keys";
 import { runSchemaValidatedAiStage, type RawAiGenerate } from "./ai-boundary";
 import type { ImageSlot } from "./site-generator";
+import { orientationConforms, sniffImageDimensions } from "../lib/image-dimensions";
 
 // PRD section 18.
 export const KIE_SPEND_LIMIT_USD = 3.0;
@@ -254,6 +255,10 @@ export async function runImageWave(env: Env, input: RunImageWaveInput): Promise<
   const waveSlots = orderSlotsByPriority(input.slots.filter((slot) => waveForSlot(slot) === input.wave));
   const outcomes: SlotGenerationOutcome[] = [];
   let lastProviderError: string | null = null;
+  // Issue #47 orientation conformance: measured pixel-dimension mismatches are
+  // recorded here for the wave event — a rejected asset burns its attempt's
+  // real cost, so the ledger must show where the spend went.
+  const orientationRejections: string[] = [];
 
   for (const slot of waveSlots) {
     const record = input.promptRecords.get(slot.id);
@@ -289,8 +294,7 @@ export async function runImageWave(env: Env, input: RunImageWaveInput): Promise<
     let succeeded = false;
     let lastOutcome: SlotGenerationOutcome = { slotId: slot.id, status: "failed", costUsd: 0 };
 
-    for (let attemptNumber = firstAttemptNumber; attemptNumber <= MAX_ATTEMPTS_PER_SLOT && !succeeded; attemptNumber++) {
-      const attemptId = generateId();
+    for (let attemptNumber = firstAttemptNumber; attemptNumber <= MAX_ATTEMPTS_PER_SLOT && !succeeded; attemptNumber++) {      const attemptId = generateId();
       const createdAt = nowIso();
 
       // Probe cost without committing.
@@ -350,6 +354,26 @@ export async function runImageWave(env: Env, input: RunImageWaveInput): Promise<
         continue;
       }
 
+      // Issue #47: deterministic orientation conformance BEFORE acceptance —
+      // a decodable asset whose measured pixel orientation contradicts the
+      // slot's compositional requirement is a failed attempt, never an
+      // Accepted Image (the frozen v3 build shipped a 16:9 collage for a 2:3
+      // portrait role). Undecodable bytes stay a QA judgment, not a rejection.
+      const dimensions = sniffImageDimensions(result.bytes);
+      if (dimensions && !orientationConforms(slot.orientation, dimensions)) {
+        const r2Key = buildVersionAssetKey(input.buildId, input.buildVersionNumber, `images/${slot.id}-a${attemptNumber}.webp`);
+        await putImmutableObjectTolerant(env, r2Key, result.bytes, { httpMetadata: { contentType: "image/webp" } });
+        await env.DB.prepare(
+          `INSERT INTO image_attempts (id, build_id, build_version_id, slot_id, wave, attempt_number, status, provider_task_id, provider_url, r2_key, cost_usd, checksum, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, 'failed', ?, ?, ?, ?, ?, ?)`
+        )
+          .bind(attemptId, input.buildId, input.buildVersionId, slot.id, input.wave, attemptNumber, task.taskId, result.temporaryUrl, r2Key, task.costUsd, await sha256Hex(result.bytes), createdAt)
+          .run();
+        orientationRejections.push(`${slot.id}: ${slot.orientation} required, measured ${dimensions.width}x${dimensions.height}`);
+        lastOutcome = { slotId: slot.id, status: "failed", costUsd: task.costUsd };
+        continue;
+      }
+
       // Persist to project-controlled storage; the temporary provider URL is
       // audit-only and never referenced by the Site.
       const r2Key = buildVersionAssetKey(
@@ -392,7 +416,7 @@ export async function runImageWave(env: Env, input: RunImageWaveInput): Promise<
     fromState: input.wave === 1 ? "SITE_VALIDATION" : "IMAGE_WAVE_1",
     toState: input.wave === 1 ? "IMAGE_WAVE_1" : "IMAGE_WAVE_2",
     stage: input.wave === 1 ? "image_wave_1" : "image_wave_2",
-    detail: `Wave ${input.wave}: ${outcomes.filter((outcome) => outcome.status === "accepted").length}/${waveSlots.length} slots accepted${lastProviderError ? `; last provider error: ${lastProviderError.replace(/\s+/g, " ").slice(0, 240)}` : ""}`,
+    detail: `Wave ${input.wave}: ${outcomes.filter((outcome) => outcome.status === "accepted").length}/${waveSlots.length} slots accepted${lastProviderError ? `; last provider error: ${lastProviderError.replace(/\s+/g, " ").slice(0, 240)}` : ""}${orientationRejections.length ? `; orientation rejections: ${orientationRejections.join("; ").slice(0, 240)}` : ""}`,
   });
 
   return outcomes;

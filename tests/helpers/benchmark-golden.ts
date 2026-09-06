@@ -85,7 +85,23 @@ function caseAnalysisJson(caseDefinition: BenchmarkCaseDefinition): Record<strin
   };
 }
 
-const SHARED_CSS = `
+// Issue #47 realization binding: the canned stylesheet scopes a real rule to
+// EVERY canonical region of the case and defines every class its canned pages
+// use — exactly what the binding contract demands from the generated CSS.
+function sharedCssFor(regions: Array<{ id: string }>): string {
+  const regionRules = regions
+    .map((region, index) => {
+      if (index === 0) {
+        return `[data-region="${region.id}"] { display: grid; grid-template-columns: 5fr 7fr; min-height: 88vh; align-items: center; }\n[data-region="${region.id}"] h1 { font-size: clamp(3rem, 7vw, 6rem); line-height: 1.02; }`;
+      }
+      if (index % 3 === 2) {
+        return `[data-region="${region.id}"] { padding-block: var(--section); background: var(--ink); color: var(--paper); }`;
+      }
+      return `[data-region="${region.id}"] { padding-block: var(--section); }`;
+    })
+    .join("\n");
+  const mobileRegionRules = regions.map((region) => `[data-region="${region.id}"] { grid-template-columns: 1fr; }`).join(" ");
+  return `
 :root { --ink: #1a1a1a; --paper: #faf7f2; --section: clamp(4rem, 10vh, 8rem); }
 body { margin: 0; font-family: system-ui, sans-serif; background: var(--paper); color: var(--ink); }
 .container { max-width: 1200px; margin: 0 auto; padding: 0 1.5rem; }
@@ -93,15 +109,24 @@ body { margin: 0; font-family: system-ui, sans-serif; background: var(--paper); 
 .hero h1 { font-size: clamp(3rem, 7vw, 6rem); line-height: 1.02; }
 .section { padding-block: var(--section); }
 .surface-ink { background: var(--ink); color: var(--paper); }
+.site-nav { display: flex; align-items: center; justify-content: space-between; padding: 1rem 1.5rem; }
+.wordmark { font-size: 1.25rem; text-decoration: none; color: var(--ink); }
+.page-header { padding-block: 5rem 2rem; }
+.content-section { padding-block: 3rem; }
+.fact-list { padding-block: 3rem; }
+.cta-band { padding-block: 5rem; background: var(--ink); color: var(--paper); text-align: center; }
 [data-reveal] { opacity: 0; transform: translateY(1rem); transition: opacity .6s ease, transform .6s ease; }
 [data-reveal].is-visible { opacity: 1; transform: none; }
+${regionRules}
 @media (max-width: 768px) {
   .hero { grid-template-columns: 1fr; min-height: auto; }
+  ${mobileRegionRules}
   .nav-links { display: none; }
   .nav-toggle { display: grid; }
 }
 @media (prefers-reduced-motion: reduce) { [data-reveal] { transition: none; } }
 `;
+}
 
 const SHARED_JS = `
 (function () {
@@ -240,7 +265,7 @@ ${img("contact-atmosphere", `${business} atmosphere`)}
       return respond(blueprint);
     }
     if (user.includes("shared stylesheet")) {
-      return respond({ css: SHARED_CSS });
+      return respond({ css: sharedCssFor(regions) });
     }
     if (user.includes("minimal shared runtime")) {
       return respond({ js: SHARED_JS });

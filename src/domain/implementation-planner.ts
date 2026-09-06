@@ -38,6 +38,36 @@ export const FormContractSchema = Type.Object(
 );
 export type FormContract = Static<typeof FormContractSchema>;
 
+// Issue #47: the binding realization seam between the Blueprint's canonical
+// regions and the generated CSS/HTML. Derived deterministically by the
+// planner; the CSS generator MUST scope at least one rule to every bound
+// selector and the page generators MUST stay inside the CSS class inventory.
+// Optional so implementation-contract/1 artifacts (frozen before #47) still
+// parse — old contracts simply carry no binding and skip the new checks.
+export const RegionStyleBindingSchema = Type.Object({
+  regionId: Type.String({ minLength: 1 }),
+  cssSelector: Type.String({ minLength: 1, maxLength: 200 }),
+});
+export type RegionStyleBinding = Static<typeof RegionStyleBindingSchema>;
+
+export const RealizationContractSchema = Type.Object(
+  {
+    // Regions are styled through their canonical data-region attribute — the
+    // one identifier the page prompt already enforces verbatim, so CSS and
+    // HTML can never split vocabularies on region surfaces.
+    regionStyleBinding: Type.Array(RegionStyleBindingSchema, { minItems: 1 }),
+    // The CSS call owns the class vocabulary; page calls receive the frozen
+    // inventory of classes the generated CSS actually defines and must not
+    // invent styling classes outside it.
+    classVocabularyPolicy: Type.Union([Type.Literal("css-defined-classes-only")]),
+    // Content fits the design, not the reverse (remediation Part 9): when
+    // measured region capacities exist, derived copy adapts to them.
+    contentCapacityPolicy: Type.Union([Type.Literal("copy-fits-measured-regions")]),
+  },
+  { additionalProperties: false }
+);
+export type RealizationContract = Static<typeof RealizationContractSchema>;
+
 export const ImplementationContractSchema = Type.Object(
   {
     version: Type.String({ minLength: 1 }),
@@ -46,6 +76,8 @@ export const ImplementationContractSchema = Type.Object(
     blueprintVisualThesis: Type.String({ minLength: 1 }),
     blueprintSignatureTraitIds: Type.Array(Type.String({ minLength: 1 }), { minItems: 1 }),
     blueprintFirstViewportRegionIds: Type.Array(Type.String({ minLength: 1 }), { minItems: 1 }),
+    // Issue #47 binding (optional for /1 artifact compatibility).
+    realization: Type.Optional(RealizationContractSchema),
     pages: Type.Array(
       Type.Object({
         id: PageIdSchema,
@@ -129,6 +161,23 @@ export function validateContractAgainstBlueprint(
     for (const roleId of imageSlotStrategy.roleIds) {
       if (!blueprintRoleIds.has(roleId)) {
         problems.push(`image role '${roleId}' was invented or changed`);
+      }
+    }
+  }
+  // Issue #47: the realization binding mirrors the Blueprint topology — it
+  // may bind every canonical region, but never invent, drop or reorder one.
+  if (contract.realization) {
+    const blueprintRegionIds = blueprint.homepageRegions.map((region) => region.id);
+    const boundIds = contract.realization.regionStyleBinding.map((binding) => binding.regionId);
+    if (
+      boundIds.length !== blueprintRegionIds.length ||
+      !boundIds.every((id, index) => id === blueprintRegionIds[index])
+    ) {
+      problems.push("realization region style binding does not mirror the Blueprint homepage topology");
+    }
+    for (const binding of contract.realization.regionStyleBinding) {
+      if (!binding.cssSelector.includes(`"${binding.regionId}"`)) {
+        problems.push(`realization selector for region '${binding.regionId}' does not reference the canonical region id`);
       }
     }
   }
@@ -216,6 +265,18 @@ export function planImplementationContract(input: PlanImplementationContractInpu
         services: "services.html",
         contact: "contact.html",
       },
+    },
+    // Issue #47: deterministic realization binding — every canonical region
+    // must be styled through its data-region attribute selector so the CSS
+    // and the pages can never drift into split class vocabularies (the
+    // failed-production v3 root cause).
+    realization: {
+      regionStyleBinding: homepageRegionIds.map((regionId) => ({
+        regionId,
+        cssSelector: `[data-region="${regionId}"]`,
+      })),
+      classVocabularyPolicy: "css-defined-classes-only",
+      contentCapacityPolicy: "copy-fits-measured-regions",
     },
     tokens: { ...input.blueprint.tokens },
     components: [

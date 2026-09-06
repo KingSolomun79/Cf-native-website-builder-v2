@@ -94,10 +94,26 @@ body { margin: 0; font-family: system-ui, sans-serif; background: var(--color-pa
 .hero h1 { font-family: 'Playfair Display', serif; font-size: clamp(3rem, 7vw, 6rem); line-height: 1.02; }
 .section { padding-block: var(--space-section); }
 .surface-ink { background: var(--color-ink); color: var(--color-paper); }
+.site-nav { display: flex; align-items: center; justify-content: space-between; padding: 1rem 1.5rem; }
+.wordmark { font-family: 'Playfair Display', serif; font-size: 1.25rem; text-decoration: none; color: var(--color-ink); }
+.page-header { padding-block: 5rem 2rem; }
+.content-section { padding-block: 3rem; }
+.fact-list { padding-block: 3rem; background: var(--color-paper); }
+.fact-list ul { list-style: none; display: grid; gap: 0.75rem; }
+.cta-band { padding-block: 5rem; background: var(--color-ink); color: var(--color-paper); text-align: center; }
+/* Issue #47 realization binding: every canonical Blueprint region carries a
+   real rule scoped to its data-region selector. */
+[data-region="hero"] { display: grid; grid-template-columns: 5fr 7fr; min-height: 88vh; align-items: center; }
+[data-region="hero"] h1 { font-family: 'Playfair Display', serif; font-size: clamp(3rem, 7vw, 6rem); line-height: 1.02; }
+[data-region="intro"] { padding-block: var(--space-section); }
+[data-region="services-overview"] { padding-block: var(--space-section); background: var(--color-ink); color: var(--color-paper); display: grid; grid-template-columns: repeat(4, 1fr); gap: 2rem; }
+[data-region="contact-cta"] { padding-block: 5rem; text-align: center; }
 [data-reveal] { opacity: 0; transform: translateY(1rem); transition: opacity .6s ease, transform .6s ease; }
 [data-reveal].is-visible { opacity: 1; transform: none; }
 @media (max-width: 768px) {
   .hero { grid-template-columns: 1fr; min-height: auto; }
+  [data-region="hero"] { grid-template-columns: 1fr; min-height: auto; }
+  [data-region="services-overview"] { grid-template-columns: 1fr; }
   .nav-links { display: none; }
   .nav-toggle { display: grid; }
 }

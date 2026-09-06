@@ -56,6 +56,23 @@ export interface RawImage {
   displayedWidth: number;
   inMain: boolean;
   evidenceId: string | null;
+  /** Issue #47 realization precheck: rendered height + document y + the
+   *  canonical data-region the image sits inside (if any). Optional so
+   *  pre-#47 fixture adapters remain valid; the production extractor always
+   *  emits them. */
+  displayedHeight?: number;
+  boundsY?: number;
+  regionId?: string | null;
+  /** data-image-id of generated markup (resolved slots keep it after
+   *  assembly); null on external references. */
+  imageId?: string | null;
+}
+
+export interface RawHeadline {
+  text: string | null;
+  fontFamily: string | null;
+  fontSize: string | null;
+  bounds: RawBounds;
 }
 
 export interface RawNavItem {
@@ -96,6 +113,12 @@ export interface RawLayout {
   spacing: RawSpacing | null;
   contrastSamples: RawContrastSample[];
   consentDetected: boolean;
+  /** Issue #47 realization precheck: the page's first H1 as rendered, plus
+   *  the viewport the layout was measured at. Optional for pre-#47 fixture
+   *  adapters; the production extractor always emits them. */
+  headline?: RawHeadline | null;
+  viewportHeight?: number;
+  viewportWidth?: number;
 }
 
 export interface RawCandidate {
@@ -385,7 +408,11 @@ const EXTRACT_LAYOUT_SCRIPT = `(() => {
   Array.from(document.querySelectorAll("h1, h2, h3, a, button, [role=button]")).slice(0, 60).forEach((el) => { const s = getComputedStyle(el); [s.color, s.backgroundColor].forEach((c) => { if (c && c !== "rgba(0, 0, 0, 0)" && c !== "transparent") counts.set(c, (counts.get(c) || 0) + 1); }); });
   const accents = Array.from(counts.entries()).sort((a, b) => b[1] - a[1]).slice(0, 8).map((e) => e[0]);
   const nav = Array.from(document.querySelectorAll("nav a, [role=navigation] a")).slice(0, 40).map((a) => { let external = false; try { external = a.href ? new URL(a.href, location.href).origin !== location.origin : false; } catch (e) {} return { href: a.href || "", text: trim(a.textContent), external, evidenceId: eid(a) }; });
-  const images = Array.from(document.querySelectorAll("img")).slice(0, 80).map((img) => { const r = img.getBoundingClientRect(); return { src: img.currentSrc || img.src || "", alt: trim(img.getAttribute("aria-label") || img.alt), naturalWidth: img.naturalWidth || 0, naturalHeight: img.naturalHeight || 0, displayedWidth: round(r.width), inMain: !!img.closest("main"), evidenceId: eid(img) }; });
+  const images = Array.from(document.querySelectorAll("img")).slice(0, 80).map((img) => { const r = img.getBoundingClientRect(); const regionEl = img.closest("[data-region]"); return { src: img.currentSrc || img.src || "", alt: trim(img.getAttribute("aria-label") || img.alt), naturalWidth: img.naturalWidth || 0, naturalHeight: img.naturalHeight || 0, displayedWidth: round(r.width), inMain: !!img.closest("main"), evidenceId: eid(img), displayedHeight: round(r.height), boundsY: round(r.y + window.scrollY), regionId: regionEl ? regionEl.getAttribute("data-region") : null, imageId: img.getAttribute("data-image-id") }; });
+  const headlineElement = document.querySelector("h1");
+  const headline = headlineElement ? (() => { const s = getComputedStyle(headlineElement); return { text: trim(headlineElement.textContent), fontFamily: s.fontFamily, fontSize: s.fontSize, bounds: boundsOf(headlineElement) }; })() : null;
+  const viewportHeight = window.innerHeight;
+  const viewportWidth = window.innerWidth;
   const viewportMeta = document.querySelector("meta[name=viewport]") ? document.querySelector("meta[name=viewport]").getAttribute("content") : null;
   const description = document.querySelector("meta[name=description]") ? document.querySelector("meta[name=description]").getAttribute("content") : null;
   const consentSelector = "[id*=cookie i], [class*=cookie i], [id*=consent i], [class*=consent i], [id*=gdpr i], [aria-label*=cookie i]";
@@ -398,7 +425,7 @@ const EXTRACT_LAYOUT_SCRIPT = `(() => {
   const effectiveBackground = (el) => { const layers = []; let node = el; while (node && node.nodeType === 1) { const parsed = parseColor(getComputedStyle(node).backgroundColor); if (parsed && parsed.a > 0) layers.push(parsed); node = node.parentElement; } let color = { r: 255, g: 255, b: 255, a: 1 }; layers.reverse().forEach((layer) => { color = composite(layer, color); }); return "rgb(" + Math.round(color.r) + ", " + Math.round(color.g) + ", " + Math.round(color.b) + ")"; };
   const contrastTargets = "h1, h2, h3, h4, p, a[href], button, label, li, summary, .stat__value, .stat__label, .footer__copy";
   const contrastSamples = Array.from(document.querySelectorAll(contrastTargets)).filter((el) => { const r = el.getBoundingClientRect(); const s = getComputedStyle(el); return r.width > 0 && r.height > 0 && s.display !== "none" && s.visibility !== "hidden" && Number(s.opacity || 1) > 0 && trim(el.textContent); }).slice(0, 160).map((el) => { const s = getComputedStyle(el); const id = eid(el); return { selector: id ? "[data-cf-evidence-id=\\\"" + id + "\\\"]" : el.tagName.toLowerCase(), evidenceId: id, text: trim(el.textContent), color: s.color, backgroundColor: effectiveBackground(el), fontSize: s.fontSize, fontWeight: s.fontWeight }; });
-  return { finalUrl: location.href, title: trim(document.title), lang: document.documentElement.lang || null, description: trim(description), viewportMeta, sections, typography, colors: { background: bodyStyle.backgroundColor, text: bodyStyle.color, accents }, nav, images, spacing, contrastSamples, consentDetected };
+  return { finalUrl: location.href, title: trim(document.title), lang: document.documentElement.lang || null, description: trim(description), viewportMeta, sections, typography, colors: { background: bodyStyle.backgroundColor, text: bodyStyle.color, accents }, nav, images, spacing, contrastSamples, consentDetected, headline, viewportHeight, viewportWidth };
 })()`;
 
 const DISCOVER_INTERACTABLES_SCRIPT = `(() => {
