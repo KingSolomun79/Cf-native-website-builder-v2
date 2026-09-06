@@ -285,11 +285,15 @@ async function driveWorkflow(
   env: Env,
   siteGenerationId: string,
   engine: RetryEngine,
-  deps: BuildPipelineDeps
+  deps: BuildPipelineDeps,
+  workflowInstanceId?: string
 ): Promise<unknown> {
   const workflow = Object.assign(Object.create(WebsiteBuildWorkflow.prototype), { env }) as WebsiteBuildWorkflow;
   workflow.pipelineDeps = deps;
-  const event = { payload: { siteGenerationId } } as unknown as WorkflowEvent<{ siteGenerationId: string }>;
+  const event = {
+    payload: { siteGenerationId },
+    instanceId: workflowInstanceId,
+  } as unknown as WorkflowEvent<{ siteGenerationId: string }>;
   return await workflow.run(event, engine as unknown as WorkflowStep);
 }
 
@@ -364,7 +368,7 @@ describe("single-flight retry liveness (workflow level)", () => {
     const deps: BuildPipelineDeps = { ...base, generate };
 
     const engine = new RetryEngine(env, buildIdRef, { killFirstGenerateAttempt: () => killSignal });
-    const result = (await driveWorkflow(env, siteGenerationId, engine, deps)) as {
+    const result = (await driveWorkflow(env, siteGenerationId, engine, deps, "wf-liveness-dead-owner")) as {
       buildId: string;
       terminal: string;
     };
@@ -373,6 +377,13 @@ describe("single-flight retry liveness (workflow level)", () => {
     expect(result.terminal).toEqual("RELEASE_READY");
     expect(buildIdRef.current).toEqual(result.buildId);
     expect(engine.events.some((event) => event.kind === "exhausted")).toBe(false);
+
+    // The Build carries the owning workflow instance (issue #56 sweep input —
+    // the forensic snapshot found NO code path ever wrote this column).
+    const buildRow = await env.DB.prepare("SELECT workflow_instance_id FROM builds WHERE id = ?1")
+      .bind(result.buildId)
+      .first<{ workflow_instance_id: string | null }>();
+    expect(buildRow?.workflow_instance_id).toEqual("wf-liveness-dead-owner");
 
     // Attempt timeline for the generate step: killed owner -> IN_PROGRESS
     // yield -> takeover. Comfortably inside the 8 total attempts.
@@ -432,7 +443,7 @@ describe("single-flight retry liveness (workflow level)", () => {
 
     // Drive A: the legitimate slow owner.
     const engineA = new RetryEngine(env, buildIdRef);
-    const driveA = driveWorkflow(env, siteGenerationId, engineA, deps);
+    const driveA = driveWorkflow(env, siteGenerationId, engineA, deps, "wf-liveness-owner-a");
     const claimDuringOwnership = await waitForLiveSiteCssClaim(env, buildIdRef);
     expect(entries.siteCss).toEqual(1);
 
@@ -448,7 +459,7 @@ describe("single-flight retry liveness (workflow level)", () => {
       completeAfterResultOf: "pipeline: generate site",
       holdClockUntil: ownerCompleted,
     });
-    const driveB = driveWorkflow(env, siteGenerationId, engineB, deps).catch((error) => {
+    const driveB = driveWorkflow(env, siteGenerationId, engineB, deps, "wf-liveness-overlap-b").catch((error) => {
       if (error instanceof ScenarioComplete) return error.result;
       throw error;
     });
@@ -491,5 +502,13 @@ describe("single-flight retry liveness (workflow level)", () => {
       .bind(resultA.buildId)
       .first<ClaimRow>();
     expect(claim?.state).toEqual("COMPLETED");
+
+    // B (a different instance) adopted the Build but never stole A's
+    // instance mapping — first writer wins (issue #56 sweep input stays
+    // truthful about the instance that owns the Build).
+    const buildRow = await env.DB.prepare("SELECT workflow_instance_id FROM builds WHERE id = ?1")
+      .bind(resultA.buildId)
+      .first<{ workflow_instance_id: string | null }>();
+    expect(buildRow?.workflow_instance_id).toEqual("wf-liveness-owner-a");
   });
 });

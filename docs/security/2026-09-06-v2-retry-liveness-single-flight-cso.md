@@ -29,6 +29,12 @@ The simulated engine rewrites `stage_execution_claims.lease_expires_at` to simul
 
 - Critical: 0 · High: 0 · Medium: 0 · Low: 1 (fixed in-change) · Watch items: 1 (pre-existing, unchanged)
 
-## 5. Final security verdict
+## 5. Addendum — forensic-snapshot discovery (same day)
+
+The directive §12 read-only snapshot found that `builds.workflow_instance_id` was **never written by any code path** (both build-creation INSERTs write NULL; the build-create route returns the instance id to the caller without persisting it). The issue-#56 reconciliation sweep selects `WHERE workflow_instance_id IS NOT NULL` and therefore could never examine any Build — an inert control, not a security exposure.
+
+Fix (separate commit): workflow step 1.0 stamps the owning instance id idempotently (`UPDATE … WHERE workflow_instance_id IS NULL`, first writer wins). No secrets or identifiers beyond the opaque workflow instance id are persisted. Residual watch item: the two pre-#56 wedged Builds (`bbba52df…`, `91764d47…`) keep NULL instance ids and remain outside the sweep's selector until the operator chooses a backfill or an orphan-arm design.
+
+## 6. Final security verdict
 
 **SECURITY OK** — the change is internal retry scheduling; the one realistic weakness found (F1) is fixed and regression-tested in the same commit.

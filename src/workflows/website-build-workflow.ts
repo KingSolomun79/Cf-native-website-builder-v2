@@ -104,20 +104,42 @@ export class WebsiteBuildWorkflow extends WorkflowEntrypoint<Env, WebsiteBuildPa
     const created = await step.do<InitialBuildCreated | { buildId: string }>(
       "1.0 resolve Build and immutable Build Version 1",
       async () => {
-        if (buildId) return { buildId };
-        const { createInitialBuild, adoptExistingInitialBuild } = await import("../domain/lifecycle");
-        try {
-          return await createInitialBuild(this.env, { siteGenerationId });
-        } catch (error) {
-          // Engine/operator restart of an in-flight generation: the initial
-          // Build already exists — adopt it so the restart resumes the
-          // pipeline on its frozen artifacts instead of erroring forever.
-          if ((error as { code?: string }).code === "INITIAL_BUILD_ALREADY_EXISTS") {
-            const existing = await adoptExistingInitialBuild(this.env, siteGenerationId);
-            if (existing) return existing;
+        let resolved: InitialBuildCreated | { buildId: string };
+        if (buildId) {
+          resolved = { buildId };
+        } else {
+          const { createInitialBuild, adoptExistingInitialBuild } = await import("../domain/lifecycle");
+          try {
+            resolved = await createInitialBuild(this.env, { siteGenerationId });
+          } catch (error) {
+            // Engine/operator restart of an in-flight generation: the initial
+            // Build already exists — adopt it so the restart resumes the
+            // pipeline on its frozen artifacts instead of erroring forever.
+            if ((error as { code?: string }).code === "INITIAL_BUILD_ALREADY_EXISTS") {
+              const existing = await adoptExistingInitialBuild(this.env, siteGenerationId);
+              if (existing) resolved = existing;
+              else throw error;
+            } else {
+              throw error;
+            }
           }
-          throw error;
         }
+        // Record the owning workflow instance on the Build (issue #56 sweep
+        // input): without it the reconciliation sweep's
+        // `workflow_instance_id IS NOT NULL` selector can never see any Build,
+        // and resource-killed instances stay invisible to the sweep (found by
+        // the 2026-09-06 forensic snapshot — no code path ever wrote this
+        // column). First writer wins; engine restarts of the same instance are
+        // no-ops, and a later DIFFERENT instance never steals the mapping.
+        // Idempotent under step retries.
+        if (event.instanceId) {
+          await this.env.DB.prepare(
+            "UPDATE builds SET workflow_instance_id = ?2, updated_at = ?3 WHERE id = ?1 AND workflow_instance_id IS NULL"
+          )
+            .bind(resolved.buildId, event.instanceId, new Date().toISOString())
+            .run();
+        }
+        return resolved;
       }
     );
 
