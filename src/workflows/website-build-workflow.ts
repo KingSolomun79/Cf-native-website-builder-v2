@@ -77,47 +77,68 @@ export class WebsiteBuildWorkflow extends WorkflowEntrypoint<Env, WebsiteBuildPa
       }
     );
 
-    const outcome = await step.do<WebsiteBuildResult>(
-      "2.0 run REFERENCE_BOUND pipeline to terminal state",
-      async () => {
-        const { runBuildPipeline } = await import("../domain/build-pipeline");
-        const result = await runBuildPipeline(this.env, {
-          siteGenerationId,
-          buildId: created.buildId,
-          // Every pipeline stage executes as its own durable step: a mid-flight
-          // isolate eviction retries only that stage, and each stage is
-          // idempotent (frozen-artifact reuse / KIE spend-resume).
-          deps: {
-            ...(this.pipelineDeps ?? {}),
-            // Transient platform faults (D1 "Durable Object no longer
-            // active", isolate evictions) heal via bounded engine retries;
-            // every step is idempotent (artifact reuse / spend-resume /
-            // single-flight provider claims — issue #54).
-            step: async <T,>(name: string, fn: () => Promise<T>) => {
-              try {
-                return (await step.do(
-                  name,
-                  { retries: { limit: 8, delay: "10 seconds", backoff: "exponential" } } as never,
-                  () => fn() as never
-                )) as T;
-              } catch (error) {
-                throw toWorkflowStepError(error);
-              }
+    // Catchable failures (step retry exhaustion, NonRetryableError terminal
+    // collisions) record the domain failure BEFORE the instance dies, so the
+    // Build never sits non-terminal with only platform evidence (issue #56).
+    // Resource kills cannot rely on this catch running — the scheduled
+    // reconciliation sweep (reconcileWorkflowTerminations) covers those via
+    // the workflow status API.
+    try {
+      return await step.do<WebsiteBuildResult>(
+        "2.0 run REFERENCE_BOUND pipeline to terminal state",
+        async () => {
+          const { runBuildPipeline } = await import("../domain/build-pipeline");
+          const result = await runBuildPipeline(this.env, {
+            siteGenerationId,
+            buildId: created.buildId,
+            // Every pipeline stage executes as its own durable step: a mid-flight
+            // isolate eviction retries only that stage, and each stage is
+            // idempotent (frozen-artifact reuse / KIE spend-resume).
+            deps: {
+              ...(this.pipelineDeps ?? {}),
+              // Transient platform faults (D1 "Durable Object no longer
+              // active", isolate evictions) heal via bounded engine retries;
+              // every step is idempotent (artifact reuse / spend-resume /
+              // single-flight provider claims — issue #54).
+              step: async <T,>(name: string, fn: () => Promise<T>) => {
+                try {
+                  return (await step.do(
+                    name,
+                    { retries: { limit: 8, delay: "10 seconds", backoff: "exponential" } } as never,
+                    () => fn() as never
+                  )) as T;
+                } catch (error) {
+                  throw toWorkflowStepError(error);
+                }
+              },
             },
-          },
+          });
+          return {
+            buildId: result.buildId,
+            buildVersionId: result.releaseReadyBuildVersionId ?? undefined,
+            terminal: result.terminal,
+            releaseReadyBuildVersionId: result.releaseReadyBuildVersionId,
+            artifactManifestHash: result.artifactManifestHash,
+            previewUrl: result.previewUrl,
+            reasons: result.reasons,
+          };
+        }
+      );
+    } catch (error) {
+      try {
+        const { failBuildForWorkflowTermination } = await import("../domain/workflow-reconciliation");
+        await failBuildForWorkflowTermination(this.env, {
+          buildId: created.buildId,
+          workflowInstanceId: event.instanceId,
+          reason: "WORKFLOW_EXECUTION_EXHAUSTED",
+          detail: (error as Error)?.message?.slice(0, 250),
         });
-        return {
-          buildId: result.buildId,
-          buildVersionId: result.releaseReadyBuildVersionId ?? undefined,
-          terminal: result.terminal,
-          releaseReadyBuildVersionId: result.releaseReadyBuildVersionId,
-          artifactManifestHash: result.artifactManifestHash,
-          previewUrl: result.previewUrl,
-          reasons: result.reasons,
-        };
+      } catch (reconciliationError) {
+        console.error(
+          `(error) workflow_failure_reconciliation_failed { buildId: '${created.buildId}', message: '${(reconciliationError as Error).message.replace(/'/g, "")}' }`
+        );
       }
-    );
-
-    return outcome;
+      throw error;
+    }
   }
 }

@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import type { Env } from "./env.d";
 import { processDueEmailDeliveries } from "./domain/form-service";
+import { reconcileWorkflowTerminations } from "./domain/workflow-reconciliation";
 import { handleKieCallback } from "./routes/internal.kie-callback";
 import { submitOnboardingSubmission } from "./routes/v2.onboarding-submit";
 import { getSiteGeneration } from "./routes/v2.site-generation-get";
@@ -45,10 +46,31 @@ app.onError((err, c) => {
 // (PRD 37): due retries fire on the cron trigger declared in wrangler.jsonc
 // so visitors never resubmit. Idempotent per delivery ledger state; the
 // per-submission attempt ceiling lives in processDueEmailDeliveries.
+//
+// The same sweep also reconciles workflow terminal failures (issue #56): a
+// Build whose workflow instance the platform reports errored/terminated while
+// the Build is still non-terminal is failed exactly once with an audit event.
+// Resource kills cannot run catch/finally in the dying invocation, so this
+// external status check is the guarantee that no Build stays non-terminal
+// forever. Bounded per run; reuses the existing cron (no new scheduler).
 export async function scheduled(event: ScheduledController, env: Env): Promise<void> {
-  const processed = await processDueEmailDeliveries(env);
-  if (processed > 0) {
-    console.log(`email delivery retry sweep: ${processed} due submissions processed (cron ${event.cron})`);
+  try {
+    const processed = await processDueEmailDeliveries(env);
+    if (processed > 0) {
+      console.log(`email delivery retry sweep: ${processed} due submissions processed (cron ${event.cron})`);
+    }
+  } catch (error) {
+    console.error(`(error) email_retry_sweep_failed { message: '${(error as Error).message.replace(/'/g, "")}' }`);
+  }
+  try {
+    const summary = await reconcileWorkflowTerminations(env);
+    if (summary.examined > 0 || summary.errors > 0) {
+      console.log(
+        `(info) workflow_reconciliation_sweep { examined: ${summary.examined}, reconciled: ${summary.reconciled}, skipped: ${summary.skipped}, errors: ${summary.errors} }`
+      );
+    }
+  } catch (error) {
+    console.error(`(error) workflow_reconciliation_sweep_failed { message: '${(error as Error).message.replace(/'/g, "")}' }`);
   }
 }
 
