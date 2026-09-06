@@ -201,7 +201,21 @@ export function evaluateQaARelease(report: QaAReport | QaAConfirmationReport | Q
   const p1 = active.filter((finding) => finding.severity === "P1");
   if (p0.length > 0) reasons.push(`${p0.length} P0 finding(s)`);
   if (p1.length > 0) reasons.push(`${p1.length} P1 finding(s)`);
-  if (report.fabrication) reasons.push("fabricated Business Facts detected");
+  // Issue #48: fabrication is not only a release reason — it becomes a
+  // tracked P1 business-truth blocker so the repair loop receives it and the
+  // confirmation seam must explicitly re-judge it (ACTIVE/RESOLVED). A
+  // fabricated customer/partner identity can therefore never silently pass
+  // confirmation while every visual defect around it is marked resolved.
+  const fabricationBlocker: EvaluableQaFinding = {
+    severity: "P1",
+    domain: "business-truth",
+    description: "Fabricated Business Facts / unsupported trust or identity content detected — unsupported fabricated customer, partner, award or certification identities cannot pass release",
+    evidenceRef: "qa-a:business-truth",
+  };
+  if (report.fabrication) {
+    reasons.push("fabricated Business Facts detected");
+    p1.push(fabricationBlocker);
+  }
   const failedGates = report.hardGates.filter((gate) => !gate.passed);
   if (failedGates.length > 0) reasons.push(`hard composition gate(s) failed: ${failedGates.map((gate) => gate.id).join(", ")}`);
   return {
@@ -245,6 +259,8 @@ export function buildQaAUserPrompt(input: {
   adaptationContractQaExceptions: string[];
 }): string {
   return `Evaluate this Release Candidate against the Reference and the Visual Blueprint. Judge rendered visual fidelity and content quality, verify every hard composition gate, and list exact findings with severity (P0/P1/P2/P3) and evidence references. Treat declared Adaptation Contract QA exceptions as intentional; a high score may never compensate a failed hard gate.
+
+BUSINESS TRUTH (binding, issue #48): set fabrication=true whenever the candidate presents unsupported identity or trust entities — invented client/partner names or logos, awards, certifications, press features, ratings or testimonial identities not present in the Business Facts — whether in text, badges or imagery. The same rule binds confirmation: a fabricated identity may never pass while unresolved, regardless of how many visual defects around it are fixed.
 
 HARD GATE IDS (production retest 2026-09-05): report hardGates with EXACTLY these ids, each exactly once, no synonyms: ${JSON.stringify(QA_A_HARD_GATE_IDS)}.
 

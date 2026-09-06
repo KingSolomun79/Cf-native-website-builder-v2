@@ -1043,3 +1043,33 @@ Evidence: 41 test files / 306 tests green (baseline 39/280); `tsc --noEmit`
 clean; `wrangler deploy --dry-run` clean;
 `docs/security/2026-09-05-v2-issue47-realization-binding-cso.md` = SECURITY
 OK WITH WATCH ITEMS (2 low watch items, no remediation).
+
+## 2026-09-05 — #48 Fabrication Defenses (implemented)
+
+1. Deterministic trust-context Business-truth lint (`FABRICATED_TRUST_ENTITY`)
+   in assembly validation: labels inside trust-signaling contexts (container
+   attributes, dominating trust headings, Blueprint regions whose semantic
+   purpose is a trust band) must be backed by the Business Facts or the
+   closed safe vocabulary. NOT a capitalization heuristic: entity shape =
+   interior capitals / digit runs / single capitalized unknown word / long
+   all-caps tokens; sentence-case phrases, acronyms, prose, lowercase labels
+   and imagery descriptors are exempt. The frozen v3 fabricated names
+   ("Glap Thon", "Marivert", "6699", "Scap Thes", "Hopes") fail; a visually
+   equivalent fact-safe adaptation passes; facts-supplied partner names pass.
+   Tuning evidence: a business name containing "Partners" as H1 does not
+   trigger a trust context (heading must be dominated by the trust phrase).
+2. KIE image prompts carry a binding identity prohibition: no readable text,
+   wordmarks, logos, brand/client names, UI chrome or screenshot-like
+   composition — the pixel mode of the frozen defect is defended at the
+   prompt seam and by QA-A's vision business-truth rule (the #47 orientation
+   gate deterministically rejects the exact frozen asset).
+3. QA consistency: `evaluateQaARelease` turns a fabrication verdict into a
+   tracked P1 business-truth blocker, so fresh blockers → Fix Coordinator →
+   confirmation previousBlockers all carry it, and the confirmation
+   resolution contract restates: business truth is never visually resolved.
+   Regression-pinned: confirmation with all visual defects RESOLVED but
+   fabrication active cannot pass; genuinely removed fabricated content
+   releases.
+4. Tests: `tests/v2-truth-lint.test.ts` (10 tests). Suite 42 files / 316
+   tests green; tsc + wrangler dry-run clean; CSO = SECURITY OK WITH WATCH
+   ITEMS (`docs/security/2026-09-05-v2-issue48-fabrication-defenses-cso.md`).

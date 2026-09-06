@@ -1,0 +1,230 @@
+import { describe, expect, it } from "vitest";
+import {
+  lintTrustContexts,
+  validateAssembledSite,
+  type AssembledSiteSource,
+} from "../src/domain/site-generator";
+import type { ImplementationContract } from "../src/domain/implementation-planner";
+import { buildImagePromptUserPrompt } from "../src/domain/image-pipeline";
+import {
+  evaluateQaARelease,
+  QA_A_HARD_GATE_IDS,
+  type QaAConfirmationReport,
+  type QaAReport,
+} from "../src/domain/qa-stages";
+import type { BusinessFacts } from "../src/domain/lifecycle-schema";
+
+// Issue #48 — fabrication defenses.
+//
+// The production RankForge candidate filled a Reference client-logo/trust
+// band with invented entities ("Glap Thon", "Marivert", "6699", "Scap Thes",
+// "Hopes" — frozen in the v3 fixture). Reproducing a trust band's STRUCTURE
+// never licenses inventing its entities. These tests pin the deterministic
+// Business-truth lint, the fact-safe adaptation path, and the confirmation
+// seam that must never lose a fabrication finding.
+
+const FROZEN_FABRICATED_NAMES = ["Glap Thon", "Marivert", "6699", "Scap Thes", "Hopes"];
+
+const FACTS: BusinessFacts = {
+  businessName: "RankForge Kenya",
+  contactEmail: "hello@rankforge.example",
+  businessType: "SEO agency",
+  businessDescription: "A Nairobi-based SEO and organic-growth agency.",
+  city: "Nairobi",
+  country: "Kenya",
+  extraInformation: "Long-standing partners: Acme Corp and Eastside Media.",
+};
+
+const CLIENT_BAND = (labels: string[]): string =>
+  `<section class="logo-strip" aria-label="Trusted by">
+  <h2>Trusted by</h2>
+  <ul class="logo-wall">${labels.map((label) => `<li>${label}</li>`).join("")}</ul>
+</section>`;
+
+const PAGE = (main: string): string =>
+  `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>RankForge Kenya</title><link rel="stylesheet" href="site.css"><script src="site.js" defer></script></head><body><header><nav aria-label="Primary"><a href="/">Home</a><a href="/about">About</a><a href="/services">Services</a><a href="/contact">Contact</a></nav></header><main>${main}</main><footer><p>RankForge Kenya</p></footer></body></html>`;
+
+function contractFixture(): ImplementationContract {
+  return {
+    version: "1",
+    blueprintVisualThesis: "t",
+    blueprintSignatureTraitIds: ["bp-trait"],
+    blueprintFirstViewportRegionIds: ["hero"],
+    pages: [
+      { id: "home", path: "/", regions: [{ id: "hero", realization: "section" }] },
+      { id: "about", path: "/about", regions: [] },
+      { id: "services", path: "/services", regions: [] },
+      { id: "contact", path: "/contact", regions: [] },
+    ],
+    files: { sharedCss: "site.css", sharedJs: "site.js", pageFiles: { home: "index.html", about: "about.html", services: "services.html", contact: "contact.html" } },
+    tokens: {},
+    components: [],
+    responsiveStrategy: {},
+    imageSlotStrategy: {},
+    formContract: {
+      formServiceEndpoint: "https://forms.wazibiz.example/api/v2/forms/submit",
+      siteFormId: "site:test-site",
+      fields: ["name", "email", "message"],
+      turnstile: false,
+    },
+    approvedDependencies: [],
+    blockers: [],
+  };
+}
+
+type ValidationContext = Parameters<typeof validateAssembledSite>[1];
+
+function verdictFor(homeHtml: string, facts: BusinessFacts | undefined, blueprint?: VisualBlueprint) {
+  const source: AssembledSiteSource = {
+    pages: { home: homeHtml, about: "", services: "", contact: "" },
+    sharedCss: "[data-region=\"hero\"] { min-height: 50vh; }\n@media (max-width: 768px) { [data-region=\"hero\"] { min-height: auto; } }",
+    sharedJs: "(function(){})();",
+  };
+  const context: ValidationContext = { contract: contractFixture(), slots: [], ...(facts ? { facts } : {}), ...(blueprint ? { blueprint } : {}) };
+  return validateAssembledSite(source, context);
+}
+
+const truthFindings = (findings: Array<{ id: string; detail: string }>) =>
+  findings.filter((finding) => finding.id === "FABRICATED_TRUST_ENTITY");
+
+describe("deterministic trust-context truth lint (issue #48)", () => {
+  it("fails every frozen RankForge fabricated trust-strip name in a client band", () => {
+    const verdict = verdictFor(PAGE(CLIENT_BAND(FROZEN_FABRICATED_NAMES)), FACTS);
+    const findings = truthFindings(verdict.findings);
+    expect(findings.length).toBeGreaterThanOrEqual(FROZEN_FABRICATED_NAMES.length);
+    for (const name of FROZEN_FABRICATED_NAMES) {
+      expect(findings.some((finding) => finding.detail.includes(`'${name}'`)), name).toBe(true);
+    }
+    expect(verdict.passed).toBe(false);
+  });
+
+  it("flags fabricated logos in image alt text inside a trust context", () => {
+    const html = PAGE(
+      `<ul class="client-logos" aria-label="Our clients"><li><img src="assets/images/x.webp" alt="Marivert"></li><li><img src="assets/images/y.webp" alt="Scap Thes"></li></ul>`
+    );
+    const findings = truthFindings(verdictFor(html, FACTS).findings);
+    expect(findings.map((finding) => finding.detail)).toEqual(
+      expect.arrayContaining([expect.stringContaining("'Marivert'"), expect.stringContaining("'Scap Thes'")])
+    );
+  });
+
+  it("passes a visually equivalent fact-safe adaptation (the #48 adaptation contract)", () => {
+    // Same visual rhythm — a label strip — populated with service categories,
+    // topic labels, the business's own city and generic audience categories.
+    const html = PAGE(
+      `<section class="logo-strip" aria-label="Trusted by">
+  <h2>Trusted by</h2>
+  <ul class="logo-wall"><li>SEO</li><li>Web design</li><li>Nairobi businesses</li><li>Who We Help</li></ul>
+  <p class="audience-line">Kenyan SMEs · Professional services · Ecommerce · Hospitality &amp; travel · B2B companies · East African brands</p>
+</section>`
+    );
+    expect(truthFindings(verdictFor(html, FACTS).findings)).toEqual([]);
+  });
+
+  it("permits customer/partner names that the Business Facts explicitly supply", () => {
+    const html = PAGE(CLIENT_BAND(["Acme Corp", "Eastside Media"]));
+    expect(truthFindings(verdictFor(html, FACTS).findings)).toEqual([]);
+  });
+
+  it("does not police ordinary containers — only trust-signaling contexts", () => {
+    const html = PAGE(`<div class="random-band"><ul><li>Glap Thon</li><li>Marivert</li></ul></div>`);
+    expect(truthFindings(verdictFor(html, FACTS).findings)).toEqual([]);
+  });
+
+  it("treats a Blueprint trust region purpose as a trigger even without DOM trust wording", () => {
+    const violations = lintTrustContexts(
+      `<section data-region="client_logos_band"><ul><li>Glap Thon</li></ul></section>`,
+      "home",
+      new Set(["rankforge", "kenya", "seo"]),
+      new Map([["client_logos_band", "Client logos band from the Reference"]])
+    );
+    expect(violations.map((violation) => violation.text)).toEqual(["Glap Thon"]);
+  });
+});
+
+describe("fabrication is a tracked, unloseable release blocker (issue #48)", () => {
+  const hardGates = QA_A_HARD_GATE_IDS.map((id) => ({ id, passed: true }));
+
+  it("fresh QA-A turns a fabrication verdict into a business-truth blocker", () => {
+    const report: QaAReport = {
+      version: "1",
+      visualScore: 95,
+      contentScore: 95,
+      fabrication: true,
+      hardGates,
+      findings: [],
+    };
+    const verdict = evaluateQaARelease(report);
+    expect(verdict.releaseReady).toBe(false);
+    expect(verdict.reasons.join(" ")).toContain("fabricated");
+    expect(verdict.blockers).toHaveLength(1);
+    expect(verdict.blockers[0].domain).toBe("business-truth");
+    expect(verdict.blockers[0].severity).toBe("P1");
+  });
+
+  it("confirmation cannot pass while fabrication is active — even with every visual defect resolved", () => {
+    const confirmation: QaAConfirmationReport = {
+      version: "1",
+      visualScore: 96,
+      contentScore: 95,
+      fabrication: true,
+      hardGates,
+      findings: [
+        {
+          severity: "P1",
+          domain: "visual-fidelity",
+          description: "Previously identified hero contrast defect",
+          evidenceRef: "qa/home-1440-first.png",
+          status: "RESOLVED",
+        },
+      ],
+    };
+    const verdict = evaluateQaARelease(confirmation);
+    expect(verdict.releaseReady).toBe(false);
+    expect(verdict.blockers.some((blocker) => blocker.domain === "business-truth" && blocker.status !== "RESOLVED")).toBe(true);
+    expect(verdict.resolved).toHaveLength(1);
+  });
+
+  it("a genuinely removed fabricated band allows release when everything else passes", () => {
+    const confirmation: QaAConfirmationReport = {
+      version: "1",
+      visualScore: 95,
+      contentScore: 94,
+      fabrication: false,
+      hardGates,
+      findings: [
+        {
+          severity: "P1",
+          domain: "business-truth",
+          description: "Previously identified fabricated client-logo strip",
+          evidenceRef: "qa/home-1440.png",
+          status: "RESOLVED",
+        },
+      ],
+    };
+    const verdict = evaluateQaARelease(confirmation);
+    expect(verdict.releaseReady).toBe(true);
+    expect(verdict.blockers).toEqual([]);
+    expect(verdict.resolved).toHaveLength(1);
+  });
+});
+
+describe("generated imagery cannot carry fabricated identity (issue #48)", () => {
+  it("every KIE prompt carries the binding identity prohibition", () => {
+    const prompt = buildImagePromptUserPrompt([
+      {
+        id: "home-hero",
+        page: "home",
+        semanticRole: "editorial hero",
+        blueprintRole: "role-hero",
+        priority: "CRITICAL",
+        orientation: "landscape",
+        negativeSpaceForText: true,
+      },
+    ]);
+    expect(prompt).toContain("IDENTITY PROHIBITION");
+    expect(prompt).toContain("NO readable text");
+    expect(prompt).toContain("logo");
+    expect(prompt).toContain("screenshot-like composition");
+  });
+});

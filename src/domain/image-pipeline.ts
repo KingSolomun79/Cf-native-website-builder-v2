@@ -106,7 +106,12 @@ export type ImagePromptRecords = Static<typeof ImagePromptRecordsSchema>;
 
 export function buildImagePromptUserPrompt(slots: ImageSlot[], slotIdsWithPrompts?: string[]): string {
   const scoped = slotIdsWithPrompts ? slots.filter((slot) => slotIdsWithPrompts.includes(slot.id)) : slots;
-  return `Generate KIE image prompts for the Image Slots below. Each record keeps the slot's stable semantic/compositional identity, honors its priority, orientation and text-space requirements, and follows the slot avoidance discipline. No text overlays in images.
+  // Issue #48: generated imagery must never carry fabricated identity — the
+  // frozen RankForge candidate baked a fake client-logo strip into an asset's
+  // pixels. The prohibition is binding for every slot prompt record.
+  return `Generate KIE image prompts for the Image Slots below. Each record keeps the slot's stable semantic/compositional identity, honors its priority, orientation and text-space requirements, and follows the slot avoidance discipline.
+
+IDENTITY PROHIBITION (binding, issue #48): every prompt must produce abstract or photographic imagery only — NO readable text, lettering, numbers, wordmarks, logos, brand or client names, awards or certifications marks, watermarks, UI chrome, or screenshot-like composition. Reproducing a Reference trust band's visual rhythm never licenses inventing the entities in it; a prompt that would render any name, logo or text must be rewritten to an abstract/photographic equivalent before output.
 
 IMAGE SLOTS:
 ${JSON.stringify(scoped, null, 2)}`;

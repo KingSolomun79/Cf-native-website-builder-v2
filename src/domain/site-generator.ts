@@ -247,6 +247,231 @@ export function classifyGeneratedClass(cls: string, sharedJs: string): Generated
   return "styling-intent";
 }
 
+// ── Business-truth trust-context lint (issue #48) ───────────────────────────
+//
+// Reproducing a Reference trust-band STRUCTURE never licenses inventing its
+// entities: the production candidate fabricated client names ("Glap Thon",
+// "Marivert", "6699", "Scap Thes", "Hopes") to fill a Reference client-logo
+// band. That is a Business Truth defect, not an aesthetic one. The lint is
+// deliberately context-scoped and fact-anchored — NOT a global capitalization
+// scan: a label is a defect only when it sits in a trust-signaling context
+// (DOM attributes/headings or a Blueprint region whose semantic role is a
+// trust context), is short/logo-like, is entity-shaped, and is not backed by
+// the Business Facts or the safe service/topic vocabulary.
+const TRUST_CONTEXT_PATTERN =
+  /\b(clients?|customers?|trusted\s+by|partners?|partnership|awards?|winners?|winning|featured\s+in|press|certif(?:ied|ication|ications?)|testimonials?|reviews?|logos?|logo\s*wall|accredited?|endorsements?)\b/i;
+
+// Generic category/topic words that cannot constitute a fabricated entity on
+// their own. A label whose content words are all generic/fact-backed is safe
+// even when it appears in a trust context ("Nairobi SMEs", "SEO agencies").
+const GENERIC_TRUST_LABEL_WORDS = new Set(
+  ("business businesses brand brands company companies firm firms startup startups sme smes " +
+    "organization organizations organisation organisations professional professionals team teams " +
+    "agency agencies enterprise enterprises people entrepreneur entrepreneurs owner owners " +
+    "retail ecommerce e-commerce hospitality travel tourism services service industry industries " +
+    "sector sectors local global leading growing modern trusted emerging ambitious small medium large " +
+    "help story work about meet contact more " +
+    "signature imagery photo photograph image picture graphic visual visuals media asset banner " +
+    "collage strip section band studio style show showing featuring work works crafted" +
+    "the a an and or but if of for to in on at by with from as into over under between after before " +
+    "during through without within who whom whose what why how when where we us our you your they them " +
+    "their he she it its i me my this these those that is are was were be been being have has had do " +
+    "does did will would can could should may might must not no so than too very own same s such only " +
+    "every all any some both few other others another each")
+    .split(" ")
+);
+
+interface TrustLabel {
+  text: string;
+  context: string;
+}
+
+// Words the Business Facts vouch for (lowercased). Any fact string contributes
+// its words: a supplied partner/customer name in the facts is therefore
+// permitted explicitly (issue #48 acceptance #3).
+function factVocabulary(facts: BusinessFacts | undefined): Set<string> {
+  const words = new Set<string>(["wazibiz"]);
+  if (!facts) return words;
+  const strings = [
+    facts.businessName,
+    facts.businessType ?? "",
+    facts.businessDescription ?? "",
+    facts.idealClientProfile ?? "",
+    facts.addressLine1 ?? "",
+    facts.city ?? "",
+    facts.country ?? "",
+    facts.extraInformation ?? "",
+  ];
+  for (const text of strings) {
+    for (const word of text.toLowerCase().split(/[^a-z0-9&]+/)) {
+      if (word) words.add(word);
+    }
+  }
+  return words;
+}
+
+// Entity-shaped: a short label that reads like a proper name, brand or mark
+// rather than a common phrase. Sentence-case phrases ("Web design",
+// "Kenyan SMEs"), acronyms ("SEO", "SMEs"), lowercase and purely generic
+// labels are exempt; interior capitals ("Glap Thon"), single capitalized
+// unknown words ("Marivert"), digit runs ("6699") and long all-caps tokens
+// are entity signals.
+function isEntityLikeLabel(label: string): boolean {
+  const trimmed = label.trim().replace(/\s+/g, " ");
+  if (trimmed.length < 2 || trimmed.length > 60) return false;
+  if (/\d{2,}/.test(trimmed)) return true; // "6699" — digit-run marks
+  if (trimmed === trimmed.toLowerCase()) return false;
+  const words = trimmed.split(/\s+/);
+  if (words.length > 6) return false; // prose/copy, not a logo label
+  const vocabularyFree = (word: string) => word.toLowerCase().replace(/[^a-z0-9]/g, "");
+  let interiorCapital = false;
+  let singleCapitalizedCandidate = false;
+  words.forEach((word, index) => {
+    const bare = vocabularyFree(word);
+    if (!bare) return;
+    if (/^\d+$/.test(bare)) return;
+    const isAllCaps = bare === bare.toUpperCase() && bare.length >= 2;
+    const isCapitalized = /^[A-Z]/.test(word);
+    if (isAllCaps && bare.length <= 5) return; // acronym: SEO, SMEs, B2B
+    if (index === 0 && isCapitalized && word.slice(1) === word.slice(1).toLowerCase()) {
+      singleCapitalizedCandidate = true; // may be sentence case
+      return;
+    }
+    if (isCapitalized || (isAllCaps && bare.length > 5)) interiorCapital = true;
+  });
+  if (interiorCapital) return true;
+  // A single-word label starting with a capital is a logo mark unless it is
+  // sentence case AND generic/fact-backed ("Nairobi", "SEO").
+  if (singleCapitalizedCandidate && words.length === 1) return true;
+  return false;
+}
+
+function isFactSafeLabel(label: string, factWords: Set<string>): boolean {
+  const words = label.toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
+  if (words.length === 0) return true;
+  return words.every((word) => factWords.has(word) || GENERIC_TRUST_LABEL_WORDS.has(word));
+}
+
+// Collect short entity-carrying labels from a trust context's inner HTML:
+// list items, image alt texts and text-only elements.
+function collectTrustLabels(innerHtml: string): string[] {
+  const labels: string[] = [];
+  const stripTags = (html: string) => html.replace(/<[^>]+>/g, " ").replace(/&[a-z]+;/gi, " ").replace(/\s+/g, " ").trim();
+  for (const match of innerHtml.matchAll(/<li\b[^>]*>([\s\S]*?)<\/li>/gi)) {
+    const text = stripTags(match[1]);
+    if (text) labels.push(text);
+  }
+  for (const match of innerHtml.matchAll(/<img\b[^>]*>/gi)) {
+    const alt = /alt=(?:"([^"]*)"|'([^']*)')/i.exec(match[0]);
+    const text = (alt?.[1] ?? alt?.[2] ?? "").trim();
+    if (text) labels.push(text);
+  }
+  for (const match of innerHtml.matchAll(/<(span|p|h3|h4|h5|h6|div)\b[^>]*>([^<]*)<\/\1>/gi)) {
+    const text = match[2].replace(/&[a-z]+;/gi, " ").replace(/\s+/g, " ").trim();
+    if (text) labels.push(text);
+  }
+  return labels;
+}
+
+// A heading is a trust-context signal only when the trust phrase dominates
+// it: the text matches the trust pattern and every word OUTSIDE the matched
+// phrase is generic/function vocabulary.
+function isTrustHeading(headingText: string): boolean {
+  if (headingText.length === 0 || headingText.length > 40) return false;
+  const match = TRUST_CONTEXT_PATTERN.exec(headingText);
+  if (!match) return false;
+  const remainder = (headingText.slice(0, match.index) + " " + headingText.slice(match.index + match[0].length))
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .filter(Boolean);
+  return remainder.every((word) => GENERIC_TRUST_LABEL_WORDS.has(word));
+}
+
+// Deterministic scan of one page: find trust contexts (an attribute match on
+// a container, a trust heading inside it, or a Blueprint region whose
+// semantic purpose is a trust context) and entity-check every short label
+// inside them. Violations are deduplicated by label text.
+export function lintTrustContexts(
+  html: string,
+  pageId: PageId,
+  factWords: Set<string>,
+  trustRegionPurposes: Map<string, string>
+): TrustLabel[] {
+  const violations = new Map<string, TrustLabel>();
+  const contextRegions = new Set(trustRegionPurposes.keys());
+
+  interface Frame {
+    tagName: string;
+    innerStart: number;
+    attributes: string;
+    regionId: string | null;
+    trustByAttribute: boolean;
+    trustByHeading: boolean;
+  }
+  const stack: Frame[] = [];
+
+  const consider = (innerHtml: string, context: string) => {
+    for (const label of collectTrustLabels(innerHtml)) {
+      if (isEntityLikeLabel(label) && !isFactSafeLabel(label, factWords)) {
+        if (!violations.has(label)) violations.set(label, { text: label, context });
+      }
+    }
+  };
+
+  const token = /<(\/)?(section|div|ul|ol|footer|aside|nav|article|h[1-6])\b([^>]*)>/g;
+  let match: RegExpExecArray | null;
+  while ((match = token.exec(html)) !== null) {
+    const [full, closing, tagNameRaw, attributes] = match;
+    const tagName = tagNameRaw.toLowerCase();
+    if (closing) {
+      for (let index = stack.length - 1; index >= 0; index--) {
+        if (stack[index].tagName === tagName) {
+          const frame = stack[index];
+          const trustByRegion = frame.regionId !== null && contextRegions.has(frame.regionId);
+          if (frame.trustByAttribute || frame.trustByHeading || trustByRegion) {
+            const regionPurpose = frame.regionId ? trustRegionPurposes.get(frame.regionId) : undefined;
+            const context = regionPurpose
+              ? `${pageId}: Blueprint trust region '${frame.regionId}' (${regionPurpose})`
+              : `${pageId}: trust context <${frame.tagName} ${frame.attributes.trim().slice(0, 80)}>`;
+            consider(html.slice(frame.innerStart, match.index), context);
+          }
+          stack.length = index;
+          break;
+        }
+      }
+      continue;
+    }
+    if (/^h[1-6]$/.test(tagName)) {
+      // A short trust heading ("Trusted by", "Our clients") signals a trust
+      // context for its container. A heading that merely CONTAINS a trust
+      // word inside a proper noun — the Business name as H1 ("… & Vale
+      // Partners") — does not: after removing the matched phrase, every
+      // remaining word must be generic/function vocabulary.
+      const headingEnd = html.indexOf(`</${tagName}>`, match.index + full.length);
+      const headingText = headingEnd === -1 ? "" : stripHtml(html.slice(match.index + full.length, headingEnd));
+      if (stack.length > 0 && isTrustHeading(headingText)) {
+        stack[stack.length - 1].trustByHeading = true;
+      }
+      continue;
+    }
+    const regionMatch = /data-region="([^"]*)"/i.exec(attributes);
+    const regionId = regionMatch ? regionMatch[1] : stack.length > 0 ? stack[stack.length - 1].regionId : null;
+    stack.push({
+      tagName,
+      innerStart: match.index + full.length,
+      attributes,
+      regionId,
+      trustByAttribute: TRUST_CONTEXT_PATTERN.test(attributes),
+      trustByHeading: false,
+    });
+  }
+  return [...violations.values()];
+}
+
+function stripHtml(html: string): string {
+  return html.replace(/<[^>]+>/g, " ").replace(/&[a-z]+;/gi, " ").replace(/\s+/g, " ").trim();
+}
+
 const UNSUPPORTED_FACT_PATTERNS: Array<{ id: string; pattern: RegExp }> = [
   { id: "FABRICATED_AWARD", pattern: /\b(award|winner|winning|prize|certified|certification|accredited)\b/i },
   { id: "FABRICATED_SOCIAL_PROOF", pattern: /\b\d+\s?\+?\s?(clients|customers|projects|reviews|testimonials|jobs)\b/i },
@@ -262,9 +487,11 @@ const UNSUPPORTED_FACT_PATTERNS: Array<{ id: string; pattern: RegExp }> = [
 
 // Deterministic cross-file validation of the assembled source (PRD section 15
 // step 8). Semantic, navigation, contract, slot and fact-provenance rules.
+// `facts` and `blueprint` are optional so frozen callers stay valid; when
+// present they anchor the Business-truth trust-context lint (issue #48).
 export function validateAssembledSite(
   source: AssembledSiteSource,
-  context: { contract: ImplementationContract; slots: ImageSlot[] }
+  context: { contract: ImplementationContract; slots: ImageSlot[]; facts?: BusinessFacts; blueprint?: VisualBlueprint }
 ): { passed: boolean; findings: AssemblyFinding[] } {
   const findings: AssemblyFinding[] = [];
   const pageFiles = new Set(
@@ -331,6 +558,23 @@ export function validateAssembledSite(
       const text = html.replace(/<[^>]+>/g, " ");
       if (pattern.test(text)) {
         findings.push({ id, detail: `${pageId}: generated content invents an unsupported Business Fact (${pattern.source})` });
+      }
+    }
+
+    // Issue #48: trust/identity contexts may only carry fact-backed labels.
+    // A Blueprint region whose semantic role is a trust context (client logo
+    // band, testimonials, awards…) triggers the same lint on its markup.
+    const trustRegionPurposes = new Map<string, string>();
+    for (const region of context.blueprint?.homepageRegions ?? []) {
+      if (TRUST_CONTEXT_PATTERN.test(region.purpose)) trustRegionPurposes.set(region.id, region.purpose);
+    }
+    if (context.facts || trustRegionPurposes.size > 0) {
+      const factWords = factVocabulary(context.facts);
+      for (const violation of lintTrustContexts(html, pageId, factWords, trustRegionPurposes)) {
+        findings.push({
+          id: "FABRICATED_TRUST_ENTITY",
+          detail: `${pageId}: trust label '${violation.text}' is not backed by the Business Facts (${violation.context}) — reproducing a Reference trust structure never licenses inventing its entities`,
+        });
       }
     }
   }
@@ -676,7 +920,7 @@ export async function generateCompleteSite(
 
   // 8. deterministic cross-file assembly validation BEFORE anything flows
   // downstream.
-  const validation = validateAssembledSite(source, { contract: input.contract, slots: imagePlan.slots });
+  const validation = validateAssembledSite(source, { contract: input.contract, slots: imagePlan.slots, facts, blueprint: input.blueprint });
 
   // Bounded targeted assembly repair (production retest 2026-09-05): the
   // frozen per-page subkeys are reused verbatim by engine retries, so a
@@ -716,7 +960,7 @@ ${validation.findings.map((finding) => `- ${finding.id}: ${finding.detail}`).joi
 
   const finalValidation = validation.passed
     ? validation
-    : validateAssembledSite(source, { contract: input.contract, slots: imagePlan.slots });
+    : validateAssembledSite(source, { contract: input.contract, slots: imagePlan.slots, facts, blueprint: input.blueprint });
   if (!finalValidation.passed) {
     throw new SiteGenerationValidationError(finalValidation.findings);
   }
@@ -852,7 +1096,7 @@ ${input.findingDirectives}`,
   }
 
   const source: AssembledSiteSource = { pages: pages as Record<PageId, string>, sharedCss: cssArtifact.value.css, sharedJs: jsArtifact.value.js };
-  const validation = validateAssembledSite(source, { contract: input.contract, slots: input.imagePlan.slots });
+  const validation = validateAssembledSite(source, { contract: input.contract, slots: input.imagePlan.slots, facts, blueprint: input.blueprint });
   if (!validation.passed) {
     throw new SiteGenerationValidationError(validation.findings);
   }

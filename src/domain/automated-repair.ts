@@ -354,7 +354,8 @@ export async function runConfirmationQa(
   const resolutionContract = `You are evaluating whether the PREVIOUSLY IDENTIFIED blockers remain active after the repair — not producing a fresh blocker list without context. For EVERY finding you emit you must set its structured status field:
 - "RESOLVED": the evidence shows a previously identified defect is fixed on THIS Build Version. Report it with its ORIGINAL severity (a fixed P1 stays severity "P1") and status "RESOLVED" — it is a resolution record, NOT an active blocker, and must never by itself fail the release.
 - "ACTIVE": the defect is currently present on THIS Build Version — a previous blocker that is unfixed or only partially fixed, or a NEW defect discovered during this confirmation. Only ACTIVE P0/P1 findings count as Release Blockers.
-Do not mark RESOLVED if the evidence still shows the defect, and never report a resolved previous blocker without the explicit RESOLVED status.`;
+Do not mark RESOLVED if the evidence still shows the defect, and never report a resolved previous blocker without the explicit RESOLVED status.
+BUSINESS TRUTH IS NEVER VISUALLY RESOLVED (issue #48): a previously identified fabricated identity or trust entity (invented clients, partners, awards, certifications, testimonials, press, or imagery with baked-in logos/names) stays ACTIVE unless the evidence shows the fabricated content itself was removed from THIS Build Version. Fixing the visual defects around it never resolves it.`;
 
   const runA = await runSchemaValidatedAiStage<QaAConfirmationReport>(env, {
     stage: "qa-a-confirmation",
