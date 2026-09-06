@@ -617,31 +617,79 @@ export async function runVisualBlueprintStage(
     generate: input.generate,
   };
 
-  // Bounded informed blueprint repair (production retest 2026-09-05): the
-  // cross-validations below are deterministic and their findings are
-  // actionable, but the engine's blind retries re-prompt identically and the
-  // model keeps dropping a DIFFERENT trait each attempt. One targeted
-  // regeneration carrying the exact rejection reasons closes that loop;
-  // a second failure stays terminal.
+  // Bounded informed blueprint repair (production retest 2026-09-05; issue
+  // #60 convergence contract): the engine's blind retries re-prompt
+  // identically and rotate which identity carrier is sacrificed. The repair
+  // below is therefore INFORMED and CONSTRAINED: it receives the rejected
+  // Blueprint verbatim, the deterministic failed findings, the binding trait
+  // set, and the passing preservation set (satisfied obligations, region
+  // order, valid image-role assignments) which it must carry forward
+  // unchanged. Exactly ONE such repair follows the initial generation; a
+  // second failure is terminal and escalates BLUEPRINT_REVIEW_REQUIRED in
+  // the pipeline — never another semantic redesign.
   const firstRun = await runSchemaValidatedAiStage<VisualBlueprint>(env, { ...stageOptions, userPrompt });
   const firstRejection = validateProducedBlueprint(firstRun.value, input);
   if (!firstRejection) {
     return persistBlueprint(env, input, firstRun);
   }
 
+  const preservation = deriveBlueprintPreservationSet(firstRun.value, input);
+  const bindingTraitIds = input.analysis.signatureTraits.filter((trait) => trait.identityDefining).map((trait) => trait.id);
   const repairPrompt = `${userPrompt}
 
-## Blueprint repair directives
-Your previously produced Blueprint was REJECTED by deterministic validation:
+## Blueprint repair directives (issue #60)
+Your previously produced Blueprint — reproduced VERBATIM below — was REJECTED by deterministic validation:
 - ${firstRejection.code}: ${firstRejection.message}
 
-Regenerate the COMPLETE blueprint fixing exactly these problems. Every binding identity trait must carry exactly one valid traitObligations entry (PRESERVED with real canonical-region realizations, or ADAPTED under an existing Adaptation Contract clause) and be realized in the region topology (business-content substitution belongs inside the region/adaptation text — it must not remove or erase the trait's visual role). Do not drop or rename any required id.`;
+REJECTED BLUEPRINT (verbatim):
+${JSON.stringify(firstRun.value)}
+
+BINDING TRAITS: exactly one traitObligations disposition is required for each of ${JSON.stringify(bindingTraitIds)}.
+
+PRESERVATION SET (binding — carry forward UNCHANGED unless a failed finding directly concerns the element):
+- Satisfied trait obligations: ${JSON.stringify(preservation.satisfiedObligations)}
+- Canonical region order: ${JSON.stringify(preservation.regionOrder)}
+- Valid image-role assignments: ${JSON.stringify(preservation.validImageRoleAssignments)}
+- Signature traits with valid analysis traces: ${JSON.stringify(preservation.tracedSignatureTraitIds)}
+
+REPAIR SCOPE: change the smallest necessary elements — fix the failed findings and only directly related obligation/region fields. Do NOT redesign, reorder, drop or rename satisfied obligations, canonical regions or traced signature traits. The Adaptation Contract above remains the only adaptation authority. Return the COMPLETE corrected blueprint object.`;
   const repairRun = await runSchemaValidatedAiStage<VisualBlueprint>(env, { ...stageOptions, userPrompt: repairPrompt });
   const repairRejection = validateProducedBlueprint(repairRun.value, input);
   if (repairRejection) {
+    // Terminal by design (issue #60 §24-25): no second semantic repair, no
+    // engine retry storm. The pipeline escalates this to human review.
     throw new VisualBlueprintError(repairRejection.code, repairRejection.message);
   }
   return persistBlueprint(env, input, repairRun);
+}
+
+// The passing preservation set for the informed Blueprint repair (issue #60,
+// analogous to the implementation-repair preservation principle): everything
+// the rejected candidate ALREADY satisfies deterministically, which the
+// repair must carry forward so a narrow fix cannot rotate identity carriers.
+export interface BlueprintPreservationSet {
+  satisfiedObligations: TraitObligation[];
+  regionOrder: string[];
+  validImageRoleAssignments: Array<{ regionId: string; imageRoleId: string }>;
+  tracedSignatureTraitIds: string[];
+}
+
+export function deriveBlueprintPreservationSet(
+  blueprint: VisualBlueprint,
+  input: Pick<RunVisualBlueprintInput, "analysis" | "adaptationContract">
+): BlueprintPreservationSet {
+  const evaluation = evaluateTraitObligations(blueprint, input.analysis, input.adaptationContract);
+  const imageRoleIds = new Set(blueprint.imageSystem.imageRoles.map((role) => role.id));
+  return {
+    satisfiedObligations: evaluation.satisfiedObligations,
+    regionOrder: blueprint.homepageRegions.map((region) => region.id),
+    validImageRoleAssignments: blueprint.homepageRegions
+      .filter((region) => region.imageRoleId && imageRoleIds.has(region.imageRoleId))
+      .map((region) => ({ regionId: region.id, imageRoleId: region.imageRoleId! })),
+    tracedSignatureTraitIds: blueprint.signatureTraits
+      .filter((trait) => trait.sourceTraitId && input.analysis.signatureTraits.some((a) => a.id === trait.sourceTraitId))
+      .map((trait) => trait.id),
+  };
 }
 
 // Runs the deterministic blueprint gates; null means the blueprint is accepted.

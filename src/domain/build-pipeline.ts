@@ -24,7 +24,7 @@ import type { Env } from "../env.d";
 import { appendBuildWorkflowEvent, createInitialBuild } from "./lifecycle";
 import { runReferenceIntake, getFrozenReferenceEvidence, type ReferenceCaptureFn } from "./reference-intake";
 import { runReferenceAnalysisStage, ReferenceAnalysisError, createProductionVisionGenerate } from "./reference-analysis";
-import { runVisualBlueprintStage, canonicalRegionComposition, evaluateBlueprintCoverage } from "./visual-blueprint";
+import { runVisualBlueprintStage, VisualBlueprintError, canonicalRegionComposition, evaluateBlueprintCoverage } from "./visual-blueprint";
 import { produceImplementationContract } from "./implementation-planner";
 import { generateCompleteSite, type ImageSlot } from "./site-generator";
 import {
@@ -457,28 +457,64 @@ export async function runBuildPipeline(
     }
 
     const facts = (await getEffectiveBusinessFacts(env, buildId)).facts;
-    const blueprint = await stepDo("pipeline: visual blueprint", async () => {
-      const existingBlueprint = await getBuildStageArtifact<VisualBlueprint>(env, version.buildVersionId, "visual_blueprint");
-      if (existingBlueprint) {
-        return { blueprint: existingBlueprint.value, artifactR2Key: existingBlueprint.artifactR2Key };
+    const blueprint = await stepDo(
+      "pipeline: visual blueprint",
+      async (): Promise<
+        | { blueprint: VisualBlueprint; artifactR2Key: string }
+        | { blueprintReviewRequired: { code: string; message: string } }
+      > => {
+        const existingBlueprint = await getBuildStageArtifact<VisualBlueprint>(env, version.buildVersionId, "visual_blueprint");
+        if (existingBlueprint) {
+          return { blueprint: existingBlueprint.value, artifactR2Key: existingBlueprint.artifactR2Key };
+        }
+        try {
+          return await runVisualBlueprintStage(env, {
+          siteGenerationId: input.siteGenerationId,
+          buildId,
+          buildVersionId: version.buildVersionId,
+          buildVersionNumber: version.buildVersionNumber,
+          analysis: analysis.analysis,
+          analysisR2Key: analysis.artifactR2Key,
+          facts,
+          adaptationContract: frozen.adaptationContract ?? null,
+          evidenceRegions: frozen.evidence.regions.map((region) => ({
+            id: region.id,
+            ...(typeof region.viewportHeightRatio === "number" ? { viewportHeightRatio: region.viewportHeightRatio } : {}),
+          })),
+          referenceUrl: frozen.evidence.referenceUrl,
+          generate: deps.generate,
+          });
+        } catch (error) {
+          if (error instanceof VisualBlueprintError) {
+            // Issue #60 §24-25: the stage already spent its initial generation
+            // and its ONE informed, preservation-set-bound repair. A second
+            // deterministic rejection is a blueprint-root defect — escalate
+            // domain-visibly instead of burning the step-retry budget on
+            // identical re-prompts (the 2026-09-06 production failure mode).
+            return { blueprintReviewRequired: { code: error.code, message: error.message } };
+          }
+          throw error;
+        }
       }
-      return runVisualBlueprintStage(env, {
-      siteGenerationId: input.siteGenerationId,
-      buildId,
-      buildVersionId: version.buildVersionId,
-      buildVersionNumber: version.buildVersionNumber,
-      analysis: analysis.analysis,
-      analysisR2Key: analysis.artifactR2Key,
-      facts,
-      adaptationContract: frozen.adaptationContract ?? null,
-      evidenceRegions: frozen.evidence.regions.map((region) => ({
-        id: region.id,
-        ...(typeof region.viewportHeightRatio === "number" ? { viewportHeightRatio: region.viewportHeightRatio } : {}),
-      })),
-      referenceUrl: frozen.evidence.referenceUrl,
-      generate: deps.generate,
+    );
+    if ("blueprintReviewRequired" in blueprint) {
+      const reason = `BLUEPRINT_REVIEW_REQUIRED: blueprint rejected by deterministic validation after the bounded informed repair — ${blueprint.blueprintReviewRequired.code}: ${blueprint.blueprintReviewRequired.message}`;
+      await appendBuildWorkflowEvent(env, {
+        buildId,
+        buildVersionId: version.buildVersionId,
+        fromState: "REFERENCE_ANALYSIS",
+        toState: "HUMAN_REVIEW_REQUIRED",
+        stage: "blueprint",
+        detail: reason.slice(0, 400),
       });
-    });
+      return {
+        terminal: "HUMAN_REVIEW_REQUIRED",
+        reasons: [reason],
+        siteGenerationId: input.siteGenerationId, siteId, buildId,
+        releaseReadyBuildVersionId: null, artifactManifestHash: null, previewUrl: null,
+        qaA: null, qaB: null, repairApplied: false,
+      };
+    }
 
     // ── Blueprint coverage contract (issue #42) ─────────────────────────────
     // The Blueprint may aggregate the reference but may never erase it: every
