@@ -43,7 +43,12 @@ export interface AssembledCandidate {
   files: Map<string, Uint8Array>;
   artifactManifestHash: string;
   manifestR2Key: string;
+  /** The exact manifest document the hash was computed over — the freeze
+   *  stores this verbatim, so served bytes stay traceable to the hash. */
+  manifestJson: string;
   routingNotes: string[];
+  /** Technical Preflight check count (for the assembly workflow events). */
+  preflightChecksPassed: number;
 }
 
 async function sha256Hex(data: Uint8Array | string): Promise<string> {
@@ -61,10 +66,14 @@ export class AssemblyPreflightError extends Error {
   }
 }
 
-export async function assembleBuildVersionCandidate(
-  env: Env,
-  input: AssemblyInput
-): Promise<AssembledCandidate> {
+// Pure candidate build (issue #49 lifecycle seam): resolves placeholders,
+// computes the artifact manifest and runs the Technical Preflight — with NO
+// release-facing persistence. Splitting build from freeze lets the pipeline
+// inspect (deploy + craft-preflight + at most one informed repair) the
+// candidate BEFORE anything is frozen: only the final candidate ever occupies
+// the immutable version keys, so invalid intermediate candidates cannot
+// distort Build Version content or repair accounting.
+export async function buildAssembledCandidate(env: Env, input: AssemblyInput): Promise<AssembledCandidate> {
   const routingNotes: string[] = [];
   const roleBySlot = new Map(input.imagePlanSlots.map((slot) => [slot.id, slot.blueprintRole]));
   const acceptedByRole = new Map<string, string>();
@@ -143,39 +152,66 @@ export async function assembleBuildVersionCandidate(
     throw new AssemblyPreflightError(preflight.blockers);
   }
 
-  // Freeze the passing candidate under the canonical artifact scheme
-  // (tolerant re-freeze: a retried workflow step finds its own writes).
-  for (const [path, bytes] of files) {
+  return {
+    pages,
+    sharedCss: input.sharedCss,
+    sharedJs: input.sharedJs,
+    files,
+    artifactManifestHash,
+    manifestR2Key,
+    manifestJson,
+    routingNotes,
+    preflightChecksPassed: preflight.checks.filter((item) => item.passed).length,
+  };
+}
+
+// Freezes the final candidate under the canonical artifact scheme (tolerant
+// re-freeze: a retried workflow step finds its own writes) and records the
+// assembled manifest artifact. Only ever called for the candidate that
+// survived the Technical Preflight and the craft preflight/repair round.
+export async function freezeAssembledCandidate(
+  env: Env,
+  input: AssemblyInput & { candidate: AssembledCandidate }
+): Promise<void> {
+  const { candidate } = input;
+  for (const [path, bytes] of candidate.files) {
     await putImmutableObjectTolerant(env, buildVersionSourceKey(input.buildId, input.buildVersionNumber, path), bytes);
   }
-  for (const [slotId, publicPath] of publicPathBySlot) {
-    const r2Key = input.acceptedImages.get(slotId) ?? acceptedByRole.get(roleBySlot.get(slotId)!)!;
+  // Asset objects: the per-version asset keys freeze the same immutable
+  // bytes accepted_images already pins (shared read-only R2 content).
+  for (const slot of input.imagePlanSlots) {
+    const r2Key = input.acceptedImages.get(slot.id);
+    if (!r2Key) continue;
     const body = await getObject(env, r2Key);
     if (!body) continue;
-    await putImmutableObjectTolerant(env, buildVersionAssetKey(input.buildId, input.buildVersionNumber, `images/${slotId}.webp`), new Uint8Array(await new Response(body).arrayBuffer()));
+    await putImmutableObjectTolerant(env, buildVersionAssetKey(input.buildId, input.buildVersionNumber, `images/${slot.id}.webp`), new Uint8Array(await new Response(body).arrayBuffer()));
   }
-  await putImmutableObjectTolerant(env, manifestR2Key, manifestJson, { httpMetadata: { contentType: "application/json" } });
+  await putImmutableObjectTolerant(env, candidate.manifestR2Key, candidate.manifestJson, { httpMetadata: { contentType: "application/json" } });
   await storeBuildStageArtifactIdempotent(env, {
     buildId: input.buildId,
     buildVersionId: input.buildVersionId,
     siteGenerationId: input.siteGenerationId,
     kind: "assembled_manifest",
     schemaVersion: "build-manifest/1",
-    value: JSON.parse(manifestJson),
+    value: JSON.parse(candidate.manifestJson),
   });
 
   await appendBuildWorkflowEvent(env, {
     buildId: input.buildId, buildVersionId: input.buildVersionId,
     fromState: "ASSET_PERSISTENCE", toState: "ASSEMBLY", stage: "assembly",
-    detail: `Immutable candidate assembled (manifest ${artifactManifestHash.slice(0, 12)}, ${files.size} files, ${routingNotes.length} routing fix(es))`,
+    detail: `Immutable candidate assembled (manifest ${candidate.artifactManifestHash.slice(0, 12)}, ${candidate.files.size} files, ${candidate.routingNotes.length} routing fix(es))`,
   });
   await appendBuildWorkflowEvent(env, {
     buildId: input.buildId, buildVersionId: input.buildVersionId,
     fromState: "ASSEMBLY", toState: "TECHNICAL_PREFLIGHT", stage: "technical_preflight",
-    detail: `Technical Preflight passed (${preflight.checks.filter((item) => item.passed).length} checks)`,
+    detail: `Technical Preflight passed (${candidate.preflightChecksPassed} checks)`,
   });
+}
 
-  return { pages, sharedCss: input.sharedCss, sharedJs: input.sharedJs, files, artifactManifestHash, manifestR2Key, routingNotes };
+export async function assembleBuildVersionCandidate(env: Env, input: AssemblyInput): Promise<AssembledCandidate> {
+  const candidate = await buildAssembledCandidate(env, input);
+  await freezeAssembledCandidate(env, { ...input, candidate });
+  return candidate;
 }
 
 // ── Preview deployment ──────────────────────────────────────────────────────
@@ -237,6 +273,16 @@ export async function deployPreview(env: Env, input: DeployPreviewInput): Promis
   const deployed = await deployer({ workerName, files: input.candidate.files });
   const deploymentId = generateId();
   const now = nowIso();
+
+  // A superseding deploy of the SAME version (the one informed craft repair
+  // round, issue #49) replaces the earlier active deployment record; other
+  // versions' previews are superseded by the retention lifecycle below.
+  await env.DB.prepare(
+    `UPDATE build_deployments SET status = 'superseded', updated_at = ?
+     WHERE role = 'preview' AND status = 'active' AND build_version_id = ? AND artifact_manifest_hash != ?`
+  )
+    .bind(now, input.buildVersionId, input.candidate.artifactManifestHash)
+    .run();
 
   await env.DB.prepare(
     `INSERT INTO build_deployments (id, build_id, build_version_id, role, worker_name, preview_url, artifact_manifest_hash, status, created_at, updated_at)

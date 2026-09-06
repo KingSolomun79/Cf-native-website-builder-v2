@@ -112,6 +112,7 @@ export default defineWorkersConfig({
       "tests/v2-site-generator.test.ts",
       "tests/v2-realization-binding.test.ts",
       "tests/v2-truth-lint.test.ts",
+      "tests/v2-craft-preflight.test.ts",
       "tests/v2-image-pipeline.test.ts",
       "tests/v2-form-service.test.ts",
       "tests/v2-assembly-preview.test.ts",

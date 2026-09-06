@@ -304,8 +304,7 @@ export function createPipelineScripts(
   // Reference URL capture with measured design-structure evidence (issue #39):
   // dimensions-only evidence is INSUFFICIENT by design, so pipeline fixtures
   // model the valid screenshot+URL mode with a real measured capture.
-  const capture: ReferenceCaptureFn = async () => ({
-    canonicalScreenshot: {
+  const capture: ReferenceCaptureFn = async () => ({    canonicalScreenshot: {
       content: buildPng({ width: 1440, height: 3200 }),
       mimeType: "image/png",
       pixelWidth: 1440,
@@ -343,11 +342,52 @@ export function createPipelineScripts(
     discrepancies: [],
   });
 
+  // Design Craft Preflight seam (issue #49): a deterministic home-desktop
+  // capture whose canonical regions mirror the REGIONS composition targets,
+  // with both home slots rendered large and landscape-conformant, so the
+  // golden path passes preflight without repair.
+  const craftCapture = async () => ({
+    layout: {
+      finalUrl: "https://preview.example/",
+      title: BUSINESS,
+      lang: "en",
+      description: BUSINESS,
+      viewportMeta: "width=device-width, initial-scale=1",
+      sections: REGIONS.map((region, index) => ({
+        order: index,
+        tag: "section",
+        role: null,
+        heading: null,
+        text: null,
+        bounds: { x: 0, y: index * 800, width: 1440, height: region.height },
+        evidenceId: null,
+        dataRegion: region.id,
+      })),
+      typography: [],
+      colors: { background: "rgb(250, 247, 242)", text: "rgb(26, 26, 26)", accents: [] },
+      nav: [],
+      images: [
+        { src: "assets/images/home-r1.webp", alt: "signature", naturalWidth: 1344, naturalHeight: 768, displayedWidth: 1200, inMain: true, evidenceId: null, displayedHeight: 600, boundsY: 100, regionId: "r1", imageId: "home-r1" },
+        { src: "assets/images/home-r2.webp", alt: "detail", naturalWidth: 1200, naturalHeight: 800, displayedWidth: 800, inMain: true, evidenceId: null, displayedHeight: 500, boundsY: 900, regionId: "r2", imageId: "home-r2" },
+      ],
+      spacing: null,
+      contrastSamples: [],
+      consentDetected: false,
+      headline: { text: BUSINESS, fontFamily: "system-ui", fontSize: "64px", bounds: { x: 60, y: 200, width: 900, height: 120 } },
+      viewportHeight: 900,
+      viewportWidth: 1440,
+    },
+    fullPageScreenshot: buildPng({ width: 1440, height: 3200 }),
+    viewportWidth: 1440,
+    viewportHeight: 900,
+  });
+
   return {
     generate,
     imageProvider,
     previewDeployer,
     capture,
+    craftCapture,
     qaCapture: () => async (spec) =>
       spec.map((entry) => ({
         page: entry.page,

@@ -1076,6 +1076,9 @@ export async function regeneratePagesForRealization(
           userPrompt:
             pagePrompt({ pageId, blueprint: input.blueprint, contract: input.contract, facts, slots: input.imagePlan.slots, compositionTargets: input.compositionTargets, cssClassInventory }) +
             referenceBlock +
+            (input.visualInputs && input.visualInputs.length > 0
+              ? "\n\nATTACHED REGION CROPS (issue #49): for each failed canonical region you receive TWO attached slices — the Reference region crop and this candidate's rendered crop of the SAME region, in that order. Compare them directly and realize the Reference/contract geometry."
+              : "") +
             `\n\n## Realization repair directives (issue #47)
 The previously generated page was assembled and RENDERED, and a deterministic realization precheck measured these gross deviations from the binding Blueprint/Contract. Regenerate the COMPLETE page fixing every measured deviation. The numbers below are frozen measurements and binding targets — realize the stated geometry, do not reinterpret it:
 ${input.findingDirectives}`,

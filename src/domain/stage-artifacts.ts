@@ -23,7 +23,8 @@ export type StageArtifactKind =
   | "assembled_manifest"
   | "qa_evidence_bundle"
   | "qa_report"
-  | "release_record";
+  | "release_record"
+  | "craft_preflight";
 
 export class StageArtifactError extends Error {
   readonly code: "ARTIFACT_ALREADY_EXISTS" | "BUILD_VERSION_NOT_FOUND";

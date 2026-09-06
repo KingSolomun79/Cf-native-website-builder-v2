@@ -178,6 +178,7 @@ export interface GoldenScripts {
   imageProvider: ImageGenerationProvider;
   previewDeployer: PreviewDeployer;
   qaCapture: QaCaptureFn;
+  craftCapture: () => Promise<import("../../src/domain/craft-preflight").CraftCapture>;
 }
 
 export interface GoldenScriptOptions {
@@ -353,5 +354,43 @@ ${img("contact-atmosphere", `${business} atmosphere`)}
       runtime: { consoleErrors: [], failedRequests: [] },
     }));
 
-  return { generate, imageProvider, previewDeployer, qaCapture };
+  // Design Craft Preflight seam (issue #49): canonical regions mirror the
+  // case's composition targets with conformant, meaningfully-sized imagery.
+  const craftCapture = async () => ({
+    layout: {
+      finalUrl: "https://preview.example/",
+      title: business,
+      lang: "en",
+      description: business,
+      viewportMeta: "width=device-width, initial-scale=1",
+      sections: regions.map((region, index) => ({
+        order: index,
+        tag: "section",
+        role: null,
+        heading: null,
+        text: null,
+        bounds: { x: 0, y: index * 800, width: 1440, height: Math.round(region.viewportHeightRatio * 900) },
+        evidenceId: null,
+        dataRegion: region.id,
+      })),
+      typography: [],
+      colors: { background: "rgb(250, 247, 242)", text: "rgb(26, 26, 26)", accents: [] },
+      nav: [],
+      images: [
+        { src: `assets/images/home-${heroRegion.id}.webp`, alt: "signature", naturalWidth: 1344, naturalHeight: 768, displayedWidth: 1200, inMain: true, evidenceId: null, displayedHeight: 600, boundsY: 100, regionId: heroRegion.id, imageId: `home-${heroRegion.id}` },
+        { src: `assets/images/home-${detailRegion.id}.webp`, alt: "detail", naturalWidth: 1200, naturalHeight: 800, displayedWidth: 800, inMain: true, evidenceId: null, displayedHeight: 500, boundsY: 900, regionId: detailRegion.id, imageId: `home-${detailRegion.id}` },
+      ],
+      spacing: null,
+      contrastSamples: [],
+      consentDetected: false,
+      headline: { text: business, fontFamily: "system-ui", fontSize: "64px", bounds: { x: 60, y: 200, width: 900, height: 120 } },
+      viewportHeight: 900,
+      viewportWidth: 1440,
+    },
+    fullPageScreenshot: new TextEncoder().encode(`PNG-craft-${business}`),
+    viewportWidth: 1440,
+    viewportHeight: 900,
+  });
+
+  return { generate, imageProvider, previewDeployer, qaCapture, craftCapture };
 }

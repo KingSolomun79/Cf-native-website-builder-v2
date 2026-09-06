@@ -1073,3 +1073,51 @@ OK WITH WATCH ITEMS (2 low watch items, no remediation).
 4. Tests: `tests/v2-truth-lint.test.ts` (10 tests). Suite 42 files / 316
    tests green; tsc + wrangler dry-run clean; CSO = SECURITY OK WITH WATCH
    ITEMS (`docs/security/2026-09-05-v2-issue48-fabrication-defenses-cso.md`).
+
+## 2026-09-05 — #49 Deterministic Craft Preflight + Region-Targeted Repair Context (implemented)
+
+Lifecycle seam (analysed per the authorization): assembly is split into a
+PURE build (placeholder resolution + manifest hash + Technical Preflight)
+and an explicit FREEZE (immutable version keys + assembled_manifest
+artifact). The pipeline now deploys the unfrozen build for inspection,
+runs the craft preflight against one home-desktop browser capture, and
+freezes ONLY the surviving candidate — invalid intermediate candidates
+never occupy the immutable version keys, never become the release source,
+and never touch `repair_batches`. Same-version redeploy (the one repair
+round) supersedes the earlier deployment row so provenance stays truthful.
+
+1. Deterministic checks (issue #49 B): canonical region presence, rendered
+   region style realization (collapsed-box detection), per-region height
+   deviation vs MEASURED composition targets (gross-only tolerance
+   max(0.30, 50% of target)), headline clipping/off-canvas, display type
+   scale vs a NUMERIC Blueprint display token (UA-default 32px vs 60px
+   token — the frozen v3 headline defect), CRITICAL/HIGH image-role
+   realization + rendered orientation conformance, first-viewport image
+   mass vs the MEASURED reference extraction (gross-only), horizontal
+   viewport overflow. Absent measurements skip checks — never fabricated.
+2. Mode split (C): every check measures against Reference/Blueprint/
+   Contract authority; nothing flags "generic" patterns. ORIGINAL_DESIGN
+   anti-generic detectors remain future #51.
+3. Region crops (D/E): deterministic PNG row-slices cut from the immutable
+   candidate capture and the frozen normalized Reference screenshot at its
+   measured coordinates (scale-normalized). Every crop records source
+   sha256, coordinates, scale, crop sha256 and a deterministic R2 evidence
+   key — no manual or model-chosen crops.
+4. Informed repair (F/G): at most ONE per-page regeneration through the #47
+   entry point, carrying measured findings (exact region, current vs target,
+   allowed scope) plus the region crop PAIRS as attached vision slices.
+   Image-asset findings flow to QA (page regen cannot repaint pixels). No
+   unbounded loop; QA repair budget untouched; verdicts frozen per attempt
+   (attempt-1/attempt-2 idempotent artifacts) so workflow retries reuse the
+   frozen decision.
+5. Migration 0032 rebuilds build_stage_artifacts with the `craft_preflight`
+   kind (copy-then-swap, triggers/index preserved).
+6. Tests: `tests/v2-craft-preflight.test.ts` — frozen v3 failure shape fails
+   with exact regions and measured deltas; a Reference-matching candidate
+   passes without repair; crops pixel-true + provenance-bound; pipeline
+   integration proves repair-once, two attempts recorded, budget untouched;
+   preflight-clean candidate goes straight to QA.
+
+Suite 43 files / 322 tests green; tsc + wrangler dry-run clean; CSO =
+SECURITY OK WITH WATCH ITEMS
+(`docs/security/2026-09-05-v2-issue49-craft-preflight-cso.md`).

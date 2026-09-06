@@ -23,7 +23,7 @@ import { nowIso } from "../lib/crypto";
 import type { Env } from "../env.d";
 import { appendBuildWorkflowEvent, createInitialBuild } from "./lifecycle";
 import { runReferenceIntake, getFrozenReferenceEvidence, type ReferenceCaptureFn } from "./reference-intake";
-import { runReferenceAnalysisStage, ReferenceAnalysisError } from "./reference-analysis";
+import { runReferenceAnalysisStage, ReferenceAnalysisError, createProductionVisionGenerate } from "./reference-analysis";
 import { runVisualBlueprintStage, canonicalRegionComposition, evaluateBlueprintCoverage } from "./visual-blueprint";
 import { produceImplementationContract } from "./implementation-planner";
 import { generateCompleteSite, type ImageSlot } from "./site-generator";
@@ -33,12 +33,22 @@ import {
   expandSlotsToTarget,
   type ImageGenerationProvider,
 } from "./image-pipeline";
-import { assembleBuildVersionCandidate, deployPreview, type PreviewDeployer } from "./assembly";
+import { buildAssembledCandidate, deployPreview, freezeAssembledCandidate, type PreviewDeployer } from "./assembly";
+import { getObject } from "../lib/assets";
 import { buildStandardEvidenceBundle, compareGeometry, geometryFromRegions, evaluateReferenceMacroFidelity, type GeometryComparison, type QaCaptureFn } from "./qa-evidence";
-import { createProductionQaCapture } from "./qa-capture";
+import { createCraftCapture, createProductionQaCapture } from "./qa-capture";
+import {
+  runCraftPreflight,
+  storeCraftCrops,
+  storedVerdict,
+  CRAFT_PREFLIGHT_SCHEMA_VERSION,
+  type CraftCapture,
+  type StoredCraftPreflight,
+} from "./craft-preflight";
 import { runQaAStage, runQaBStage, type QaAReport, type QaAReportAugmented, type QaBReport, type QaFinding } from "./qa-stages";
+import { regeneratePagesForRealization } from "./site-generator";
 import { assignReleaseReady, ReleaseGateError } from "./release";
-import { getBuildStageArtifact } from "./stage-artifacts";
+import { getBuildStageArtifact, storeBuildStageArtifactIdempotent } from "./stage-artifacts";
 import type { ReferenceAnalysis } from "./reference-analysis";
 import type { VisualBlueprint } from "./visual-blueprint";
 import type { ImplementationContract } from "./implementation-planner";
@@ -100,6 +110,9 @@ export interface BuildPipelineDeps {
    *  production vision adapter (real gateway); tests inject deterministic
    *  scripts. */
   visionGenerate?: import("./ai-boundary").RawAiGenerate;
+  /** Design Craft Preflight capture seam (issue #49): one home-desktop load.
+   *  Defaults to the production browser capture; tests inject layouts. */
+  craftCapture?: (previewUrl: string) => Promise<CraftCapture>;
   /** Durable step executor (the workflow's WorkflowStep). Each stage runs as
    *  its own step so a mid-flight isolate eviction retries only that stage;
    *  every stage is idempotent (artifact reuse / spend-resume) by design.
@@ -593,7 +606,45 @@ export async function runBuildPipeline(
       const acceptedImageEntries = await getAcceptedImageMap(env, ctx.buildVersionId);
       const acceptedImages = new Map([...acceptedImageEntries].map(([slotId, entry]) => [slotId, entry.r2Key] as const));
       const candidate = await stepDo(`pipeline: assemble + preview (v${ctx.buildVersionNumber})`, async () => {
-        const assembled = await assembleBuildVersionCandidate(env, {
+        const craftInputs = {
+          buildId: ctx.buildId,
+          buildVersionId: ctx.buildVersionId,
+          siteGenerationId: ctx.siteGenerationId,
+          siteId: ctx.siteId,
+          buildVersionNumber: ctx.buildVersionNumber,
+        };
+        // Deterministic Reference side for the craft preflight (issue #49 D/E):
+        // the frozen normalized screenshot + its measured region coordinates.
+        // Absent evidence simply loses the reference side of a crop — the
+        // coordinates are never invented.
+        const buildReferenceSide = async () => {
+          const primary = frozen.evidence.visualInputs?.find((entry) => entry.kind === "full-page") ?? frozen.evidence.visualInputs?.[0];
+          if (!primary) return null;
+          const body = await getObject(env, primary.artifact);
+          if (!body) return null;
+          return {
+            screenshot: new Uint8Array(await new Response(body).arrayBuffer()),
+            cssViewportWidth: frozen.evidence.screenshotMetadata.likelyCssViewportWidth ?? 1440,
+            regions: frozen.evidence.regions.map((region) => ({
+              id: region.id,
+              ...(typeof region.startY === "number" ? { startY: region.startY } : {}),
+              ...(typeof region.endY === "number" ? { endY: region.endY } : {}),
+            })),
+          };
+        };
+
+        // Workflow-retry safety: the craft verdict is FROZEN per attempt. A
+        // re-entered pipeline reuses attempt-1's verdict (and whatever repair
+        // subkeys it already produced) instead of re-deciding on a fresh
+        // browser roll — the whole step rebuilds deterministically.
+        const existingCraft = await getBuildStageArtifact<StoredCraftPreflight>(env, ctx.buildVersionId, "craft_preflight", "attempt-1");
+        let craft: StoredCraftPreflight | null = existingCraft ? existingCraft.value : null;
+
+        // Build (pure) + deploy. Nothing is frozen yet: the intermediate
+        // candidate may still be superseded by the one informed repair round,
+        // and only the FINAL candidate ever occupies the immutable keys
+        // (issue #49 lifecycle seam).
+        let built = await buildAssembledCandidate(env, {
           siteGenerationId: ctx.siteGenerationId,
           buildId: ctx.buildId,
           buildVersionId: ctx.buildVersionId,
@@ -606,16 +657,146 @@ export async function runBuildPipeline(
           formServiceEndpoint: contract.contract.formContract.formServiceEndpoint,
           expectedSiteFormId: contract.contract.formContract.siteFormId,
         });
-
-        const preview = await deployPreview(env, {
+        let preview = await deployPreview(env, {
           buildId: ctx.buildId,
           buildVersionId: ctx.buildVersionId,
           buildVersionNumber: ctx.buildVersionNumber,
-          candidate: assembled,
+          candidate: built,
           ...(deps.previewDeployer ? { deployer: deps.previewDeployer } : {}),
         });
 
-        return { manifestHash: assembled.artifactManifestHash, previewUrl: preview.previewUrl };
+        if (!craft) {
+          const capture = await (deps.craftCapture ? deps.craftCapture(preview.previewUrl) : createCraftCapture(env, preview.previewUrl));
+          const referenceSide = await buildReferenceSide();
+          const verdict = await runCraftPreflight(
+            {
+              capture,
+              blueprint: blueprint.blueprint,
+              contract: contract.contract,
+              slots: site.imagePlan.slots,
+              ...(compositionTargets ? { compositionTargets: compositionTargets.map(({ regionId, viewportHeightRatio }) => ({ regionId, viewportHeightRatio })) } : {}),
+              referenceImageMassRatio: frozen.evidence.extraction?.imageMassRatio ?? null,
+              ...(referenceSide ? { reference: referenceSide } : {}),
+            },
+            1
+          );
+          await storeCraftCrops(env, { buildId: ctx.buildId, buildVersionNumber: ctx.buildVersionNumber, attempt: 1, crops: verdict.crops });
+          craft = storedVerdict(verdict);
+          await storeBuildStageArtifactIdempotent(env, {
+            ...craftInputs,
+            kind: "craft_preflight",
+            subkey: "attempt-1",
+            schemaVersion: CRAFT_PREFLIGHT_SCHEMA_VERSION,
+            value: craft,
+          });
+          void existingCraft;
+          await appendBuildWorkflowEvent(env, {
+            buildId: ctx.buildId, buildVersionId: ctx.buildVersionId,
+            fromState: "PREVIEW", toState: "PREVIEW", stage: "craft_preflight",
+            detail: verdict.passed
+              ? "Design Craft Preflight passed (deterministic checks, one home-desktop capture)"
+              : `Design Craft Preflight found ${verdict.findings.length} gross realization deviation(s)`,
+          });
+        }
+
+        // At most ONE informed per-page realization repair (issue #49 G):
+        // driven only by page-realization findings, consuming no QA repair
+        // budget, reusing the #47 entry point's immutable subkeys.
+        if (!craft.passed && craft.pageRepairable) {
+          const affected = [...new Set(craft.findings.filter((finding) => finding.repairScope === "page-realization").map((finding) => finding.affectedPage))];
+          const cropVisualInputs = craft.crops.flatMap((pair, index) => {
+            const inputs: Array<{ kind: "slice"; artifact: string; sha256: string; width: number; height: number; sliceIndex: number }> = [];
+            if (pair.reference) inputs.push({ kind: "slice" as const, artifact: pair.reference.artifactR2Key, sha256: pair.reference.cropSha256, width: pair.reference.width, height: pair.reference.height, sliceIndex: index * 2 });
+            if (pair.candidate) inputs.push({ kind: "slice" as const, artifact: pair.candidate.artifactR2Key, sha256: pair.candidate.cropSha256, width: pair.candidate.width, height: pair.candidate.height, sliceIndex: index * 2 + 1 });
+            return inputs;
+          });
+          const regenerated = await regeneratePagesForRealization(env, {
+            ...craftInputs,
+            blueprint: blueprint.blueprint,
+            blueprintR2Key: blueprint.artifactR2Key,
+            contract: contract.contract,
+            contractR2Key: contract.artifactR2Key,
+            imagePlan: site.imagePlan,
+            affected,
+            findingDirectives: craft.directiveText,
+            ...(compositionTargets ? { compositionTargets } : {}),
+            ...(cropVisualInputs.length > 0 ? { visualInputs: cropVisualInputs } : {}),
+            visionGenerate:
+              cropVisualInputs.length > 0
+                ? deps.visionGenerate ??
+                  createProductionVisionGenerate(env, cropVisualInputs, {
+                    buildId: ctx.buildId,
+                    buildVersionNumber: ctx.buildVersionNumber,
+                  })
+                : deps.generate,
+            generate: deps.generate,
+          });
+
+          built = await buildAssembledCandidate(env, {
+            siteGenerationId: ctx.siteGenerationId,
+            buildId: ctx.buildId,
+            buildVersionId: ctx.buildVersionId,
+            buildVersionNumber: ctx.buildVersionNumber,
+            pages: regenerated.pages,
+            sharedCss: regenerated.sharedCss,
+            sharedJs: regenerated.sharedJs,
+            imagePlanSlots: site.imagePlan.slots,
+            acceptedImages,
+            formServiceEndpoint: contract.contract.formContract.formServiceEndpoint,
+            expectedSiteFormId: contract.contract.formContract.siteFormId,
+          });
+          preview = await deployPreview(env, {
+            buildId: ctx.buildId,
+            buildVersionId: ctx.buildVersionId,
+            buildVersionNumber: ctx.buildVersionNumber,
+            candidate: built,
+            ...(deps.previewDeployer ? { deployer: deps.previewDeployer } : {}),
+          });
+          if (!(await getBuildStageArtifact<StoredCraftPreflight>(env, ctx.buildVersionId, "craft_preflight", "attempt-2"))) {
+            const capture2 = await (deps.craftCapture ? deps.craftCapture(preview.previewUrl) : createCraftCapture(env, preview.previewUrl));
+            const referenceSide2 = await buildReferenceSide();
+            const verdict2 = await runCraftPreflight(
+              {
+                capture: capture2,
+                blueprint: blueprint.blueprint,
+                contract: contract.contract,
+                slots: site.imagePlan.slots,
+                ...(compositionTargets ? { compositionTargets: compositionTargets.map(({ regionId, viewportHeightRatio }) => ({ regionId, viewportHeightRatio })) } : {}),
+                referenceImageMassRatio: frozen.evidence.extraction?.imageMassRatio ?? null,
+                ...(referenceSide2 ? { reference: referenceSide2 } : {}),
+              },
+              2
+            );
+            await storeCraftCrops(env, { buildId: ctx.buildId, buildVersionNumber: ctx.buildVersionNumber, attempt: 2, crops: verdict2.crops });
+            await storeBuildStageArtifactIdempotent(env, {
+              ...craftInputs,
+              kind: "craft_preflight",
+              subkey: "attempt-2",
+              schemaVersion: CRAFT_PREFLIGHT_SCHEMA_VERSION,
+              value: storedVerdict(verdict2),
+            });
+          }
+          // Per issue #49 G the repair round is over either way — the
+          // candidate proceeds to full QA with its attempt-2 evidence.
+        }
+
+        // Only the surviving candidate is frozen: invalid intermediate
+        // candidates never occupy the immutable version keys.
+        await freezeAssembledCandidate(env, {
+          siteGenerationId: ctx.siteGenerationId,
+          buildId: ctx.buildId,
+          buildVersionId: ctx.buildVersionId,
+          buildVersionNumber: ctx.buildVersionNumber,
+          pages: built.pages,
+          sharedCss: built.sharedCss,
+          sharedJs: built.sharedJs,
+          candidate: built,
+          imagePlanSlots: site.imagePlan.slots,
+          acceptedImages,
+          formServiceEndpoint: contract.contract.formContract.formServiceEndpoint,
+          expectedSiteFormId: contract.contract.formContract.siteFormId,
+        });
+        return { manifestHash: built.artifactManifestHash, previewUrl: preview.previewUrl };
       });
       return candidate;
     };
