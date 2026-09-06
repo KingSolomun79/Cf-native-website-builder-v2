@@ -76,6 +76,10 @@ const BLUEPRINT: VisualBlueprint = {
     { id: "bp-flow", description: "Two-region silhouette", sourceTraitId: "trait-flow" },
     { id: "bp-surface", description: "Surface alternation", sourceTraitId: "trait-surface" },
   ],
+  traitObligations: [
+    { sourceTraitId: "trait-display", disposition: "PRESERVED", realizedByRegionIds: ["hero"] },
+    { sourceTraitId: "trait-flow", disposition: "PRESERVED", realizedByRegionIds: ["hero", "cta"] },
+  ],
   fidelityPriorities: ["first viewport topology"],
   tokens: { "color.ink": "#1a1a1a", "color.paper": "#faf7f2" },
   globalGrid: { containerLogic: "max-width 1200px", columnRatios: ["5/7"] },

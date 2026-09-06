@@ -45,7 +45,8 @@ export const PROMPT_MANIFEST: Record<PromptStageKey, PromptManifestEntry> = {
   },
   "visual-blueprint-generator": {
     promptId: "visual-blueprint-generator",
-    promptVersion: "v4",
+    // v5 (issue #59): trait obligation ledger + fidelityPriorities string format.
+    promptVersion: "v5",
     bodyFile: "02-visual-blueprint-generator-v2.md",
   },
   "original-design-blueprint-generator": {

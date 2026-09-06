@@ -26,6 +26,7 @@ const ANALYSIS: ReferenceAnalysis = {
   signatureTraits: [
     { id: "trait-typography", description: "Oversized display type", identityDefining: true, evidenceRefs: ["r1"] },
     { id: "trait-region-flow", description: "Distinctive silhouette", identityDefining: true, evidenceRefs: ["r2"] },
+    { id: "trait-surface", description: "Surface alternation", identityDefining: false, evidenceRefs: ["r3"] },
   ],
   designIntent: [{ hypothesis: "premium authority", confidence: "MEDIUM" }],
   photographicGrammar: { summary: "editorial imagery", imageRoles: ["hero"] },
@@ -40,6 +41,10 @@ const BLUEPRINT: VisualBlueprint = {
   signatureTraits: [
     { id: "bp-typography", description: "display", sourceTraitId: "trait-typography" },
     { id: "bp-flow", description: "flow", sourceTraitId: "trait-region-flow" },
+  ],
+  traitObligations: [
+    { sourceTraitId: "trait-typography", disposition: "PRESERVED", realizedByRegionIds: ["r1"] },
+    { sourceTraitId: "trait-region-flow", disposition: "PRESERVED", realizedByRegionIds: ["r1", "r2", "r3", "r4"] },
   ],
   fidelityPriorities: ["region order"],
   tokens: {},
@@ -124,7 +129,9 @@ describe("blueprint coverage contract (issue #42)", () => {
   it("GAPS when an identity-defining analysis trait is erased by the Blueprint", () => {
     const traitless: VisualBlueprint = {
       ...BLUEPRINT,
-      signatureTraits: [BLUEPRINT.signatureTraits[0]],
+      // Issue #59: erasure is a missing LEDGER disposition, not a missing
+      // signature-trait slot — the concise vocabulary no longer decides.
+      traitObligations: BLUEPRINT.traitObligations!.filter((o) => o.sourceTraitId !== "trait-region-flow"),
     };
     const coverage = evaluateBlueprintCoverage({
       blueprint: traitless,
@@ -253,7 +260,7 @@ describe("multimodal Reference Analysis (issue #42)", () => {
     });
     expect(visionCalled).toBe(true);
     expect(textCalled).toBe(false);
-    expect(produced.analysis.signatureTraits.length).toBe(2);
+    expect(produced.analysis.signatureTraits.length).toBe(3);
 
     // Provenance records the visual input artifacts.
     const run = await env.DB.prepare(
@@ -305,6 +312,13 @@ describe("pipeline blueprint coverage enforcement (issue #42)", () => {
         // Drop the canonical region claiming r2 (0.98 viewports — a major mass).
         blueprint.homepageRegions = blueprint.homepageRegions.filter((region) => region.id !== "r2");
         blueprint.homepageFirstViewport = { summary: "hero", regionIds: ["r1"] };
+        // A compliant model also re-points its obligation ledger at the
+        // regions that remain — the identity gate passes, but the mass is
+        // silently gone, which is exactly the #42 coverage defect.
+        blueprint.traitObligations = (blueprint.traitObligations ?? []).map((obligation) => ({
+          ...obligation,
+          realizedByRegionIds: obligation.realizedByRegionIds.filter((id) => id !== "r2"),
+        }));
         return { ...response, content: JSON.stringify(blueprint) };
       }
       return base.generate!(system, user, attempt);

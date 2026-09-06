@@ -57,6 +57,10 @@ const BLUEPRINT: VisualBlueprint = {
     { id: "bp-asymmetric", description: "Asymmetric composition", sourceTraitId: "trait-asymmetric-grid" },
     { id: "bp-surfaces", description: "Alternating surfaces", sourceTraitId: "trait-alternating-surfaces" },
   ],
+  traitObligations: [
+    { sourceTraitId: "trait-oversized-serif", disposition: "PRESERVED", realizedByRegionIds: ["hero"] },
+    { sourceTraitId: "trait-asymmetric-grid", disposition: "PRESERVED", realizedByRegionIds: ["hero", "services-overview"] },
+  ],
   fidelityPriorities: ["first viewport topology"],
   tokens: { "color.ink": "#1a1a1a", "color.paper": "#faf7f2", "space.section": "8rem" },
   globalGrid: { containerLogic: "12-col, hero 5/7 split", columnRatios: ["5/7"] },

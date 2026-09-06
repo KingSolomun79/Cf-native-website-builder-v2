@@ -158,6 +158,8 @@
 109. Accessibility may override clear Reference defects while preserving design character and recording adaptation.
 110. Business brand requirements override copying Reference brand identity; preserve relevant visual roles/distribution instead.
 111. SEO scope is deterministic foundation only: titles/descriptions, canonical, semantic headings, crawlable links, truthful JSON-LD, OG and alt semantics.
+112. Reference Analysis binds exactly 3–8 signature traits, schema-enforced (`reference-analysis/2`, issue #59). An output exceeding the bound is rejected by the Analyzer boundary and must return a compliant ranked set through the targeted schema repair; silent truncation is forbidden.
+113. The REFERENCE_BOUND Visual Blueprint carries an explicit trait obligation ledger (`visual-blueprint/2`, issue #59): every identity-defining Analysis trait has exactly one disposition — PRESERVED (realized by existing canonical regions) or ADAPTED under an existing immutable Adaptation Contract clause. Per #110, Business-brand substitution of a trait is legal only through that authority. Absence is deterministic erasure (`BLUEPRINT_REVIEW_REQUIRED`). The 3–8 signature traits remain the Blueprint's concise vocabulary; identity no longer depends on trait-slot capacity or on repeating trait names.
 
 ## 14. Repository cleanup
 

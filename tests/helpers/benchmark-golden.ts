@@ -28,6 +28,10 @@ function caseBlueprintJson(caseDefinition: BenchmarkCaseDefinition): Record<stri
       { id: "bp-region-flow", description: `The Reference's ${regions.length}-region silhouette and flow`, sourceTraitId: "trait-region-flow" },
       { id: "bp-surface", description: "Alternating surface treatment across regions", sourceTraitId: "trait-surface" },
     ],
+    traitObligations: [
+      { sourceTraitId: "trait-typography", disposition: "PRESERVED", realizedByRegionIds: [heroRegion.id] },
+      { sourceTraitId: "trait-region-flow", disposition: "PRESERVED", realizedByRegionIds: regions.map((region) => region.id) },
+    ],
     fidelityPriorities: ["first viewport topology", "region order", "whitespace rhythm"],
     tokens: { "color.ink": "#1a1a1a", "color.paper": "#faf7f2", "space.section": "clamp(4rem, 10vh, 8rem)" },
     globalGrid: { containerLogic: "max-width 1200px, 12-col grid with asymmetric splits", columnRatios: ["5/7"] },

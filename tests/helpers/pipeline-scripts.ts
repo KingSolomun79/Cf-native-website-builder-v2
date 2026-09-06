@@ -37,6 +37,7 @@ const analysisJson = {
   signatureTraits: [
     { id: "trait-typography", description: "Oversized display type", identityDefining: true, evidenceRefs: ["screenshot"] },
     { id: "trait-region-flow", description: "Distinctive region silhouette and order", identityDefining: true, evidenceRefs: ["screenshot"] },
+    { id: "trait-surface", description: "Alternating surface treatment across bands", identityDefining: false, evidenceRefs: ["screenshot"] },
   ],
   designIntent: [{ hypothesis: "premium authority for a local business", confidence: "MEDIUM" }],
   photographicGrammar: { summary: "editorial documentary imagery", imageRoles: ["hero", "detail"] },
@@ -52,6 +53,10 @@ const blueprintJson = {
     { id: "bp-typography", description: "Oversized display type for statements", sourceTraitId: "trait-typography" },
     { id: "bp-region-flow", description: "The Reference's 4-region silhouette and flow", sourceTraitId: "trait-region-flow" },
     { id: "bp-surface", description: "Alternating surface treatment across regions", sourceTraitId: "trait-typography" },
+  ],
+  traitObligations: [
+    { sourceTraitId: "trait-typography", disposition: "PRESERVED", realizedByRegionIds: ["r1"] },
+    { sourceTraitId: "trait-region-flow", disposition: "PRESERVED", realizedByRegionIds: ["r1", "r2", "r3", "r4"] },
   ],
   fidelityPriorities: ["first viewport topology", "region order", "whitespace rhythm"],
   tokens: { "color.ink": "#1a1a1a", "color.paper": "#faf7f2" },

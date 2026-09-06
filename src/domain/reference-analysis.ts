@@ -18,7 +18,7 @@ import { appendBuildWorkflowEvent } from "./lifecycle";
 import { getBuildStageArtifact, storeBuildStageArtifact, type StoredStageArtifact } from "./stage-artifacts";
 import type { ReferenceEvidence } from "./reference-evidence-schema";
 
-export const REFERENCE_ANALYSIS_SCHEMA_VERSION = "reference-analysis/1";
+export const REFERENCE_ANALYSIS_SCHEMA_VERSION = "reference-analysis/2";
 
 const ConfidenceSchema = Type.Union([Type.Literal("HIGH"), Type.Literal("MEDIUM"), Type.Literal("LOW")]);
 
@@ -34,6 +34,12 @@ export const ReferenceAnalysisSchema = Type.Object(
       }),
       { minItems: 1 }
     ),
+    // 3-8 binding signature traits (issue #59): the canonical Analyzer
+    // instruction "Identify 3-8 traits that make the design unmistakably
+    // itself" is SCHEMA-ENFORCED, not prompt prose. The Blueprint side
+    // (visual-blueprint/2) carries exactly one trait obligation per
+    // identity-defining trait, so an analysis emitting more than 8 would
+    // re-create the 2026-09-06 impossible-cardinality contradiction.
     signatureTraits: Type.Array(
       Type.Object({
         id: Type.String({ minLength: 1, maxLength: 120 }),
@@ -41,7 +47,7 @@ export const ReferenceAnalysisSchema = Type.Object(
         identityDefining: Type.Boolean(),
         evidenceRefs: Type.Array(Type.String({ minLength: 1 }), { minItems: 1 }),
       }),
-      { minItems: 1 }
+      { minItems: 3, maxItems: 8 }
     ),
     designIntent: Type.Array(
       Type.Object({ hypothesis: Type.String({ minLength: 1, maxLength: 2000 }), confidence: ConfidenceSchema }),

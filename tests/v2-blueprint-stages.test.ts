@@ -84,6 +84,12 @@ const BLUEPRINT_JSON: VisualBlueprint = {
     { id: "bp-asymmetric", description: "Asymmetric two-column composition", sourceTraitId: "trait-asymmetric-grid" },
     { id: "bp-surfaces", description: "Alternating dark/light surfaces", sourceTraitId: "trait-alternating-surfaces" },
   ],
+  // Issue #59: one explicit disposition per binding (identity-defining)
+  // analysis trait — trait-oversized-serif and trait-asymmetric-grid.
+  traitObligations: [
+    { sourceTraitId: "trait-oversized-serif", disposition: "PRESERVED", realizedByRegionIds: ["hero"] },
+    { sourceTraitId: "trait-asymmetric-grid", disposition: "PRESERVED", realizedByRegionIds: ["hero", "services-overview"] },
+  ],
   fidelityPriorities: ["first viewport topology", "region order", "whitespace rhythm"],
   tokens: { "color.ink": "#1a1a1a", "color.paper": "#faf7f2", "font.display": "Public Domain Serif", "space.section": "clamp(4rem, 10vh, 8rem)" },
   globalGrid: { containerLogic: "max-width 1200px with 12-col grid; hero spans 5/7 asymmetric split", columnRatios: ["5/7", "4/8"] },
@@ -196,7 +202,7 @@ describe("Reference Analysis stage", () => {
 
     const stored = await getBuildStageArtifact<ReferenceAnalysis>(env, pipeline.buildVersionId, "reference_analysis");
     expect(stored!.value.signatureTraits[0].id).toBe("trait-oversized-serif");
-    expect(stored!.schemaVersion).toBe("reference-analysis/1");
+    expect(stored!.schemaVersion).toBe("reference-analysis/2");
     expect(stored!.provenance?.promptId).toBe("reference-analyzer");
     expect(stored!.provenance?.promptVersion).toBe("v3");
     expect(stored!.provenance?.model).toBe("test-model-y");
@@ -252,7 +258,7 @@ describe("Visual Blueprint stage", () => {
 
     const stored = await getBuildStageArtifact<VisualBlueprint>(env, pipeline.buildVersionId, "visual_blueprint");
     expect(stored!.provenance?.promptId).toBe("visual-blueprint-generator");
-    expect(stored!.provenance?.promptVersion).toBe("v4");
+    expect(stored!.provenance?.promptVersion).toBe("v5");
 
     const events = await env.DB.prepare("SELECT to_state FROM build_workflow_events WHERE build_id = ? ORDER BY created_at")
       .bind(pipeline.buildId)
@@ -265,14 +271,15 @@ describe("Visual Blueprint stage", () => {
     const { analysis, r2Key } = await runAnalysis(pipeline);
 
     const erasing = JSON.parse(JSON.stringify(BLUEPRINT_JSON)) as VisualBlueprint;
-    // Stay schema-valid (3 traits) but stop preserving the identity-defining
-    // 'trait-asymmetric-grid' — Business adaptation cannot erase it.
-    erasing.signatureTraits = [
-      erasing.signatureTraits[0],
-      erasing.signatureTraits[2],
-      { id: "bp-secondary", description: "Secondary supporting rhythm", sourceTraitId: "trait-alternating-surfaces" },
-    ];
-    expect(validateBlueprintIdentityPreservation(erasing, analysis).valid).toBe(false);
+    // Erasure under the obligation ledger (issue #59): the binding trait
+    // 'trait-asymmetric-grid' loses its disposition — the signatureTraits
+    // vocabulary alone no longer decides identity.
+    erasing.traitObligations = erasing.traitObligations!.filter(
+      (obligation) => obligation.sourceTraitId !== "trait-asymmetric-grid"
+    );
+    const verdict = validateBlueprintIdentityPreservation(erasing, analysis, null);
+    expect(verdict.valid).toBe(false);
+    if (!verdict.valid) expect(verdict.problems.join("; ")).toContain("trait-asymmetric-grid");
 
     await expect(
       runVisualBlueprintStage(env, {
@@ -291,11 +298,9 @@ describe("Visual Blueprint stage", () => {
     const { analysis, r2Key } = await runAnalysis(pipeline);
 
     const erasing = JSON.parse(JSON.stringify(BLUEPRINT_JSON)) as VisualBlueprint;
-    erasing.signatureTraits = [
-      erasing.signatureTraits[0],
-      erasing.signatureTraits[2],
-      { id: "bp-secondary", description: "Secondary supporting rhythm", sourceTraitId: "trait-alternating-surfaces" },
-    ];
+    erasing.traitObligations = erasing.traitObligations!.filter(
+      (obligation) => obligation.sourceTraitId !== "trait-asymmetric-grid"
+    );
     let repairCalls = 0;
     const produced = await runVisualBlueprintStage(env, {
       ...contextOf(pipeline),
@@ -316,9 +321,9 @@ describe("Visual Blueprint stage", () => {
     });
 
     expect(repairCalls).toBe(1);
-    expect(produced.blueprint.signatureTraits.map((trait) => trait.sourceTraitId)).toContain("trait-asymmetric-grid");
+    expect(produced.blueprint.traitObligations!.map((obligation) => obligation.sourceTraitId)).toContain("trait-asymmetric-grid");
     const stored = await getBuildStageArtifact<VisualBlueprint>(env, pipeline.buildVersionId, "visual_blueprint");
-    expect(stored!.value.signatureTraits.map((trait) => trait.sourceTraitId)).toContain("trait-asymmetric-grid");
+    expect(stored!.value.traitObligations!.map((obligation) => obligation.sourceTraitId)).toContain("trait-asymmetric-grid");
   });
 
   it("rejects Reference content copied into the Blueprint as Business content", async () => {

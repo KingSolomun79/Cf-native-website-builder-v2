@@ -450,7 +450,7 @@ Responsibilities:
 
 - describe the visual system;
 - identify hierarchy/relationships;
-- identify signature traits;
+- identify 3-8 binding signature traits (schema-enforced, issue #59: an output exceeding the bound is rejected by the Analyzer boundary and returned as a compliant ranked set through the targeted schema repair, never silently truncated);
 - infer likely design intent with confidence;
 - describe photographic grammar;
 - describe responsive/motion behavior;
@@ -475,8 +475,9 @@ The Visual Blueprint is the binding design contract.
 It must define at minimum:
 
 - visual thesis;
-- 3–8 signature traits;
-- fidelity priorities;
+- 3–8 concise signature traits (the design vocabulary, not the identity ledger);
+- trait obligation ledger: exactly one explicit disposition per identity-defining Reference Analysis trait — `PRESERVED` (realized by existing canonical regions) or `ADAPTED` under an existing immutable Adaptation Contract clause (issue #59; absence is deterministic erasure);
+- fidelity priorities as ordered plain strings (`N. dimension — reason`);
 - tokens;
 - global grid/container logic;
 - spacing rhythm;

@@ -2034,3 +2034,51 @@ COMPLETENESS
 - QA agents can objectively evaluate implementation.
 
 Return ONLY the JSON.
+
+======================================================================
+ADDENDUM — v5 (issue #59): TRAIT OBLIGATION LEDGER
+======================================================================
+
+This addendum is binding runtime contract (composed under the domain
+contract, which remains authoritative). It supersedes any contradictory
+clause above.
+
+1. SIGNATURE TRAITS ARE THE CONCISE VOCABULARY, NOT THE IDENTITY LEDGER.
+
+   Produce 3-8 concise signature traits. Each still traces via
+   `sourceTraitId` to the analysis trait it preserves. Identity accounting
+   does NOT depend on these slots.
+
+2. TRAIT OBLIGATION LEDGER (`traitObligations`) IS BINDING.
+
+   The Reference Analysis binds N identity traits (identityDefining = true).
+   N never exceeds the contract maximum. Provide EXACTLY ONE
+   `traitObligations` entry per binding trait id:
+
+   - `disposition: "PRESERVED"` — the trait's visual role is kept. Requires
+     `realizedByRegionIds`: at least one real canonical region from your own
+     `homepageRegions` that realizes the trait.
+   - `disposition: "ADAPTED"` — the trait is transformed under an immutable
+     Adaptation Contract clause (FDR #110: Business brand requirements may
+     override copying Reference brand identity while visual roles/distribution
+     stay preserved). Requires `adaptationClauseId` naming the EXACT existing
+     clause (`unsupportedFeatures[].feature` or
+     `acceptedApproximations[].replaces`) plus `realizedByRegionIds` for the
+     preserved role.
+
+   No binding trait may disappear merely because it was not selected as a
+   signature-trait label. Missing, duplicated, unknown or unauthorized
+   obligations are deterministic erasure and are rejected before generation.
+
+3. FIDELITY PRIORITIES ARE ORDERED PLAIN STRINGS.
+
+   Express each priority as one string formatted exactly
+   `N. dimension — reason` (example: "1. first viewport topology —
+   identity-defining mass"). Do not emit objects.
+
+4. ANALYSIS BOUND (paired contract, `reference-analysis/2`).
+
+   The Reference Analysis binds exactly 3-8 signature traits. If your
+   analysis output exceeds the bound, the Analyzer boundary rejects it and
+   the targeted schema repair must return a compliant ranked 3-8 set; it is
+   never silently truncated.

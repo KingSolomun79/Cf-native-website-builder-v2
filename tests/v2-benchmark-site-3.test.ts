@@ -69,7 +69,7 @@ describe("Benchmark Site 3 — restrained corporate/professional", () => {
     // Prompt/model/schema provenance covers analysis -> QA.
     const provenance = JSON.parse(run!.provenance_json!) as Array<{ stage: string; prompt_version: string; schema_version: string }>;
     const analysisEntry = provenance.find((entry) => entry.stage === "reference-analyzer");
-    expect(analysisEntry).toMatchObject({ prompt_version: "v3", schema_version: "reference-analysis/1" });
+    expect(analysisEntry).toMatchObject({ prompt_version: "v3", schema_version: "reference-analysis/2" });
 
     // The restrained silhouette survived: centered hero + services matrix.
     const homeArtifact = await env.DB.prepare(

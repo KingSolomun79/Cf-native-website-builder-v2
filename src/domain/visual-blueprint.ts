@@ -1,14 +1,20 @@
-// V2 Visual Blueprint stage (issue #8, PRD section 13).
+// V2 Visual Blueprint stage (issue #8, PRD section 13; obligation ledger
+// added with issue #59 after the 2026-09-06 blueprint convergence forensic).
 //
 // The binding design contract translating the Reference Analysis into the
 // intended Site for THIS Business. It preserves identity-defining structure
 // and signature traits while replacing branding/content/assets: Reference
 // copy, logos, trademarks, photography and proprietary assets are never
 // copied as Business content (deterministic lint), and Business adaptation
-// cannot erase the Reference's structural visual identity (every Blueprint
-// signature trait must trace to an analysis trait). Once generation begins,
-// downstream Automated Repair may correct implementation against the
-// Blueprint but never redefine it.
+// cannot erase the Reference's structural visual identity. Identity is
+// accounted for through an explicit TRAIT OBLIGATION LEDGER: every
+// identity-defining Reference Analysis trait must carry exactly one
+// disposition — PRESERVED (realized by existing canonical regions) or
+// ADAPTED (under an existing immutable Adaptation Contract clause, FDR
+// #110) — so a trait can be realized through any internal naming without a
+// dedicated signature-trait slot, and absence is deterministic erasure.
+// Once generation begins, downstream Automated Repair may correct
+// implementation against the Blueprint but never redefine it.
 
 import { Type, type Static } from "@sinclair/typebox";
 import { Value } from "@sinclair/typebox/value";
@@ -20,13 +26,37 @@ import type { ReferenceAnalysis } from "./reference-analysis";
 import type { AdaptationContract, ReferenceEvidence } from "./reference-evidence-schema";
 import type { BusinessFacts } from "./lifecycle-schema";
 
-export const VISUAL_BLUEPRINT_SCHEMA_VERSION = "visual-blueprint/1";
+export const VISUAL_BLUEPRINT_SCHEMA_VERSION = "visual-blueprint/2";
+
+// Cross-stage trait accounting (issue #59): one explicit disposition per
+// binding Reference Analysis identity trait. Realization references point at
+// canonical homepageRegions — the only id-bearing structural carriers in the
+// Blueprint — so an obligation can never be an empty claim. Schema-optional
+// so ORIGINAL_DESIGN Blueprints (no Reference Analysis) are untouched; the
+// REFERENCE_BOUND identity gate requires the ledger in full.
+export const TraitObligationSchema = Type.Object(
+  {
+    // The Reference Analysis trait this obligation disposes of (verbatim id).
+    sourceTraitId: Type.String({ minLength: 1, maxLength: 120 }),
+    disposition: Type.Union([Type.Literal("PRESERVED"), Type.Literal("ADAPTED")]),
+    // Canonical regions that realize the trait (or its authorized adaptation).
+    realizedByRegionIds: Type.Array(Type.String({ minLength: 1, maxLength: 120 }), { minItems: 1 }),
+    // For ADAPTED: the exact immutable Adaptation Contract clause that
+    // authorizes the adaptation (an existing `unsupportedFeatures[].feature`
+    // or `acceptedApproximations[].replaces` token — FDR #110 authority).
+    adaptationClauseId: Type.Optional(Type.String({ minLength: 1, maxLength: 120 })),
+  },
+  { additionalProperties: false }
+);
+export type TraitObligation = Static<typeof TraitObligationSchema>;
 
 export const VisualBlueprintSchema = Type.Object(
   {
     version: Type.String({ minLength: 1 }),
     visualThesis: Type.String({ minLength: 1, maxLength: 4000 }),
-    // 3-8 signature traits (PRD section 13).
+    // 3-8 signature traits (PRD section 13): the Blueprint's concise design
+    // vocabulary — NOT the identity accounting mechanism (that is the
+    // traitObligations ledger below, which has no creative cap conflict).
     signatureTraits: Type.Array(
       Type.Object({
         id: Type.String({ minLength: 1, maxLength: 120 }),
@@ -39,6 +69,7 @@ export const VisualBlueprintSchema = Type.Object(
       }),
       { minItems: 3, maxItems: 8 }
     ),
+    traitObligations: Type.Optional(Type.Array(TraitObligationSchema, { maxItems: 16 })),
     fidelityPriorities: Type.Array(Type.String({ minLength: 1, maxLength: 500 }), { minItems: 1 }),
     tokens: Type.Record(Type.String(), Type.Union([Type.String(), Type.Number()])),
     globalGrid: Type.Object({
@@ -117,12 +148,17 @@ export class VisualBlueprintError extends Error {
 }
 
 // Business adaptation must not erase the Reference's structural visual
-// identity: every Blueprint signature trait traces to a Reference Analysis
-// trait, and the trait count cannot silently collapse below the analysis
-// identity carriers.
+// identity (issue #59): every Blueprint signature trait still traces to a
+// Reference Analysis trait, and every identity-defining analysis trait must
+// have EXACTLY ONE explicit disposition in the traitObligations ledger —
+// PRESERVED with real canonical-region realizations, or ADAPTED under an
+// existing immutable Adaptation Contract clause (FDR #110). Absence is
+// deterministic erasure. The ledger frees identity from the 3-8 trait-slot
+// cap: a trait realized through different internal naming still passes.
 export function validateBlueprintIdentityPreservation(
   blueprint: VisualBlueprint,
-  analysis: ReferenceAnalysis
+  analysis: ReferenceAnalysis,
+  adaptationContract: AdaptationContract | null
 ): { valid: true } | { valid: false; problems: string[] } {
   const problems: string[] = [];
   const analysisTraitIds = new Set(analysis.signatureTraits.map((trait) => trait.id));
@@ -135,16 +171,126 @@ export function validateBlueprintIdentityPreservation(
       problems.push(`signature trait '${trait.id}' traces to unknown analysis trait '${trait.sourceTraitId}'`);
     }
   }
-  const identityCarriers = analysis.signatureTraits.filter((trait) => trait.identityDefining);
-  const preservedCarrierIds = new Set(
-    blueprint.signatureTraits.map((trait) => trait.sourceTraitId)
-  );
-  for (const carrier of identityCarriers) {
-    if (!preservedCarrierIds.has(carrier.id)) {
-      problems.push(`identity-defining analysis trait '${carrier.id}' was erased by Business adaptation`);
+  const carriers = analysis.signatureTraits.filter((trait) => trait.identityDefining);
+  if (carriers.length > 0 && !blueprint.traitObligations) {
+    problems.push(
+      "no traitObligations ledger: every binding Reference Analysis trait requires exactly one explicit PRESERVED/ADAPTED disposition"
+    );
+  }
+  problems.push(...evaluateTraitObligations(blueprint, analysis, adaptationContract).problems);
+  return problems.length === 0 ? { valid: true } : { valid: false, problems };
+}
+
+// Deterministic Adaptation Contract authority (FDR #110): an ADAPTED
+// disposition is legal only when an immutable contract clause exists AND that
+// clause concerns THIS trait — anchored by token overlap against the trait's
+// own frozen analysis description/evidence (immutable inputs), never against
+// model-written repair prose. Returns null when authorized, else the problem.
+export function adaptationClauseAuthority(
+  obligation: TraitObligation,
+  trait: ReferenceAnalysis["signatureTraits"][number] | undefined,
+  adaptationContract: AdaptationContract | null
+): string | null {
+  if (obligation.disposition === "PRESERVED") {
+    return obligation.adaptationClauseId
+      ? `obligation '${obligation.sourceTraitId}' is PRESERVED but also cites adaptation clause '${obligation.adaptationClauseId}'`
+      : null;
+  }
+  if (!obligation.adaptationClauseId) {
+    return `ADAPTED obligation '${obligation.sourceTraitId}' cites no adaptationClauseId; Business adaptation requires an existing immutable Adaptation Contract clause`;
+  }
+  if (!adaptationContract) {
+    return `ADAPTED obligation '${obligation.sourceTraitId}' has no Adaptation Contract to authorize it`;
+  }
+  const clauses = [
+    ...adaptationContract.unsupportedFeatures.map((entry) => entry.feature),
+    ...adaptationContract.acceptedApproximations.map((entry) => entry.replaces),
+  ];
+  if (!clauses.includes(obligation.adaptationClauseId)) {
+    return `ADAPTED obligation '${obligation.sourceTraitId}' cites unknown adaptation clause '${obligation.adaptationClauseId}'`;
+  }
+  if (trait) {
+    const clauseTokens = obligation.adaptationClauseId
+      .toLowerCase()
+      .split(/[^a-z0-9]+/)
+      .filter((token) => token.length >= 4);
+    const anchorText = `${trait.description} ${trait.evidenceRefs.join(" ")}`.toLowerCase();
+    if (clauseTokens.length > 0 && !clauseTokens.some((token) => anchorText.includes(token))) {
+      return `ADAPTED obligation '${obligation.sourceTraitId}' cites unrelated clause '${obligation.adaptationClauseId}' — the clause does not concern this trait`;
     }
   }
-  return problems.length === 0 ? { valid: true } : { valid: false, problems };
+  return null;
+}
+
+// Per-obligation ledger evaluation (issue #59). Shared by the identity gate
+// and by Blueprint repair (issue #60): satisfiedObligations is the passing
+// preservation set; rejectedObligations names the exact failed findings.
+export interface TraitObligationEvaluation {
+  /** Aggregate problems (duplicates, erased carriers, per-obligation failures). */
+  problems: string[];
+  /** Identity-defining analysis traits with no obligation at all. */
+  missingCarrierIds: string[];
+  /** Ledger entries that fully validate (exist, authorized, realized). */
+  satisfiedObligations: TraitObligation[];
+  /** Ledger entries that fail, with the deterministic reason. */
+  rejectedObligations: Array<{ obligation: TraitObligation; problem: string }>;
+}
+
+export function evaluateTraitObligations(
+  blueprint: VisualBlueprint,
+  analysis: ReferenceAnalysis,
+  adaptationContract: AdaptationContract | null
+): TraitObligationEvaluation {
+  const problems: string[] = [];
+  const byId = new Map(analysis.signatureTraits.map((trait) => [trait.id, trait]));
+  const carrierIds = new Set(
+    analysis.signatureTraits.filter((trait) => trait.identityDefining).map((trait) => trait.id)
+  );
+  const regionIds = new Set(blueprint.homepageRegions.map((region) => region.id));
+  const ledger = blueprint.traitObligations ?? [];
+
+  const seen = new Map<string, number>();
+  const satisfiedObligations: TraitObligation[] = [];
+  const rejectedObligations: TraitObligationEvaluation["rejectedObligations"] = [];
+  for (const obligation of ledger) {
+    seen.set(obligation.sourceTraitId, (seen.get(obligation.sourceTraitId) ?? 0) + 1);
+    let problem: string | null = null;
+    if (!byId.has(obligation.sourceTraitId)) {
+      problem = `traces to unknown analysis trait '${obligation.sourceTraitId}'`;
+    } else if (!carrierIds.has(obligation.sourceTraitId)) {
+      problem = `'${obligation.sourceTraitId}' is not identity-defining; the ledger must cover exactly the binding trait set`;
+    }
+    if (!problem) {
+      for (const regionId of obligation.realizedByRegionIds) {
+        if (!regionIds.has(regionId)) {
+          problem = `realization references nonexistent canonical region '${regionId}'`;
+          break;
+        }
+      }
+    }
+    if (!problem) {
+      problem = adaptationClauseAuthority(obligation, byId.get(obligation.sourceTraitId), adaptationContract);
+    }
+    if (problem) rejectedObligations.push({ obligation, problem });
+    else satisfiedObligations.push(obligation);
+  }
+
+  for (const [sourceTraitId, count] of seen) {
+    if (count > 1) {
+      problems.push(`duplicate disposition for '${sourceTraitId}' (${count} obligations); every binding trait has exactly one`);
+    }
+  }
+  const missingCarrierIds: string[] = [];
+  for (const carrierId of carrierIds) {
+    if (!seen.has(carrierId)) {
+      missingCarrierIds.push(carrierId);
+      problems.push(`identity-defining analysis trait '${carrierId}' was erased by Business adaptation`);
+    }
+  }
+  for (const entry of rejectedObligations) {
+    problems.push(`obligation '${entry.obligation.sourceTraitId}': ${entry.problem}`);
+  }
+  return { problems, missingCarrierIds, satisfiedObligations, rejectedObligations };
 }
 
 // Deterministic lint: Reference copy, logos, trademarks and hosts never enter
@@ -273,10 +419,13 @@ const MAJOR_MASS_RATIO = 0.35;
 export function evaluateBlueprintCoverage(input: BlueprintCoverageInput): BlueprintCoverage {
   const { blueprint, analysis, evidenceRegions, extraction, adaptationContract } = input;
 
-  // a) Identity-defining traits must be preserved via sourceTraitId.
-  const preserved = new Set(blueprint.signatureTraits.map((trait) => trait.sourceTraitId));
+  // a) Identity-defining traits must be explicitly disposed in the
+  //    traitObligations ledger (issue #59). An authorized ADAPTED disposition
+  //    covers the trait; a missing disposition is erasure. (Disposition
+  //    validity itself is the identity gate's job, which runs before persist.)
+  const dispositioned = new Set((blueprint.traitObligations ?? []).map((obligation) => obligation.sourceTraitId));
   const uncoveredTraits = analysis.signatureTraits
-    .filter((trait) => trait.identityDefining && !preserved.has(trait.id))
+    .filter((trait) => trait.identityDefining && !dispositioned.has(trait.id))
     .map((trait) => trait.id);
 
   // Declared adaptations can legally accept a mass drop (feature token
@@ -399,9 +548,15 @@ export function buildBlueprintUserPrompt(input: {
   adaptationContract: AdaptationContract | null;
   evidenceRegions: Array<{ id: string; viewportHeightRatio?: number }>;
 }): string {
-  return `Produce the binding Visual Blueprint for THIS Business from the Reference Analysis below. Preserve the Reference's identity-defining structure and signature traits while replacing its branding, content and assets with the Business's own. Every signature trait must trace to an analysis trait via sourceTraitId — use EXACTLY these analysis trait ids (verbatim, no other notation): ${JSON.stringify(input.analysis.signatureTraits.map((trait) => trait.id))}. Do NOT copy Reference copy, logos, trademarks, photography or proprietary assets. Define: visual thesis, 3-8 signature traits, fidelity priorities, tokens, global grid/container logic, spacing rhythm, typography roles, color roles, surface/depth language, header/navigation language, homepage first viewport, ordered homepage regions, image system with prioritized image roles, motion grammar, responsive contract, inner-page vocabulary, anti-fallback rules, accessibility adaptations and declared limitations. In homepageRegions, OMIT imageRoleId entirely for text-only regions — never write 'none', 'null', 'n/a' or an empty string; when present it must be an exact id from imageSystem.imageRoles.
+  const bindingTraitIds = input.analysis.signatureTraits.filter((trait) => trait.identityDefining).map((trait) => trait.id);
+  return `Produce the binding Visual Blueprint for THIS Business from the Reference Analysis below. Preserve the Reference's identity-defining structure and signature traits while replacing its branding, content and assets with the Business's own. Do NOT copy Reference copy, logos, trademarks, photography or proprietary assets. Define: visual thesis, 3-8 concise signature traits (each tracing via sourceTraitId to the analysis trait it preserves — exact ids, no other notation), fidelity priorities, tokens, global grid/container logic, spacing rhythm, typography roles, color roles, surface/depth language, header/navigation language, homepage first viewport, ordered homepage regions, image system with prioritized image roles, motion grammar, responsive contract, inner-page vocabulary, anti-fallback rules, accessibility adaptations and declared limitations. In homepageRegions, OMIT imageRoleId entirely for text-only regions — never write 'none', 'null', 'n/a' or an empty string; when present it must be an exact id from imageSystem.imageRoles. fidelityPriorities are ordered plain strings, each formatted exactly 'N. dimension — reason' (example: '1. first viewport topology — identity-defining mass').
 
-COVERAGE MANDATE (issue #42): aggregation must never erase the Reference. Every identity-defining analysis trait and every MAJOR measured visual mass (evidence segments of roughly a third of a viewport or more, and every image-mass band) must be claimed by a canonical region's sourceEvidenceRegionIds — or, when genuinely adapted away, be covered by an explicit Adaptation Contract entry (feature token 'mass:<segment-id>'). A Blueprint that silently drops a distinct visual mass, surface change or signature component is a Blueprint defect and will be rejected before generation.
+TRAIT OBLIGATION LEDGER (binding, issue #59): the Reference Analysis binds ${bindingTraitIds.length} identity traits — exactly these ids: ${JSON.stringify(bindingTraitIds)}. This count never exceeds the schema maximum. You MUST provide exactly one traitObligations entry for EVERY binding trait id — no fewer, no more, no duplicates, no unknown ids. For each binding trait:
+- disposition 'PRESERVED' with realizedByRegionIds naming at least one real canonical region from your homepageRegions that realizes the trait; or
+- disposition 'ADAPTED' with adaptationClauseId naming the exact immutable Adaptation Contract clause that authorizes the adaptation (an existing clause from the contract supplied below — Business-brand substitution is legal only through that authority) plus realizedByRegionIds for the preserved visual role.
+No binding trait may disappear merely because it was not selected as one of the concise signature-trait labels. A missing, duplicated or unauthorized obligation is deterministic erasure and will be rejected before generation.
+
+COVERAGE MANDATE (issue #42): aggregation must never erase the Reference. Every MAJOR measured visual mass (evidence segments of roughly a third of a viewport or more, and every image-mass band) must be claimed by a canonical region's sourceEvidenceRegionIds — or, when genuinely adapted away, be covered by an explicit Adaptation Contract entry (feature token 'mass:<segment-id>'); every binding identity trait must be covered by the trait obligation ledger above. A Blueprint that silently drops a distinct visual mass, surface change or signature component is a Blueprint defect and will be rejected before generation.
 
 CANONICAL REGION RULES: The Reference Evidence segmentation listed below is OBSERVATIONAL — measured raw visual segments, not a binding topology. You MAY aggregate adjacent raw segments into ONE canonical homepageRegions entry when they form a single compositional unit (e.g. header + hero image + hero copy + hero CTA = one hero region). Every homepageRegions entry MUST carry sourceEvidenceRegionIds: the verbatim contributing segment ids from the evidence inventory (never invented ids, never empty). Claim each evidence segment in at most one canonical region. The ordered homepageRegions list is the binding canonical region topology for implementation and QA.
 
@@ -480,7 +635,7 @@ export async function runVisualBlueprintStage(
 Your previously produced Blueprint was REJECTED by deterministic validation:
 - ${firstRejection.code}: ${firstRejection.message}
 
-Regenerate the COMPLETE blueprint fixing exactly these problems. Every identity-defining analysis trait must be carried into signatureTraits via its exact sourceTraitId and realized in the region topology (business-content substitution belongs inside the region/adaptation text — it must not remove or erase the trait's visual role). Do not drop or rename any required id.`;
+Regenerate the COMPLETE blueprint fixing exactly these problems. Every binding identity trait must carry exactly one valid traitObligations entry (PRESERVED with real canonical-region realizations, or ADAPTED under an existing Adaptation Contract clause) and be realized in the region topology (business-content substitution belongs inside the region/adaptation text — it must not remove or erase the trait's visual role). Do not drop or rename any required id.`;
   const repairRun = await runSchemaValidatedAiStage<VisualBlueprint>(env, { ...stageOptions, userPrompt: repairPrompt });
   const repairRejection = validateProducedBlueprint(repairRun.value, input);
   if (repairRejection) {
@@ -494,7 +649,7 @@ function validateProducedBlueprint(
   blueprint: VisualBlueprint,
   input: RunVisualBlueprintInput
 ): { code: "IDENTITY_ERASURE" | "REFERENCE_CONTENT_DETECTED" | "BLUEPRINT_INCONSISTENT"; message: string } | null {
-  const identity = validateBlueprintIdentityPreservation(blueprint, input.analysis);
+  const identity = validateBlueprintIdentityPreservation(blueprint, input.analysis, input.adaptationContract);
   if (!identity.valid) {
     return { code: "IDENTITY_ERASURE", message: identity.problems.join("; ") };
   }

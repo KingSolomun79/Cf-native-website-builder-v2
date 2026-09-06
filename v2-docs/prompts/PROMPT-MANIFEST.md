@@ -13,7 +13,7 @@ The domain contract is prepended at runtime and is authoritative over contradict
 | Stage | Reconciled prompt id/version | Detailed body |
 |---|---|---|
 | Reference Analyzer | `reference-analyzer/v3` | `01-reference-analyzer-v2.md` |
-| Visual Blueprint Generator | `visual-blueprint-generator/v4` | `02-visual-blueprint-generator-v2.md` |
+| Visual Blueprint Generator | `visual-blueprint-generator/v5` | `02-visual-blueprint-generator-v2.md` |
 | Original Design Blueprint Generator | `original-design-blueprint-generator/v3` | `03-original-design-blueprint-generator-v2.md` |
 | Website Generator | `website-generator/v4` | `04-website-generator-v3.md` |
 | KIE Image Prompt Generator | `kie-image-prompt-generator/v2` | `05-kie-image-prompt-generator-v1.md` |
@@ -28,11 +28,11 @@ The domain contract is prepended at runtime and is authoritative over contradict
 
 ### Reference Analyzer v3
 
-Consumes versioned Reference Evidence, not loose browser dumps. It is forensic/descriptive and cannot redesign, map Business content, or fabricate observations. Reference Screenshot controls static composition; Reference URL is supplemental behavioral/runtime evidence.
+Consumes versioned Reference Evidence, not loose browser dumps. It is forensic/descriptive and cannot redesign, map Business content, or fabricate observations. Reference Screenshot controls static composition; Reference URL is supplemental behavioral/runtime evidence. The analysis contract binds exactly 3-8 signature traits (schema-enforced since `reference-analysis/2`, issue #59); a model output exceeding the bound is rejected by the Analyzer boundary and must return a compliant ranked set through the targeted schema repair — never silent truncation.
 
-### Visual Blueprint Generator v4
+### Visual Blueprint Generator v5
 
-Produces the binding Visual Blueprint from Reference Analysis plus Business/brand inputs and Adaptation Contract. It cannot copy reference content/branding/assets. Raw Reference Evidence segmentation is observational: the blueprint may aggregate adjacent raw segments into canonical regions and must preserve `sourceEvidenceRegionIds` provenance per canonical region; the ordered canonical region list is the binding topology for implementation and QA. Once generation begins the Blueprint cannot be silently changed by downstream repair.
+Produces the binding Visual Blueprint from Reference Analysis plus Business/brand inputs and Adaptation Contract. It cannot copy reference content/branding/assets. Raw Reference Evidence segmentation is observational: the blueprint may aggregate adjacent raw segments into canonical regions and must preserve `sourceEvidenceRegionIds` provenance per canonical region; the ordered canonical region list is the binding topology for implementation and QA. v5 (issue #59) adds the binding trait obligation ledger: every identity-defining Reference Analysis trait carries exactly one `traitObligations` disposition — PRESERVED (realized by existing canonical regions) or ADAPTED under an existing immutable Adaptation Contract clause — and `fidelityPriorities` are ordered plain strings (`N. dimension — reason`). Once generation begins the Blueprint cannot be silently changed by downstream repair.
 
 ### Original Design Blueprint Generator v3
 

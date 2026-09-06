@@ -22,7 +22,7 @@
 
 The Reference Screenshot is authoritative for static composition. The Reference URL supplements behavioral, responsive and computed/runtime evidence.
 
-`REFERENCE_BOUND` Release Ready requires direct Reference fidelity independently of the aggregate QA score: the deterministic `REFERENCE_MACRO_FIDELITY` gate compares measured Reference evidence with the generated candidate and cannot be averaged away. Missing reference evidence never becomes fabricated defaults (`INSUFFICIENT_REFERENCE_EVIDENCE` fails closed). Evidence sufficiency is frozen at intake; the Visual Blueprint must cover identity-defining reference features (`BLUEPRINT_REVIEW_REQUIRED` otherwise); the Analyzer, Generator and QA-A work from the normalized Reference Visual Package.
+`REFERENCE_BOUND` Release Ready requires direct Reference fidelity independently of the aggregate QA score: the deterministic `REFERENCE_MACRO_FIDELITY` gate compares measured Reference evidence with the generated candidate and cannot be averaged away. Missing reference evidence never becomes fabricated defaults (`INSUFFICIENT_REFERENCE_EVIDENCE` fails closed). Evidence sufficiency is frozen at intake; the Visual Blueprint must cover identity-defining reference features through its trait obligation ledger (issue #59: one explicit PRESERVED/ADAPTED disposition per binding Analysis trait; `BLUEPRINT_REVIEW_REQUIRED` otherwise); the Analyzer, Generator and QA-A work from the normalized Reference Visual Package.
 
 Reference content, logo, branding, trademarks, proprietary graphics, photography, font files and source implementation are never reused as Business content/assets.
 

@@ -126,6 +126,24 @@ function stripNulls(value: unknown): unknown {
   return value;
 }
 
+// Same normalization philosophy for empty strings (issue #59, production
+// evidence 2026-09-06: models rendered "no image role" as imageRoleId: ""
+// against an Optional string). Absence — never "" — is the canonical
+// representation of "not present"; stripping is not semantic fabrication,
+// the model already said the field is empty.
+function stripEmptyStrings(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(stripEmptyStrings);
+  if (value !== null && typeof value === "object") {
+    const out: Record<string, unknown> = {};
+    for (const [key, entry] of Object.entries(value as Record<string, unknown>)) {
+      if (entry === "") continue;
+      out[key] = stripEmptyStrings(entry);
+    }
+    return out;
+  }
+  return value;
+}
+
 export function schemaErrorSummary(schema: TSchema, value: unknown): string {
   const issues: string[] = [];
   for (const error of Value.Errors(schema, value)) {
@@ -228,7 +246,7 @@ Return ONLY the corrected JSON object. Do not change the semantic content beyond
       outcome = "invalid";
       errorSummary = parsed.error;
     } else {
-      const candidate = stripNulls(parsed.value);
+      const candidate = stripEmptyStrings(stripNulls(parsed.value));
       if (!Value.Check(options.schema, candidate)) {
         outcome = "invalid";
         errorSummary = schemaErrorSummary(options.schema, candidate);
