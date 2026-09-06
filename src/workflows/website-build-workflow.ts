@@ -10,9 +10,28 @@
 // do the bounded work; this class sequences them durably.
 
 import { WorkflowEntrypoint, WorkflowStep, WorkflowEvent } from "cloudflare:workers";
+import { NonRetryableError } from "cloudflare:workflows";
 import type { Env } from "../env.d";
 import type { InitialBuildCreated } from "../domain/lifecycle";
 import type { BuildPipelineDeps } from "../domain/build-pipeline";
+import { StageExecutionCollisionError } from "../domain/stage-execution";
+import { StageArtifactError } from "../domain/stage-artifacts";
+
+// Terminal state/provenance corruption must not burn the workflow step retry
+// budget (issue #54 §11): a foreign artifact under an immutable slot cannot
+// heal through retries, so these errors fail the step non-retryably and the
+// failure becomes domain-visible (issue #56 reconciliation). Everything else —
+// including the transient STAGE_EXECUTION_IN_PROGRESS single-flight yield —
+// stays retryable under the existing step policy.
+export function toWorkflowStepError(error: unknown): unknown {
+  if (
+    error instanceof StageExecutionCollisionError ||
+    (error instanceof StageArtifactError && error.code === "REPAIR_ARTIFACT_MISMATCH")
+  ) {
+    return new NonRetryableError(error.message);
+  }
+  return error;
+}
 
 export interface WebsiteBuildParams {
   siteGenerationId: string;
@@ -72,13 +91,19 @@ export class WebsiteBuildWorkflow extends WorkflowEntrypoint<Env, WebsiteBuildPa
             ...(this.pipelineDeps ?? {}),
             // Transient platform faults (D1 "Durable Object no longer
             // active", isolate evictions) heal via bounded engine retries;
-            // every step is idempotent (artifact reuse / spend-resume).
-            step: async <T,>(name: string, fn: () => Promise<T>) =>
-              (await step.do(
-                name,
-                { retries: { limit: 8, delay: "10 seconds", backoff: "exponential" } } as never,
-                () => fn() as never
-              )) as T,
+            // every step is idempotent (artifact reuse / spend-resume /
+            // single-flight provider claims — issue #54).
+            step: async <T,>(name: string, fn: () => Promise<T>) => {
+              try {
+                return (await step.do(
+                  name,
+                  { retries: { limit: 8, delay: "10 seconds", backoff: "exponential" } } as never,
+                  () => fn() as never
+                )) as T;
+              } catch (error) {
+                throw toWorkflowStepError(error);
+              }
+            },
           },
         });
         return {

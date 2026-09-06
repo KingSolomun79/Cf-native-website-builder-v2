@@ -645,6 +645,14 @@ describe("informed assembly repair is idempotent under engine retries (issue #52
     expect(row).not.toBeNull();
     const provenance = JSON.parse(row!.provenance_json);
     expect(provenance.repairRequestFingerprint).toMatch(/^[0-9a-f]{64}$/);
+
+    // Issue #54: the repair provider call ran under a single-flight claim —
+    // the claim is completed and bound to the stored artifact checksum.
+    const claim = await env.DB.prepare(
+      "SELECT state, artifact_checksum FROM stage_execution_claims WHERE build_version_id = ? AND stage_kind = 'generated_page' AND subkey = 'home.assembly-repair-1'"
+    ).bind(context.buildVersionId).first<{ state: string; artifact_checksum: string | null }>();
+    expect(claim?.state).toBe("COMPLETED");
+    expect(claim?.artifact_checksum).toBeTypeOf("string");
   });
 
   it("engine re-entry reuses the stored repair with ZERO additional model calls and an identical result", async () => {

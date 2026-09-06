@@ -110,6 +110,7 @@ export default defineWorkersConfig({
       "tests/v2-blueprint-stages.test.ts",
       "tests/v2-region-semantics.test.ts",
       "tests/v2-site-generator.test.ts",
+      "tests/v2-stage-single-flight.test.ts",
       "tests/v2-realization-binding.test.ts",
       "tests/v2-truth-lint.test.ts",
       "tests/v2-craft-preflight.test.ts",

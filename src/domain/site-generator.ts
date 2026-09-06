@@ -17,10 +17,11 @@
 import { Type, type Static } from "@sinclair/typebox";
 import { Value } from "@sinclair/typebox/value";
 import type { Env } from "../env.d";
-import { runSchemaValidatedAiStage, type RawAiGenerate } from "./ai-boundary";
+import { runSchemaValidatedAiStage, type AiProvenance, type RawAiGenerate } from "./ai-boundary";
 import { appendBuildWorkflowEvent } from "./lifecycle";
 import { getEffectiveBusinessFacts } from "./revision";
 import { getBuildStageArtifact, storeBuildStageArtifact, storeBuildStageArtifactIdempotent, StageArtifactError, sha256Hex, type StoredStageArtifact } from "./stage-artifacts";
+import { deriveStageExecutionFingerprint, runStageSingleFlight } from "./stage-execution";
 import type { VisualBlueprint } from "./visual-blueprint";
 import type { ImplementationContract } from "./implementation-planner";
 import type { BusinessFacts } from "./lifecycle-schema";
@@ -976,10 +977,18 @@ export async function generateCompleteSite(
     temperature: 0.35,
   };
 
-  // Workflow-step retry safety: each generation subkey reuses its frozen
-  // artifact for this Build Version verbatim; only missing subkeys invoke the
-  // model (LLM output is nondeterministic — regeneration would collide with
-  // the artifact immutability boundary).
+  // Workflow-step retry safety (issues #52 + #54): each generation subkey
+  // reuses its frozen artifact for this Build Version verbatim; only missing
+  // subkeys invoke the model (LLM output is nondeterministic — regeneration
+  // would collide with the artifact immutability boundary). Since #54 the
+  // provider call itself is single-flight: a deterministic execution claim is
+  // inserted ATOMICALLY before the call, so overlapping engine attempts can
+  // never both invoke the provider for the same slot — production
+  // (build 91764d47) showed exactly that duplicate-call race before claims
+  // existed. Base pages and shared sources reuse ANY stored artifact for the
+  // slot (existence-only, per #47–#52): repair directives legitimately evolve
+  // between engine re-entries, so content identity gates only the repair
+  // subkeys and the collision safety net, never base-slot reuse.
   const runOrReuse = async <T extends { [key: string]: unknown }>(
     kind: "generated_shared_source" | "generated_page",
     subkey: string,
@@ -987,25 +996,46 @@ export async function generateCompleteSite(
     schemaVersion: string,
     userPrompt: string
   ): Promise<{ value: T; artifactR2Key: string; checksum: string }> => {
-    const existing = await getBuildStageArtifact<T>(env, input.buildVersionId, kind, subkey);
-    if (existing) return { value: existing.value, artifactR2Key: existing.artifactR2Key, checksum: existing.checksum };
-    const run = await runSchemaValidatedAiStage<T>(env, {
-      ...stageInput,
-      stage: "website-generator",
-      schema: schema as Parameters<typeof runSchemaValidatedAiStage>[1]["schema"],
+    const requestFingerprint = await deriveStageExecutionFingerprint({
+      binding: "website-generator-run/1",
+      buildId: input.buildId,
+      buildVersionId: input.buildVersionId,
+      kind,
+      subkey,
       schemaVersion,
-      userPrompt,
+      model: env.LLM_MODEL,
+      provider: env.PRIMARY_PROVIDER,
+      userPromptSha256: await sha256Hex(userPrompt),
     });
-    const stored = await storeBuildStageArtifact(env, {
-      buildId: input.buildId, buildVersionId: input.buildVersionId, siteGenerationId: input.siteGenerationId,
-      kind, subkey, schemaVersion, value: run.value, provenance: run.provenance,
+    const result = await runStageSingleFlight<T>(env, {
+      buildId: input.buildId,
+      buildVersionId: input.buildVersionId,
+      kind,
+      subkey,
+      requestFingerprint,
+      loadExisting: () => getBuildStageArtifact<T>(env, input.buildVersionId, kind, subkey),
+      verifyExisting: () => true,
+      run: () =>
+        runSchemaValidatedAiStage<T>(env, {
+          ...stageInput,
+          stage: "website-generator",
+          schema: schema as Parameters<typeof runSchemaValidatedAiStage>[1]["schema"],
+          schemaVersion,
+          userPrompt,
+        }),
+      store: (produced) =>
+        storeBuildStageArtifact(env, {
+          buildId: input.buildId, buildVersionId: input.buildVersionId, siteGenerationId: input.siteGenerationId,
+          kind, subkey, schemaVersion, value: produced.value,
+          provenance: produced.provenance as AiProvenance | undefined,
+        }),
     });
     // Both paths return the immutable STAGE artifact key: the AI-run record
     // key differs per execution, so returning it on the generate path made
     // first execution and engine re-entry observationally different (issue
     // #52) and pointed manifest provenance at run records instead of the
     // frozen stage artifacts.
-    return { value: run.value, artifactR2Key: stored.artifactR2Key, checksum: stored.checksum };
+    return { value: result.value, artifactR2Key: result.artifactR2Key, checksum: result.checksum };
   };
 
   // 1. shared tokens/CSS  2. shared runtime JS — incremental steps.
@@ -1091,37 +1121,44 @@ BUSINESS TRUTH (binding, issue #48/#53 — inherited by every repair): fixing la
             contractR2Key: input.contractR2Key,
           })
         );
-        const existing = await getBuildStageArtifact<PageHtml>(env, input.buildVersionId, "generated_page", subkey);
-        if (existing) {
-          if (existing.provenance?.repairRequestFingerprint !== repairRequestFingerprint) {
-            // Stored artifact does not belong to this deterministic repair
-            // request: state/provenance corruption. Fail terminally — never
-            // overwrite, never regenerate, never pick a fresh subkey.
-            throw new StageArtifactError(
+        // Issue #54: the repair provider call is single-flight like every
+        // other immutable stage. Reuse stays INPUT-BOUND (#52): a stored
+        // repair is honored only when its provenance fingerprint matches the
+        // current deterministic repair request; a mismatch is terminal
+        // corruption — never a model re-call, never a rewrite.
+        const repaired = await runStageSingleFlight<PageHtml>(env, {
+          buildId: input.buildId,
+          buildVersionId: input.buildVersionId,
+          kind: "generated_page",
+          subkey,
+          requestFingerprint: repairRequestFingerprint,
+          loadExisting: () => getBuildStageArtifact<PageHtml>(env, input.buildVersionId, "generated_page", subkey),
+          verifyExisting: (existing) => existing.provenance?.repairRequestFingerprint === repairRequestFingerprint,
+          existingMismatchError: () =>
+            new StageArtifactError(
               "REPAIR_ARTIFACT_MISMATCH",
               `REPAIR_ARTIFACT_MISMATCH: informed assembly repair artifact '${subkey}' exists for Build Version ${input.buildVersionId} but its provenance does not match the current deterministic repair request (issue #52); refusing to reuse a foreign repair or overwrite the immutable artifact`
-            );
-          }
-          // Engine retry of this exact request: the stored repair IS the
-          // outcome — reuse verbatim with zero provider calls.
-          pageRun.run = { value: existing.value, artifactR2Key: existing.artifactR2Key, checksum: existing.checksum };
-          source.pages[pageId] = existing.value.html;
-          continue;
-        }
-        const repaired = await runSchemaValidatedAiStage<PageHtml>(env, {
-          ...stageInput,
-          stage: "website-generator",
-          schema: PageHtmlSchema as Parameters<typeof runSchemaValidatedAiStage>[1]["schema"],
-          schemaVersion: `generated-source/page-${pageId}/1`,
-          userPrompt: pagePromptFor(pageId) + repairDirectives,
+            ),
+          run: () =>
+            runSchemaValidatedAiStage<PageHtml>(env, {
+              ...stageInput,
+              stage: "website-generator",
+              schema: PageHtmlSchema as Parameters<typeof runSchemaValidatedAiStage>[1]["schema"],
+              schemaVersion: `generated-source/page-${pageId}/1`,
+              userPrompt: pagePromptFor(pageId) + repairDirectives,
+            }),
+          store: (produced) =>
+            storeBuildStageArtifact(env, {
+              buildId: input.buildId, buildVersionId: input.buildVersionId, siteGenerationId: input.siteGenerationId,
+              kind: "generated_page", subkey, schemaVersion: `generated-source/page-${pageId}/1`,
+              value: produced.value,
+              provenance: {
+                ...(produced.provenance as AiProvenance),
+                repairRequestFingerprint,
+              },
+            }),
         });
-        const storedRepair = await storeBuildStageArtifact(env, {
-          buildId: input.buildId, buildVersionId: input.buildVersionId, siteGenerationId: input.siteGenerationId,
-          kind: "generated_page", subkey, schemaVersion: `generated-source/page-${pageId}/1`,
-          value: repaired.value,
-          provenance: { ...repaired.provenance, repairRequestFingerprint },
-        });
-        pageRun.run = { value: repaired.value, artifactR2Key: storedRepair.artifactR2Key, checksum: storedRepair.checksum };
+        pageRun.run = { value: repaired.value, artifactR2Key: repaired.artifactR2Key, checksum: repaired.checksum };
         source.pages[pageId] = repaired.value.html;
       }
     }
