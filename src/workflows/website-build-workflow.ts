@@ -1,13 +1,23 @@
 // Primary V2 lifecycle orchestrator (issue #4, PRD section 23; full pipeline
-// wiring landed with issue #30).
+// wiring landed with issue #30; granularity flattened with issue #57).
 //
-// WebsiteBuildWorkflow owns the V2 lifecycle. The first step creates the
-// initial Build and its immutable Build Version from one Site Generation (or
-// adopts an existing Build — e.g. a Revision Request Build — when buildId is
-// supplied); the pipeline step then drives that Build's current version
-// through the canonical REFERENCE_BOUND stages to its terminal state:
-// Release Ready, HUMAN_REVIEW_REQUIRED, DEGRADED or FAILED. Helper services
-// do the bounded work; this class sequences them durably.
+// WebsiteBuildWorkflow owns the V2 lifecycle. Step 1.0 creates the initial
+// Build and its immutable Build Version from one Site Generation (or adopts
+// an existing Build — e.g. a Revision Request Build — when buildId is
+// supplied). The pipeline itself is NOT one enclosing step: run() orchestrates
+// the canonical REFERENCE_BOUND stages directly, and every stage executes as
+// its own durable top-level step (issue #57 — a slow image provider must never
+// own the timeout/retry fate of analysis, Blueprint, generation, assembly and
+// QA, and the Cloudflare rule "make steps granular" forbids wrapping an entire
+// workflow in one step). Stages run to terminal state: Release Ready,
+// HUMAN_REVIEW_REQUIRED, DEGRADED or FAILED. Helper services do the bounded
+// work; this class sequences them durably.
+//
+// Step-occurrence note (issue #57 §2): flattening removed the "2.0 run
+// REFERENCE_BOUND pipeline to terminal state" envelope, so the per-stage
+// steps are now top-level occurrences of the instance instead of nested steps
+// inside one outer step. Stage names are unchanged, so completed-stage cache,
+// retry provenance and observability keep their identities.
 
 import { WorkflowEntrypoint, WorkflowStep, WorkflowEvent } from "cloudflare:workers";
 import { NonRetryableError } from "cloudflare:workflows";
@@ -149,50 +159,51 @@ export class WebsiteBuildWorkflow extends WorkflowEntrypoint<Env, WebsiteBuildPa
     // Resource kills cannot rely on this catch running — the scheduled
     // reconciliation sweep (reconcileWorkflowTerminations) covers those via
     // the workflow status API.
+    //
+    // Issue #57: the pipeline is orchestrated DIRECTLY by run() — no enclosing
+    // aggregate step and therefore no aggregate per-attempt timeout that a
+    // slow image provider could trip. Each stage below executes as its own
+    // durable step through the deps.step seam; completed stages replay from
+    // the engine's step cache while later stages retry.
     try {
-      return await step.do<WebsiteBuildResult>(
-        "2.0 run REFERENCE_BOUND pipeline to terminal state",
-        async () => {
-          const { runBuildPipeline } = await import("../domain/build-pipeline");
-          const result = await runBuildPipeline(this.env, {
-            siteGenerationId,
-            buildId: created.buildId,
-            // Every pipeline stage executes as its own durable step: a mid-flight
-            // isolate eviction retries only that stage, and each stage is
-            // idempotent (frozen-artifact reuse / KIE spend-resume).
-            deps: {
-              ...(this.pipelineDeps ?? {}),
-              // Transient platform faults (D1 "Durable Object no longer
-              // active", isolate evictions) heal via bounded engine retries;
-              // every step is idempotent (artifact reuse / spend-resume /
-              // single-flight provider claims — issue #54).
-              step: async <T,>(name: string, fn: () => Promise<T>) => {
-                try {
-                  return (await step.do(
-                    name,
-                    {
-                      retries: { ...STAGE_STEP_RETRIES } as never,
-                      timeout: "10 minutes",
-                    } as never,
-                    () => fn() as never
-                  )) as T;
-                } catch (error) {
-                  throw toWorkflowStepError(error);
-                }
-              },
-            },
-          });
-          return {
-            buildId: result.buildId,
-            buildVersionId: result.releaseReadyBuildVersionId ?? undefined,
-            terminal: result.terminal,
-            releaseReadyBuildVersionId: result.releaseReadyBuildVersionId,
-            artifactManifestHash: result.artifactManifestHash,
-            previewUrl: result.previewUrl,
-            reasons: result.reasons,
-          };
-        }
-      );
+      const { runBuildPipeline } = await import("../domain/build-pipeline");
+      const result = await runBuildPipeline(this.env, {
+        siteGenerationId,
+        buildId: created.buildId,
+        // Every pipeline stage executes as its own durable step: a mid-flight
+        // isolate eviction retries only that stage, and each stage is
+        // idempotent (frozen-artifact reuse / KIE spend-resume).
+        deps: {
+          ...(this.pipelineDeps ?? {}),
+          // Transient platform faults (D1 "Durable Object no longer
+          // active", isolate evictions) heal via bounded engine retries;
+          // every step is idempotent (artifact reuse / spend-resume /
+          // single-flight provider claims — issue #54).
+          step: async <T,>(name: string, fn: () => Promise<T>) => {
+            try {
+              return (await step.do(
+                name,
+                {
+                  retries: { ...STAGE_STEP_RETRIES } as never,
+                  timeout: "10 minutes",
+                } as never,
+                () => fn() as never
+              )) as T;
+            } catch (error) {
+              throw toWorkflowStepError(error);
+            }
+          },
+        },
+      });
+      return {
+        buildId: result.buildId,
+        buildVersionId: result.releaseReadyBuildVersionId ?? undefined,
+        terminal: result.terminal,
+        releaseReadyBuildVersionId: result.releaseReadyBuildVersionId,
+        artifactManifestHash: result.artifactManifestHash,
+        previewUrl: result.previewUrl,
+        reasons: result.reasons,
+      };
     } catch (error) {
       try {
         const { failBuildForWorkflowTermination } = await import("../domain/workflow-reconciliation");
