@@ -64,10 +64,42 @@ export class StageExecutionCollisionError extends Error {
 // gateway aborts each provider attempt at 300s (lib/ai-gateway), and the
 // vision path is bounded by VISION_REQUEST_TIMEOUT_MS (≤120s). Two attempts at
 // the largest bound plus parse/validation/immutable-store overhead gives the
-// floor; headroom keeps a live owner safe. A dead owner delays takeover until
-// expiry — still far inside the workflow step's ~42-minute retry envelope, so
-// recovery always lands while retries remain.
+// floor; headroom keeps a live owner safe. The workflow step's explicit
+// per-attempt timeout ("10 minutes") is deliberately SHORTER than the lease,
+// so an attempt is always dead before its claim could be stolen while still
+// running. A dead owner delays takeover until expiry; the workflow's retry
+// delay policy (stageInProgressRetryAfterMs) waits out exactly that horizon,
+// so stale takeover is reachable on the very next attempt with retries to
+// spare — independent of the platform's undocumented static backoff formula.
 export const STAGE_EXECUTION_LEASE_MS = 660_000;
+
+/** Wake margin added to a lease expiry before a waiting contender re-enters:
+ *  engine scheduling granularity plus bounded clock skew between the claim
+ *  writer and the contender, so the takeover CAS never fires a fraction of a
+ *  second before expiry. */
+export const STAGE_EXECUTION_RETRY_MARGIN_MS = 15_000;
+
+/** Retry-after milliseconds for the transient STAGE_EXECUTION_IN_PROGRESS
+ *  yield (issue #54): wake once past the live owner's lease expiry so stale
+ *  takeover is reachable on the next Workflow attempt (retry-liveness
+ *  directive §3). Returns null for any other error. Recognizes rehydrated
+ *  errors by the stable message prefix — the engine may not preserve the
+ *  error class across invocation boundaries. */
+export function stageInProgressRetryAfterMs(error: unknown, now: number = Date.now()): number | null {
+  let expiresAtMs: number | null = null;
+  if (error instanceof StageExecutionInProgressError) {
+    expiresAtMs = Date.parse(error.ownerLeaseExpiresAt);
+  } else if (error instanceof Error && error.message.startsWith("STAGE_EXECUTION_IN_PROGRESS:")) {
+    const match = / until ([^;\s]+)\s*;/.exec(error.message);
+    if (match) expiresAtMs = Date.parse(match[1]);
+  }
+  if (expiresAtMs === null || Number.isNaN(expiresAtMs)) return null;
+  // Clamp to the maximum legitimate horizon (a fresh full lease + margin): a
+  // hostile or corrupt "until" timestamp can never stretch the wait beyond
+  // one normal claim lifetime, and an expired lease never waits negatively.
+  const wait = expiresAtMs + STAGE_EXECUTION_RETRY_MARGIN_MS - now;
+  return Math.min(Math.max(wait, 0), STAGE_EXECUTION_LEASE_MS + STAGE_EXECUTION_RETRY_MARGIN_MS);
+}
 
 export interface StageExecutionFingerprintParts {
   binding: string;

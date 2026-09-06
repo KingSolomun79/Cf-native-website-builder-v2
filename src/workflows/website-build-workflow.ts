@@ -14,6 +14,7 @@ import { NonRetryableError } from "cloudflare:workflows";
 import type { Env } from "../env.d";
 import type { InitialBuildCreated } from "../domain/lifecycle";
 import type { BuildPipelineDeps } from "../domain/build-pipeline";
+import { stageInProgressRetryAfterMs } from "../domain/stage-execution";
 import { StageExecutionCollisionError } from "../domain/stage-execution";
 import { StageArtifactError } from "../domain/stage-artifacts";
 
@@ -22,7 +23,7 @@ import { StageArtifactError } from "../domain/stage-artifacts";
 // heal through retries, so these errors fail the step non-retryably and the
 // failure becomes domain-visible (issue #56 reconciliation). Everything else —
 // including the transient STAGE_EXECUTION_IN_PROGRESS single-flight yield —
-// stays retryable under the existing step policy.
+// stays retryable under the step policy below.
 export function toWorkflowStepError(error: unknown): unknown {
   if (
     error instanceof StageExecutionCollisionError ||
@@ -32,6 +33,49 @@ export function toWorkflowStepError(error: unknown): unknown {
   }
   return error;
 }
+
+// Retry policy for every pipeline stage step (retry-liveness directive §1–§9).
+// Platform facts this is derived from (Workflows docs, "Sleeping and
+// retrying"): retries.limit is the TOTAL number of attempts (limit 8 = one
+// initial + 7 retries); the delay may be a WorkflowDelayFunction receiving the
+// thrown error; the timeout is per attempt. The static exponential backoff
+// formula is NOT documented by the platform, so the repo owns the whole
+// schedule explicitly:
+//
+// - STAGE_EXECUTION_IN_PROGRESS (a live owner holds the claim): wait until
+//   that owner's lease expires (+ margin) via stageInProgressRetryAfterMs, so
+//   stale takeover is reachable on the very next attempt — the required
+//   liveness invariant does not depend on any backoff formula. One yield
+//   consumes one retry slot; it is a cheap waiting condition, not an error
+//   storm (directive §6).
+// - Every other transient error: repo-owned exponential schedule (10s, 20s,
+//   40s, ... capped at 1280s). Its cumulative horizon (~21 min over 7
+//   retries) stays beyond the 660s lease, so the fallback path alone
+//   satisfies the invariant; the IN_PROGRESS wait makes it exact.
+//
+// timeout ("10 minutes", per attempt) is explicit and derived, not incidental:
+// one owner attempt is bounded by 2 x 300s provider aborts plus
+// validation/store overhead, and it must be dead BEFORE its 660s claim lease
+// expires so a contender can never take over a claim from a still-running
+// attempt (600s < 660s < IN_PROGRESS wait horizon).
+// Repo-owned exponential fallback schedule (milliseconds) for ordinary
+// transient errors: starts at the documented 10s and doubles per attempt,
+// capped at 1280s (the 8th/final attempt's delay). The horizon is
+// indexing-proof: whether the engine's ctx.attempt is 0- or 1-based, the
+// cumulative fallback schedule from the first failure (10+20+...+640 =
+// ~21 min) stays far beyond the 660s claim lease.
+export function stageStepFallbackDelayMs(attempt: number): number {
+  return 10_000 * 2 ** Math.min(Math.max(attempt - 1, 0), 7);
+}
+
+const STAGE_STEP_RETRIES = {
+  limit: 8,
+  delay: ({ ctx, error }: { ctx: { attempt: number }; error: unknown }) => {
+    const retryAfterMs = stageInProgressRetryAfterMs(error);
+    if (retryAfterMs !== null) return `${Math.ceil(retryAfterMs / 1000)} seconds`;
+    return stageStepFallbackDelayMs(ctx.attempt);
+  },
+};
 
 export interface WebsiteBuildParams {
   siteGenerationId: string;
@@ -104,7 +148,10 @@ export class WebsiteBuildWorkflow extends WorkflowEntrypoint<Env, WebsiteBuildPa
                 try {
                   return (await step.do(
                     name,
-                    { retries: { limit: 8, delay: "10 seconds", backoff: "exponential" } } as never,
+                    {
+                      retries: { ...STAGE_STEP_RETRIES } as never,
+                      timeout: "10 minutes",
+                    } as never,
                     () => fn() as never
                   )) as T;
                 } catch (error) {
