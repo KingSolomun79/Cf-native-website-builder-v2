@@ -31,6 +31,11 @@ export interface AiProvenance {
   inputArtifactIds: string[];
   tokenUsage?: unknown;
   estimatedCost?: number;
+  /** Issue #52: for informed regeneration artifacts (assembly repair), the
+   *  sha256 of the full deterministic repair request (inputs + directives).
+   *  Engine retries reuse a stored repair ONLY when this fingerprint matches
+   *  the current request; a mismatch is terminal corruption, never a rewrite. */
+  repairRequestFingerprint?: string;
 }
 
 export interface RawAiGenerateResult {

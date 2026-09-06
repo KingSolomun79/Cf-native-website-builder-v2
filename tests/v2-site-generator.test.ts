@@ -14,6 +14,7 @@ import {
   type AssembledSiteSource,
 } from "../src/domain/site-generator";
 import { putObject } from "../src/lib/assets";
+import { storeBuildStageArtifact } from "../src/domain/stage-artifacts";
 import type { RawAiGenerate } from "../src/domain/ai-boundary";
 import type { BusinessFacts } from "../src/domain/lifecycle-schema";
 import { buildPng } from "./helpers/png";
@@ -576,5 +577,145 @@ describe("deterministic assembly validation", () => {
     expect(first.version).toBe("1");
     expect(first.slots.filter((slot) => slot.page === "home").length).toBeGreaterThanOrEqual(2);
     expect(new Set(first.slots.map((slot) => slot.id)).size).toBe(first.slots.length);
+  });
+});
+
+// ── Issue #52: the informed assembly repair is immutable AND idempotent ─────
+//
+// Production (build bbba52df, 2026-09-06): the workflow engine retried the
+// generate-site stage and each retry re-ran the repair model call, then died
+// on ARTIFACT_ALREADY_EXISTS for the same {pageId}.assembly-repair-1 subkey —
+// ~22 wasted LLM calls, no convergence. The repair must follow the same
+// reuse-before-generate discipline as every other immutable stage, with
+// reuse bound to the exact deterministic repair request.
+
+type RepairSeamOptions = { homeHtml?: string; repairHtml?: string; failFirstRepairCall?: boolean };
+
+function repairSeam(options: RepairSeamOptions = {}) {
+  const state = { totalCalls: 0, repairCalls: 0, successfulRepairCalls: 0 };
+  const generate: RawAiGenerate = async (_system, user) => {
+    state.totalCalls += 1;
+    if (user.includes("Assembly repair directives")) {
+      state.repairCalls += 1;
+      if (options.failFirstRepairCall && state.successfulRepairCalls === 0) {
+        throw new Error("simulated provider failure during repair generation");
+      }
+      state.successfulRepairCalls += 1;
+      return { content: JSON.stringify({ html: options.repairHtml ?? HOME_HTML }), provider: "test", model: "test-model-g" };
+    }
+    if (user.includes("shared stylesheet")) return { content: JSON.stringify({ css: SHARED_CSS }), provider: "test", model: "test-model-g" };
+    if (user.includes("minimal shared runtime")) return { content: JSON.stringify({ js: SHARED_JS }), provider: "test", model: "test-model-g" };
+    if (user.includes("page id 'home'")) return { content: JSON.stringify({ html: options.homeHtml ?? HOME_HTML }), provider: "test", model: "test-model-g" };
+    if (user.includes("page id 'about'")) return { content: JSON.stringify({ html: ABOUT_HTML }), provider: "test", model: "test-model-g" };
+    if (user.includes("page id 'services'")) return { content: JSON.stringify({ html: SERVICES_HTML }), provider: "test", model: "test-model-g" };
+    return { content: JSON.stringify({ html: CONTACT_HTML }), provider: "test", model: "test-model-g" };
+  };
+  return { generate, state };
+}
+
+const runGeneration = (context: Awaited<ReturnType<typeof preparedContext>>, generate: RawAiGenerate) =>
+  generateCompleteSite(env, {
+    siteGenerationId: context.siteGenerationId,
+    siteId: context.siteId,
+    buildId: context.buildId,
+    buildVersionId: context.buildVersionId,
+    buildVersionNumber: 1,
+    blueprint: BLUEPRINT,
+    blueprintR2Key: context.blueprintR2Key,
+    contract: context.contract,
+    contractR2Key: context.contractR2Key,
+    generate,
+  });
+
+describe("informed assembly repair is idempotent under engine retries (issue #52)", () => {
+  const footerlessHome = () =>
+    HOME_HTML.replace(/<footer>/i, '<section class="footer-zone">').replace(/<\/footer>/i, "</section>");
+
+  it("stores the repair exactly once, provenance-bound to the deterministic repair request", async () => {
+    const context = await preparedContext();
+    const { generate, state } = repairSeam({ homeHtml: footerlessHome() });
+
+    const site = await runGeneration(context, generate);
+
+    expect(site.validation.passed).toBe(true);
+    expect(state.successfulRepairCalls).toBe(1);
+    const row = await env.DB.prepare(
+      "SELECT id, provenance_json FROM build_stage_artifacts WHERE build_version_id = ? AND kind = 'generated_page' AND subkey = 'home.assembly-repair-1'"
+    ).bind(context.buildVersionId).first<{ id: string; provenance_json: string }>();
+    expect(row).not.toBeNull();
+    const provenance = JSON.parse(row!.provenance_json);
+    expect(provenance.repairRequestFingerprint).toMatch(/^[0-9a-f]{64}$/);
+  });
+
+  it("engine re-entry reuses the stored repair with ZERO additional model calls and an identical result", async () => {
+    const context = await preparedContext();
+    const first = repairSeam({ homeHtml: footerlessHome() });
+    const site1 = await runGeneration(context, first.generate);
+    expect(first.state.successfulRepairCalls).toBe(1);
+
+    const before = await env.DB.prepare(
+      "SELECT id, checksum, created_at FROM build_stage_artifacts WHERE build_version_id = ? AND kind = 'generated_page' AND subkey = 'home.assembly-repair-1'"
+    ).bind(context.buildVersionId).first<{ id: string; checksum: string; created_at: string }>();
+
+    // Simulated engine re-entry of the same stage against the same D1/R2
+    // truth: ANY provider call during re-entry is the production wedge
+    // regression — the frozen artifacts must carry the whole replay.
+    const loudGenerate: RawAiGenerate = async () => {
+      throw new Error("engine retry called the model — stored repair reuse was required (issue #52)");
+    };
+    const site2 = await runGeneration(context, loudGenerate);
+
+    expect(site2.validation.passed).toBe(true);
+    expect(site2.pages.home).toBe(site1.pages.home);
+    expect(site2.artifacts.map((a) => a.r2Key).sort()).toEqual(site1.artifacts.map((a) => a.r2Key).sort());
+    const after = await env.DB.prepare(
+      "SELECT id, checksum, created_at FROM build_stage_artifacts WHERE build_version_id = ? AND kind = 'generated_page' AND subkey = 'home.assembly-repair-1'"
+    ).bind(context.buildVersionId).first<{ id: string; checksum: string; created_at: string }>();
+    expect(after).toEqual(before);
+  });
+
+  it("a stored repair with mismatched provenance fails terminally — never reused, never regenerated", async () => {
+    const context = await preparedContext();
+    // Corrupt state: a repair artifact already exists but its provenance does
+    // not belong to the deterministic repair request this stage will compute.
+    await storeBuildStageArtifact(env, {
+      buildId: context.buildId, buildVersionId: context.buildVersionId, siteGenerationId: context.siteGenerationId,
+      kind: "generated_page", subkey: "home.assembly-repair-1", schemaVersion: "generated-source/page-home/1",
+      value: { html: HOME_HTML },
+      provenance: {
+        promptId: "website-generator", promptVersion: "test", promptDomainContractVersion: "test",
+        model: "test-model-g", schemaVersion: "generated-source/page-home/1", attempt: 1, inputArtifactIds: [],
+        repairRequestFingerprint: "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+      },
+    });
+
+    const { generate, state } = repairSeam({ homeHtml: footerlessHome() });
+    await expect(runGeneration(context, generate)).rejects.toThrowError(/REPAIR_ARTIFACT_MISMATCH/);
+    expect(state.repairCalls).toBe(0);
+  });
+
+  it("a failed repair generation stores nothing, and the retry converges without escalating the attempt or consuming repair budget", async () => {
+    const context = await preparedContext();
+    const first = repairSeam({ homeHtml: footerlessHome(), repairHtml: HOME_HTML, failFirstRepairCall: true });
+    await expect(runGeneration(context, first.generate)).rejects.toThrowError(/simulated provider failure/);
+    expect(first.state.repairCalls).toBe(1);
+
+    const second = repairSeam({ homeHtml: footerlessHome(), repairHtml: HOME_HTML });
+    const site = await runGeneration(context, second.generate);
+    expect(site.validation.passed).toBe(true);
+    // The retry generated exactly once and stored once — generate-exactly-
+    // once per durable attempt, no attempt-number escalation.
+    expect(second.state.successfulRepairCalls).toBe(1);
+
+    const attempts = await env.DB.prepare(
+      "SELECT subkey FROM build_stage_artifacts WHERE build_version_id = ? AND kind = 'generated_page' AND subkey LIKE '%assembly-repair%'"
+    ).bind(context.buildVersionId).all<{ subkey: string }>();
+    expect(attempts.results.map((r) => r.subkey)).toEqual(["home.assembly-repair-1"]);
+    // The generation-stage assembly repair never touches the bounded QA
+    // repair budget (repair_batches belongs to Fix Coordinator batches).
+    const batches = await env.DB.prepare(
+      "SELECT COUNT(*) AS n FROM repair_batches WHERE build_id = ?"
+    ).bind(context.buildId).first<{ n: number }>();
+    expect(batches!.n).toBe(0);
   });
 });

@@ -27,16 +27,16 @@ export type StageArtifactKind =
   | "craft_preflight";
 
 export class StageArtifactError extends Error {
-  readonly code: "ARTIFACT_ALREADY_EXISTS" | "BUILD_VERSION_NOT_FOUND";
+  readonly code: "ARTIFACT_ALREADY_EXISTS" | "BUILD_VERSION_NOT_FOUND" | "REPAIR_ARTIFACT_MISMATCH";
 
-  constructor(code: "ARTIFACT_ALREADY_EXISTS" | "BUILD_VERSION_NOT_FOUND", message: string) {
+  constructor(code: "ARTIFACT_ALREADY_EXISTS" | "BUILD_VERSION_NOT_FOUND" | "REPAIR_ARTIFACT_MISMATCH", message: string) {
     super(message);
     this.name = "StageArtifactError";
     this.code = code;
   }
 }
 
-async function sha256Hex(data: string): Promise<string> {
+export async function sha256Hex(data: string): Promise<string> {
   const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(data));
   return Array.from(new Uint8Array(digest))
     .map((byte) => byte.toString(16).padStart(2, "0"))

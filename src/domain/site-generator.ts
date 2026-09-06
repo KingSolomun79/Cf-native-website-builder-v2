@@ -20,7 +20,7 @@ import type { Env } from "../env.d";
 import { runSchemaValidatedAiStage, type RawAiGenerate } from "./ai-boundary";
 import { appendBuildWorkflowEvent } from "./lifecycle";
 import { getEffectiveBusinessFacts } from "./revision";
-import { getBuildStageArtifact, storeBuildStageArtifact, storeBuildStageArtifactIdempotent, type StoredStageArtifact } from "./stage-artifacts";
+import { getBuildStageArtifact, storeBuildStageArtifact, storeBuildStageArtifactIdempotent, StageArtifactError, sha256Hex, type StoredStageArtifact } from "./stage-artifacts";
 import type { VisualBlueprint } from "./visual-blueprint";
 import type { ImplementationContract } from "./implementation-planner";
 import type { BusinessFacts } from "./lifecycle-schema";
@@ -869,9 +869,9 @@ export async function generateCompleteSite(
     schema: ReturnType<typeof Type.Object> | ReturnType<typeof Type.String> extends never ? never : import("@sinclair/typebox").TSchema,
     schemaVersion: string,
     userPrompt: string
-  ): Promise<{ value: T; artifactR2Key: string }> => {
+  ): Promise<{ value: T; artifactR2Key: string; checksum: string }> => {
     const existing = await getBuildStageArtifact<T>(env, input.buildVersionId, kind, subkey);
-    if (existing) return { value: existing.value, artifactR2Key: existing.artifactR2Key };
+    if (existing) return { value: existing.value, artifactR2Key: existing.artifactR2Key, checksum: existing.checksum };
     const run = await runSchemaValidatedAiStage<T>(env, {
       ...stageInput,
       stage: "website-generator",
@@ -879,11 +879,16 @@ export async function generateCompleteSite(
       schemaVersion,
       userPrompt,
     });
-    await storeBuildStageArtifact(env, {
+    const stored = await storeBuildStageArtifact(env, {
       buildId: input.buildId, buildVersionId: input.buildVersionId, siteGenerationId: input.siteGenerationId,
       kind, subkey, schemaVersion, value: run.value, provenance: run.provenance,
     });
-    return { value: run.value, artifactR2Key: run.artifactR2Key };
+    // Both paths return the immutable STAGE artifact key: the AI-run record
+    // key differs per execution, so returning it on the generate path made
+    // first execution and engine re-entry observationally different (issue
+    // #52) and pointed manifest provenance at run records instead of the
+    // frozen stage artifacts.
+    return { value: run.value, artifactR2Key: stored.artifactR2Key, checksum: stored.checksum };
   };
 
   // 1. shared tokens/CSS  2. shared runtime JS — incremental steps.
@@ -903,13 +908,13 @@ export async function generateCompleteSite(
 
   // 3-6. one page at a time under the same fixed contracts.
   const pages: Partial<Record<PageId, string>> = {};
-  const pageRuns: Array<{ pageId: PageId; run: { value: PageHtml; artifactR2Key: string } }> = [];
+  const pageRuns: Array<{ pageId: PageId; run: { value: PageHtml; artifactR2Key: string; checksum: string } }> = [];
   const pagePromptFor = (pageId: PageId) =>
     pagePrompt({ pageId, blueprint: input.blueprint, contract: input.contract, facts, slots: imagePlan.slots, compositionTargets: input.compositionTargets, cssClassInventory }) + referenceBlock + repairBlock;
   for (const pageId of PAGE_IDS) {
     const run = await runOrReuse<PageHtml>("generated_page", pageId, PageHtmlSchema, `generated-source/page-${pageId}/1`, pagePromptFor(pageId));
     pages[pageId] = run.value.html;
-    pageRuns.push({ pageId, run: { value: run.value, artifactR2Key: run.artifactR2Key } });
+    pageRuns.push({ pageId, run: { value: run.value, artifactR2Key: run.artifactR2Key, checksum: run.checksum } });
   }
 
   const source: AssembledSiteSource = {
@@ -927,6 +932,13 @@ export async function generateCompleteSite(
   // validation failure can never heal through blind re-runs. Deterministic
   // findings instead drive ONE informed regeneration per affected page under
   // a NEW immutable subkey, then the whole site is re-validated once.
+  //
+  // Issue #52: the repair artifact itself follows the same reuse-before-
+  // generate discipline as every other immutable stage. Reuse is INPUT-BOUND:
+  // a stored {pageId}.assembly-repair-1 is honored only when its provenance
+  // fingerprint matches the current deterministic repair request (build
+  // version, page, attempt, directives hash, immutable input artifacts); a
+  // mismatch is terminal corruption — never a model re-call, never a rewrite.
   if (!validation.passed) {
     const affected = new Set<PageId>();
     for (const finding of validation.findings) {
@@ -940,6 +952,43 @@ ${validation.findings.map((finding) => `- ${finding.id}: ${finding.detail}`).joi
       for (const pageId of PAGE_IDS) {
         if (!affected.has(pageId)) continue;
         const pageRun = pageRuns.find((entry) => entry.pageId === pageId)!;
+        const subkey = `${pageId}.assembly-repair-1`;
+        // Content identity only: the immutable input artifacts' checksums.
+        // (Artifact R2 keys are NOT stable across execution modes — the
+        // generate path surfaces the AI-run key, the reuse path the stage
+        // key — so keys must never enter a request fingerprint.)
+        const repairRequestFingerprint = await sha256Hex(
+          JSON.stringify({
+            binding: "assembly-repair/1",
+            buildId: input.buildId,
+            buildVersionId: input.buildVersionId,
+            pageId,
+            repairAttempt: 1,
+            directivesSha256: await sha256Hex(repairDirectives),
+            basePageChecksum: pageRun.run.checksum,
+            sharedCssChecksum: cssRun.checksum,
+            sharedJsChecksum: jsRun.checksum,
+            blueprintR2Key: input.blueprintR2Key,
+            contractR2Key: input.contractR2Key,
+          })
+        );
+        const existing = await getBuildStageArtifact<PageHtml>(env, input.buildVersionId, "generated_page", subkey);
+        if (existing) {
+          if (existing.provenance?.repairRequestFingerprint !== repairRequestFingerprint) {
+            // Stored artifact does not belong to this deterministic repair
+            // request: state/provenance corruption. Fail terminally — never
+            // overwrite, never regenerate, never pick a fresh subkey.
+            throw new StageArtifactError(
+              "REPAIR_ARTIFACT_MISMATCH",
+              `REPAIR_ARTIFACT_MISMATCH: informed assembly repair artifact '${subkey}' exists for Build Version ${input.buildVersionId} but its provenance does not match the current deterministic repair request (issue #52); refusing to reuse a foreign repair or overwrite the immutable artifact`
+            );
+          }
+          // Engine retry of this exact request: the stored repair IS the
+          // outcome — reuse verbatim with zero provider calls.
+          pageRun.run = { value: existing.value, artifactR2Key: existing.artifactR2Key, checksum: existing.checksum };
+          source.pages[pageId] = existing.value.html;
+          continue;
+        }
         const repaired = await runSchemaValidatedAiStage<PageHtml>(env, {
           ...stageInput,
           stage: "website-generator",
@@ -947,12 +996,13 @@ ${validation.findings.map((finding) => `- ${finding.id}: ${finding.detail}`).joi
           schemaVersion: `generated-source/page-${pageId}/1`,
           userPrompt: pagePromptFor(pageId) + repairDirectives,
         });
-        await storeBuildStageArtifact(env, {
+        const storedRepair = await storeBuildStageArtifact(env, {
           buildId: input.buildId, buildVersionId: input.buildVersionId, siteGenerationId: input.siteGenerationId,
-          kind: "generated_page", subkey: `${pageId}.assembly-repair-1`, schemaVersion: `generated-source/page-${pageId}/1`,
-          value: repaired.value, provenance: repaired.provenance,
+          kind: "generated_page", subkey, schemaVersion: `generated-source/page-${pageId}/1`,
+          value: repaired.value,
+          provenance: { ...repaired.provenance, repairRequestFingerprint },
         });
-        pageRun.run = { value: repaired.value, artifactR2Key: repaired.artifactR2Key };
+        pageRun.run = { value: repaired.value, artifactR2Key: storedRepair.artifactR2Key, checksum: storedRepair.checksum };
         source.pages[pageId] = repaired.value.html;
       }
     }
