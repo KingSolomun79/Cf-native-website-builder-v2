@@ -1071,8 +1071,15 @@ export async function generateCompleteSite(
   };
 
   // 8. deterministic cross-file assembly validation BEFORE anything flows
-  // downstream.
+  // downstream. Timed for resource observability (issue #55 §17): profiled
+  // against production build 91764d47, this whole validation over four real
+  // pages costs ~2ms of CPU — recorded so future regressions in the
+  // deterministic lint path are visible in worker logs without payload data.
+  const validationStart = Date.now();
   const validation = validateAssembledSite(source, { contract: input.contract, slots: imagePlan.slots, facts, blueprint: input.blueprint });
+  console.log(
+    `(info) stage_cpu_timings { stage: 'website-generator', buildId: '${input.buildId}', phase: 'assembly-validation', ms: ${Date.now() - validationStart}, findings: ${validation.findings.length} }`
+  );
 
   // Bounded targeted assembly repair (production retest 2026-09-05): the
   // frozen per-page subkeys are reused verbatim by engine retries, so a

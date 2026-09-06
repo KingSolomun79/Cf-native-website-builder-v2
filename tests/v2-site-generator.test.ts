@@ -763,3 +763,30 @@ describe("the truth contract rides every generation and repair prompt (issue #53
     expect(repairPrompt).toContain("fact-safe substitutes");
   });
 });
+
+// Issue #55 §17: resource observability — the deterministic assembly
+// validation is timed per generation run (profiled at ~2ms on real
+// production artifacts; regressions must be visible in worker logs).
+describe("stage CPU timing observability (issue #55)", () => {
+  it("emits the assembly-validation timing line with finding counts and no payload content", async () => {
+    const context = await preparedContext();
+    const { generate } = repairSeam();
+    const logs: string[] = [];
+    const originalLog = console.log;
+    console.log = (...args: unknown[]) => {
+      logs.push(args.join(" "));
+    };
+    try {
+      await runGeneration(context, generate);
+    } finally {
+      console.log = originalLog;
+    }
+    const timingLines = logs.filter((line) => line.includes("stage_cpu_timings"));
+    expect(timingLines.length).toBeGreaterThanOrEqual(1);
+    expect(timingLines[0]).toContain("phase: 'assembly-validation'");
+    expect(timingLines[0]).toContain("ms:");
+    expect(timingLines[0]).toContain("findings:");
+    // Timing lines carry no page/prompt content.
+    expect(timingLines[0]).not.toContain("<html");
+  });
+});

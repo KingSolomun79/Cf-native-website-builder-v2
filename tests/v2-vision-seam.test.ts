@@ -5,7 +5,8 @@ import { describe, expect, it } from "vitest";
 import { env as providedEnv } from "cloudflare:test";
 import type { Env } from "../src/env.d";
 import { generateVisionWithGateway, VisionGatewayError } from "../src/lib/ai-gateway";
-import { fitVisionInputToBudget, ReferenceAnalysisError } from "../src/domain/reference-analysis";
+import { fitVisionInputToBudget, createProductionVisionGenerate, ReferenceAnalysisError } from "../src/domain/reference-analysis";
+import { buildPng } from "./helpers/png";
 
 const env = providedEnv as unknown as Env;
 
@@ -63,5 +64,107 @@ describe("vision input encoded-budget fit", () => {
     const bytes = new Uint8Array(1024);
     const brokenEnv = { ...env, VISION_INPUT_MAX_BYTES: "not-a-number" } as unknown as Env;
     await expect(fitVisionInputToBudget(brokenEnv, bytes)).resolves.toBe(bytes);
+  });
+});
+
+// Issue #55: the vision-input preparation (R2 read + PNG decode/downscale/
+// re-encode + multi-MB base64) measured ~0.5s CPU per provider call on the
+// oversized production reference screenshot, and one generation-step
+// invocation serves ~13 byte-identical calls. The prepared wire payload is
+// memoized per seam instance so the expensive path runs once.
+describe("vision input preparation memoization (issue #55)", () => {
+  it("prepares the visual input once per seam instance and reuses it for every provider call", async () => {
+    const pngBytes = new Uint8Array(buildPng({ width: 64, height: 48 }));
+    let r2Reads = 0;
+    const seamEnv = {
+      ...env,
+      SITE_BUCKET: {
+        get: async () => {
+          r2Reads += 1;
+          return { body: new Response(pngBytes).body };
+        },
+      },
+    } as unknown as Env;
+    let gatewayCalls = 0;
+    const seam = createProductionVisionGenerate(
+      seamEnv,
+      [{ kind: "full-page", artifact: "test/reference.png", sha256: "abc123", width: 64, height: 48 }],
+      { buildId: "test-build", buildVersionNumber: 1 },
+      {
+        gateway: (async () => {
+          gatewayCalls += 1;
+          return { content: "ok", provider: "test", model: "test-model" };
+        }) as never,
+      }
+    );
+
+    const first = await seam("system", "user-1");
+    const second = await seam("system", "user-2");
+
+    expect(gatewayCalls).toBe(2);
+    expect(r2Reads).toBe(1);
+    expect(first.content).toBe("ok");
+    expect(second.content).toBe("ok");
+  });
+
+  it("a fresh seam instance (new pipeline-step invocation) prepares its own input", async () => {
+    const pngBytes = new Uint8Array(buildPng({ width: 64, height: 48 }));
+    let r2Reads = 0;
+    const seamEnv = {
+      ...env,
+      SITE_BUCKET: {
+        get: async () => {
+          r2Reads += 1;
+          return { body: new Response(pngBytes).body };
+        },
+      },
+    } as unknown as Env;
+
+    const makeSeam = () =>
+      createProductionVisionGenerate(
+        seamEnv,
+        [{ kind: "full-page", artifact: "test/reference.png", sha256: "abc123", width: 64, height: 48 }],
+        { buildId: "test-build", buildVersionNumber: 1 },
+        { gateway: (async () => ({ content: "ok", provider: "test", model: "test-model" })) as never }
+      );
+
+    await makeSeam()("system", "user");
+    await makeSeam()("system", "user");
+    expect(r2Reads).toBe(2);
+  });
+});
+
+describe("resource observability logging (issue #55 §17)", () => {
+  it("emits the vision_input_prep timing line once per preparation — no payloads, only sizes", async () => {
+    const pngBytes = new Uint8Array(buildPng({ width: 64, height: 48 }));
+    const seamEnv = {
+      ...env,
+      SITE_BUCKET: {
+        get: async () => ({ body: new Response(pngBytes).body }),
+      },
+    } as unknown as Env;
+    const logs: string[] = [];
+    const originalLog = console.log;
+    console.log = (...args: unknown[]) => {
+      logs.push(args.join(" "));
+    };
+    try {
+      const seam = createProductionVisionGenerate(
+        seamEnv,
+        [{ kind: "full-page", artifact: "test/reference.png", sha256: "abc123", width: 64, height: 48 }],
+        { buildId: "test-build", buildVersionNumber: 1 },
+        { gateway: (async () => ({ content: "ok", provider: "test", model: "test-model" })) as never }
+      );
+      await seam("system", "user-1");
+      await seam("system", "user-2");
+    } finally {
+      console.log = originalLog;
+    }
+    const prepLines = logs.filter((line) => line.includes("vision_input_prep"));
+    expect(prepLines.length).toBe(1);
+    expect(prepLines[0]).toContain("prepMs:");
+    expect(prepLines[0]).toContain("inputBytes:");
+    // No prompt/response payload material in the timing line.
+    expect(prepLines[0]).not.toContain("user-1");
   });
 });

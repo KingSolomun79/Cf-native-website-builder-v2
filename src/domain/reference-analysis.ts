@@ -186,24 +186,44 @@ export function createProductionVisionGenerate(
   buildContext: { buildId: string; buildVersionNumber: number },
   deps: { gateway?: typeof import("../lib/ai-gateway").generateVisionWithGateway } = {}
 ): RawAiGenerate {
+  // Issue #55 CPU hotspot (profiled against production build 91764d47):
+  // the oversized reference screenshot pays a full pure-JS PNG
+  // decode→downscale→re-encode (~0.5s CPU per call) plus a multi-MB base64
+  // encode on EVERY provider call, and one generation step invocation makes
+  // ~13 calls with byte-identical inputs. The prepared wire payload is
+  // therefore memoized per seam instance (per pipeline-step invocation), so
+  // the expensive preparation runs once and the remaining calls reuse it.
+  let prepared: { base64: string } | null = null;
+  let callCount = 0;
   return async (systemPrompt, userPrompt) => {
+    callCount += 1;
     const primary =
       visualInputs.find((input) => input.kind === "full-page") ?? visualInputs[0];
-    const body = await getObject(env, primary.artifact);
-    if (!body) {
-      throw new ReferenceAnalysisError(
-        "VISION_INPUT_UNAVAILABLE",
-        `Visual input ${primary.artifact} is missing from storage; the analyzer refuses to run blind`
+    if (!prepared) {
+      const prepStart = Date.now();
+      const body = await getObject(env, primary.artifact);
+      if (!body) {
+        throw new ReferenceAnalysisError(
+          "VISION_INPUT_UNAVAILABLE",
+          `Visual input ${primary.artifact} is missing from storage; the analyzer refuses to run blind`
+        );
+      }
+      const sourceBytes = new Uint8Array(await new Response(body).arrayBuffer());
+      const bytes = await fitVisionInputToBudget(env, sourceBytes);
+      let binary = "";
+      const CHUNK = 0x8000;
+      for (let i = 0; i < bytes.length; i += CHUNK) {
+        binary += String.fromCharCode(...bytes.subarray(i, i + CHUNK));
+      }
+      const base64 = btoa(binary);
+      prepared = { base64 };
+      // Resource observability (issue #55 §17): wall timings only — never
+      // payloads or credentials.
+      console.log(
+        `(info) vision_input_prep { buildId: '${buildContext.buildId}', callsServed: ${callCount}, prepMs: ${Date.now() - prepStart}, inputBytes: ${sourceBytes.byteLength}, wireBytes: ${base64.length} }`
       );
     }
-    const sourceBytes = new Uint8Array(await new Response(body).arrayBuffer());
-    const bytes = await fitVisionInputToBudget(env, sourceBytes);
-    let binary = "";
-    const CHUNK = 0x8000;
-    for (let i = 0; i < bytes.length; i += CHUNK) {
-      binary += String.fromCharCode(...bytes.subarray(i, i + CHUNK));
-    }
-    const base64 = btoa(binary);
+    const base64 = prepared.base64;
     const { generateVisionWithGateway } = await import("../lib/ai-gateway");
     const result = await (deps.gateway ?? generateVisionWithGateway)(
       env,

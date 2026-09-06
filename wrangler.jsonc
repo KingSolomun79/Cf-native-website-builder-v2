@@ -6,6 +6,21 @@
   "compatibility_flags": ["nodejs_compat"],
   "account_id": "c1c0f6b100d55a09ce6a7a3121a19224",
 
+  // Issue #55: explicit CPU budget. The production experiment on build
+  // 91764d47 (2026-09-06) died repeatedly on the 30s default ("Worker
+  // exceeded CPU time limit"). Local profiling against that build's real
+  // artifacts showed the deterministic floor is the vision-input preparation
+  // (~0.5s CPU per provider call on the oversized reference screenshot,
+  // ~13 calls inside one generation-step invocation, plus multi-MB GC
+  // pressure) — now memoized per invocation — while the whole deterministic
+  // assembly-validation path measures ~2ms. 120s gives >4x headroom over the
+  // measured un-memoized floor and ample GC allowance, while staying well
+  // under the 300s platform maximum so a genuinely runaway invocation still
+  // fails fast. Provider WAITING does not consume CPU budget (network time).
+  "limits": {
+    "cpu_ms": 120000
+  },
+
   "rules": [
     {
       "type": "Text",
