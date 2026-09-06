@@ -1121,3 +1121,44 @@ round) supersedes the earlier deployment row so provenance stays truthful.
 Suite 43 files / 322 tests green; tsc + wrangler dry-run clean; CSO =
 SECURITY OK WITH WATCH ITEMS
 (`docs/security/2026-09-05-v2-issue49-craft-preflight-cso.md`).
+
+## 2026-09-05 — #50 Measured Repair Directives + Preservation/Regression Guard (implemented)
+
+The production 74 -> 71 -> 62 sequence showed repair was not monotonic in
+hard-constraint quality. This closes the seam deterministically:
+
+1. Measurable directives (A): both repair batch prompts (Fix Coordinator +
+   Release Blocker Fix) carry a MEASURED CONTEXT built from frozen artifacts
+   — per-metric reference-vs-candidate values with tolerances from the
+   geometry comparator, the direct-fidelity verdict, and the frozen craft
+   preflight deltas (measured current + binding target per finding).
+2. Preservation set (B): a deterministic list of currently-passing hard
+   constraints (QA-A hard gates, QA-B mandatory gates, macro fidelity,
+   canonical REGION_ORDER, per-region realization bindings) the repair must
+   leave intact — the model never has to infer what to keep.
+3. Mutation scope (C/G): the context states the narrowest-scope preference
+   (region -> component -> CSS selectors -> page); the final Release Blocker
+   Fix gets narrowestScopeOnly wording plus the remaining blockers, measured
+   deltas, region-crop evidence keys, realization bindings and preservation
+   set. A CONSTRAINT CONFLICTS clause directs genuine conflicts to
+   blueprintReviewRequired with the actual conflict recorded (F).
+4. Regression guard (D): after each confirmation, candidate N+1 is compared
+   against candidate N on hard constraints only. A previously passing QA-A
+   hard gate or QA-B mandatory gate that now fails, or an ACTIVE P0/P1 in a
+   domain the previous blockers never covered, is a REPAIR_REGRESSION: the
+   candidate is NOT promoted (no release record), the event ledger records
+   stage `repair_regression`, and automation escalates to
+   HUMAN_REVIEW_REQUIRED. Old blockers remaining + new regressions together
+   classify as CONSTRAINT_CONFLICT. The guard runs BEFORE
+   resolveAfterConfirmation, so a regressing confirmation can never assign
+   Release, and it consumes no repair budget.
+5. No score monotonicity (E): composite scores are structurally absent from
+   the comparison; a score drop with all hard constraints intact releases
+   (regression-pinned).
+6. Tests: `tests/v2-repair-guard.test.ts` — preservation/measured/context
+   units, all guard classifications, and two pipeline integrations (regressing
+   repair blocked + budget/batches assertions; score-drop valid release).
+
+Suite 44 files / 331 tests green; tsc + wrangler dry-run clean; CSO =
+SECURITY OK WITH WATCH ITEMS
+(`docs/security/2026-09-05-v2-issue50-repair-guard-cso.md`).

@@ -47,6 +47,7 @@ import {
 } from "./craft-preflight";
 import { runQaAStage, runQaBStage, type QaAReport, type QaAReportAugmented, type QaBReport, type QaFinding } from "./qa-stages";
 import { regeneratePagesForRealization } from "./site-generator";
+import { buildRepairContext, evaluateRepairRegression, type RepairEvaluationSnapshot } from "./repair-guard";
 import { assignReleaseReady, ReleaseGateError } from "./release";
 import { getBuildStageArtifact, storeBuildStageArtifactIdempotent } from "./stage-artifacts";
 import type { ReferenceAnalysis } from "./reference-analysis";
@@ -65,6 +66,7 @@ import {
   type AppliedRepairBatch,
   type FixPlan,
 } from "./automated-repair";
+import { evaluateQaARelease, evaluateQaBRelease } from "./qa-stages";
 import type { RawAiGenerate } from "./ai-boundary";
 import { VisionGatewayError } from "../lib/ai-gateway";
 import { KieV2ImageProvider } from "../lib/kie-v2";
@@ -805,7 +807,7 @@ export async function runBuildPipeline(
       ctx: VersionContext,
       previewUrl: string,
       acceptedImageCount: number
-    ): Promise<{ qaA: QaAReportAugmented; qaB: QaBReport; release: Awaited<ReturnType<typeof assignReleaseReady>>; macroFidelity?: Awaited<ReturnType<typeof evaluateReferenceMacroFidelity>> }> => {
+    ): Promise<{ qaA: QaAReportAugmented; qaB: QaBReport; release: Awaited<ReturnType<typeof assignReleaseReady>>; macroFidelity?: Awaited<ReturnType<typeof evaluateReferenceMacroFidelity>>; geometryComparison?: GeometryComparison }> => {
       // The evidence capture (9 browser page loads) and the QA verdicts
       // (QA-A/QA-B/release) run as SEPARATE steps: one combined step exceeds
       // the isolate eviction window and gets killed mid-flight on retry.
@@ -980,7 +982,7 @@ export async function runBuildPipeline(
           throw error;
         }
       }
-      return { qaA: qaAForRelease, qaB: qaB.report, release, macroFidelity };
+      return { qaA: qaAForRelease, qaB: qaB.report, release, macroFidelity, geometryComparison };
       });
     };
 
@@ -994,6 +996,41 @@ export async function runBuildPipeline(
       first.previewUrl,
       (await getAcceptedImageMap(env, version.buildVersionId)).size
     );
+
+    // ── Measured repair context + regression guard baseline (issue #50) ────
+    // Deterministic context for both repair batches: preservation set from
+    // the CURRENT version's passing hard constraints, measured deltas from
+    // the geometry comparator / macro verdict / frozen craft preflight, and
+    // the provenance-bound region crops from the craft attempts.
+    const buildRepairContextForVersion = async (evaluation: {
+      qaA: QaAReportAugmented;
+      qaB: QaBReport;
+      macroFidelity?: Awaited<ReturnType<typeof evaluateReferenceMacroFidelity>>;
+      geometryComparison?: GeometryComparison;
+    }): Promise<string> => {
+      const craft = (await getBuildStageArtifact<StoredCraftPreflight>(env, version.buildVersionId, "craft_preflight", "attempt-2"))
+        ?? (await getBuildStageArtifact<StoredCraftPreflight>(env, version.buildVersionId, "craft_preflight", "attempt-1"));
+      const regionCropKeys = (craft?.value.crops ?? [])
+        .flatMap((pair) => [pair.reference?.artifactR2Key, pair.candidate?.artifactR2Key])
+        .filter((key): key is string => Boolean(key));
+      return buildRepairContext({
+        blueprint: blueprint.blueprint,
+        contract: contract.contract,
+        qaAHardGates: evaluation.qaA.hardGates,
+        qaBMandatoryGates: evaluation.qaB.gates,
+        macroFidelityPassed: evaluation.macroFidelity ? evaluation.macroFidelity.verdict === "PASS" : null,
+        macroFidelityReason: evaluation.macroFidelity?.reason ?? null,
+        geometryComparison: evaluation.geometryComparison ?? null,
+        craftPreflight: craft?.value ?? null,
+        regionCropKeys,
+      });
+    };
+    const repairContext = await buildRepairContextForVersion(firstQa);
+    let previousEvaluation: RepairEvaluationSnapshot = {
+      qaAHardGates: firstQa.qaA.hardGates,
+      qaBMandatoryGates: firstQa.qaB.gates,
+      blockers: firstQa.release.blockers,
+    };
 
     let outcome: BuildPipelineOutcome | null = firstQa.release.releaseReady
       ? {
@@ -1057,6 +1094,7 @@ export async function runBuildPipeline(
               qaB: currentQa.qaB,
               remainingBlockers: previousBlockers,
               generate: deps.generate,
+              repairContext,
             })
           : await runFixCoordinatorStage(env, {
               siteGenerationId: input.siteGenerationId,
@@ -1066,6 +1104,7 @@ export async function runBuildPipeline(
               qaA: currentQa.qaA,
               qaB: currentQa.qaB,
               generate: deps.generate,
+              repairContext,
             });
       } catch (error) {
         // The planner could not produce a bounds-compliant plan even after
@@ -1178,6 +1217,48 @@ export async function runBuildPipeline(
         evidenceR2Keys: [],
         generate: deps.generate,
       });
+
+      // Regression guard (issue #50 D/E/F): candidate N+1 vs candidate N on
+      // HARD CONSTRAINTS only. A previously passing gate that now fails, or
+      // an ACTIVE P0/P1 in a domain the previous blockers never covered, is
+      // a REPAIR_REGRESSION: the candidate is not promoted and automation
+      // escalates. Composite scores are deliberately never compared — a
+      // score drop with all hard constraints intact is a valid repair.
+      const guardVerdicts = {
+        blockers: [...evaluateQaARelease(confirmation.qaA).blockers, ...evaluateQaBRelease(confirmation.qaB).blockers],
+      };
+      const regression = evaluateRepairRegression({
+        previous: previousEvaluation,
+        confirmationAHardGates: confirmation.qaA.hardGates,
+        confirmationBMandatoryGates: confirmation.qaB.gates,
+        confirmationBlockers: guardVerdicts.blockers,
+      });
+      if (regression.regression) {
+        const reasons = [
+          ...regression.regressions.map((line) => `REPAIR_REGRESSION: ${line}`),
+          ...(regression.conflict
+            ? ["CONSTRAINT_CONFLICT: previous blockers remain AND new regressions appeared — a binding constraint conflict that automated repair cannot resolve; escalating for human review"]
+            : []),
+        ];
+        await appendBuildWorkflowEvent(env, {
+          buildId,
+          buildVersionId: version.buildVersionId,
+          fromState: "CONFIRMATION",
+          toState: "HUMAN_REVIEW_REQUIRED",
+          stage: "repair_regression",
+          detail: `REPAIR_REGRESSION guard blocked promotion: ${reasons.join("; ").slice(0, 300)}`,
+        });
+        outcome = {
+          terminal: "HUMAN_REVIEW_REQUIRED",
+          reasons,
+          siteGenerationId: input.siteGenerationId, siteId, buildId,
+          releaseReadyBuildVersionId: null, artifactManifestHash: null,
+          previewUrl: currentPreviewUrl,
+          qaA: confirmation.qaA, qaB: confirmation.qaB, repairApplied,
+        };
+        break;
+      }
+
       const resolved = await resolveAfterConfirmation(env, {
         siteGenerationId: input.siteGenerationId,
         buildId,
@@ -1185,6 +1266,13 @@ export async function runBuildPipeline(
         confirmation,
         evidenceR2Keys: [],
       });
+      // The guard baseline advances to THIS version so a second repair batch
+      // compares against its immediate predecessor (candidate N+1 vs N).
+      previousEvaluation = {
+        qaAHardGates: confirmation.qaA.hardGates,
+        qaBMandatoryGates: confirmation.qaB.gates,
+        blockers: resolved.blockers,
+      };
       currentQa = { qaA: confirmation.qaA, qaB: confirmation.qaB, release: { releaseReady: resolved.status === "RELEASE_READY", reasons: resolved.reasons, blockers: resolved.blockers, polish: resolved.polish } } as typeof currentQa;
       previousBlockers = resolved.blockers;
 

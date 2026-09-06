@@ -167,6 +167,9 @@ export interface RunFixCoordinatorInput {
   qaB: QaBReport;
   evidenceR2Keys?: string[];
   generate?: RawAiGenerate;
+  /** Measured repair context (issue #50): preservation set, measured deltas,
+   *  mutation scope. Deterministically built by the pipeline (repair-guard). */
+  repairContext?: string;
 }
 
 export async function runFixCoordinatorStage(
@@ -176,7 +179,13 @@ export async function runFixCoordinatorStage(
   return planWithinBounds(env, input, {
     stage: "fix-coordinator",
     schemaVersion: FIX_PLAN_SCHEMA_VERSION,
-    basePrompt: buildFixCoordinatorUserPrompt({ qaA: input.qaA, qaB: input.qaB }),
+    basePrompt: buildFixCoordinatorUserPrompt({ qaA: input.qaA, qaB: input.qaB }) +
+      (input.repairContext ? `
+
+${input.repairContext}` : "") +
+      `
+
+CONSTRAINT CONFLICTS (issue #50): if fixing one measured constraint would genuinely make another binding constraint impossible, set blueprintReviewRequired=true and record the ACTUAL conflict in the reason — never plan a repair that trades one binding constraint for another.`,
   });
 }
 
@@ -408,7 +417,9 @@ export async function runReleaseBlockerFixStage(
     basePrompt: `Plan at most ONE narrow final Automated Repair batch for the still-valid Release Blockers after failed confirmation. Repair only the narrowest realization details behind the remaining blockers; do not introduce new human intent and do not change Business Facts, Reference, Build Mode or the Visual Blueprint. If you cannot fix a blocker within those bounds, say so via blueprintReviewRequired only when the Blueprint itself is the root cause.
 
 REMAINING VALID BLOCKERS:
-${JSON.stringify(input.remainingBlockers, null, 2)}`,
+${JSON.stringify(input.remainingBlockers, null, 2)}${input.repairContext ? `
+
+${input.repairContext}` : ""}`,
   });
 }
 
