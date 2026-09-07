@@ -1583,3 +1583,104 @@ Read in this order:
 7. root/V1 documentation only for explicitly retained infrastructure context.
 
 The goal is one coherent V2 system, not compatibility between competing specifications.
+
+---
+
+# 50. Reference Geometry Authority
+
+Issues #65/#67 (2026-09-07 remediation of Build 282f9b9d). All Reference-side
+geometry used for comparison, composition targets and repair evaluation is
+resolved by ONE deterministic authority (`reference-geometry.ts`) — never by
+per-consumer arithmetic.
+
+1. Coordinate normalization. Reference Evidence regions are recorded in
+   page-space of the canonical screenshot. When a capture recorded
+   `captureScrollY`, recorded coordinates win. Otherwise the transform is
+   recovered as `offset = -min(startY)` and VALIDATED against the screenshot
+   height (span inside the image, bottom slack within tolerance); unverifiable
+   transforms are not used.
+2. Interval union. A canonical region's reference height is the measure of the
+   UNION of its mapped evidence intervals (overlaps merged, never summed);
+   gaps are never invented. Non-contiguous evidence may legitimately produce
+   multiple ordered slices; the slices are the crop channel.
+3. Semantic validation. Evidence-to-canonical mapping is validated by ORDER
+   and coverage against the Blueprint's declared `sourceEvidenceRegionIds`.
+   Order inversion or contradicted space fails closed as
+   `REFERENCE_REGION_MAPPING_AMBIGUOUS` — name-based or best-guess re-mapping
+   is forbidden. Ambiguity escalates to `HUMAN_REVIEW_REQUIRED`; it never
+   degrades into a wrong target.
+4. Measured-only evaluation. Region-height findings and composition targets
+   are computed ONLY for regions with a MEASURED canonical mapping and an
+   existing stored reference crop (`unmappedHeightFindingRegions` gate). The
+   repair channel receives honestly labeled crops: REFERENCE slices from the
+   frozen canonical screenshot, or an explicit
+   "REFERENCE CROP UNAVAILABLE — work from the measured numbers" descriptor.
+   The canonical screenshot evidence (`evidence.screenshotId`), not a
+   re-derivation, is the crop source.
+5. Target provenance. Every composition target carries its transform kind,
+   offset, verification status and slice provenance. `min-height` equal to a
+   measured target is not a repair implementation value — targets are binding
+   evaluation constraints.
+
+# 51. Effective Candidate Lineage
+
+Issue #66. The candidate that enters Craft Preflight, repair and QA is an
+EXPLICIT artifact lineage, never a timestamp guess or filename heuristic.
+
+1. `generateCompleteSite` stores a `candidate_manifest` (schemaVersion
+   `candidate-manifest/1`): per-page `{subkey, checksum}` pointers, shared
+   CSS/JS pointers, and `unaffectedHashes`.
+2. A targeted repair updates exactly the pointers it regenerated and overlays
+   its shared-source pointers; every other pointer stays byte-identical, and
+   each unaffected page's artifact checksum is asserted `before == after`
+   (`REPAIR_PRESERVATION_VIOLATION` on drift).
+3. For Build Versions predating the manifest, the documented namespace rule
+   reconstructs lineage deterministically: a `{pageId}.assembly-repair-1`
+   artifact exists only because this version's repair produced it to supersede
+   the base page — its presence IS the pointer.
+4. A superseding preview deploy of the SAME Build Version repoints the
+   `UNIQUE(build_version_id, role)` deployment row in place;
+   `artifact_manifest_hash` remains the byte pin of what is served.
+
+# 52. Craft Preflight and Content-Preserving Realization Repair
+
+Issues #47/#49/#62/#67. One deterministic Craft Preflight runs on the deployed
+candidate; at most ONE informed realization repair follows page-realization
+findings. The repair is a content-preserving PATCH — full-page regeneration is
+not part of this contract.
+
+1. Patch contract (`realization-repair-patch/1`): `targetPageId`, `cssPatch`
+   (every selector scoped to this page's `data-region`/`data-image-id` ids; no
+   `@import`/`@charset`/`@namespace`/`@font-face`), optional `regionPatches`
+   for FAILED/authorized regions only, and explicit `insufficient`
+   escalation. The applied result is a NEW immutable artifact
+   (`{pageId}.realization-repair-1` + `.patch`); the CSS patch is layered
+   into a new `site.css.realization-repair-1` artifact — never an inline
+   `<style>`, never an edit of the frozen stylesheet.
+2. Mutation guard. Before promotion, before the Business Truth lint and
+   before the Craft confirmation attempt, the patched page is fingerprinted
+   (text nodes, title, meta description, hrefs, Accepted Image identities,
+   form fields, canonical region order, per-region text) and diffed against
+   the previous candidate. Any difference in visible copy, casing, links,
+   image identities, form semantics, region order, or in a PASSING region is
+   `REPAIR_SCOPE_VIOLATION` — a deterministic review marker, not a retry.
+   Region authorization is structural only: authorized regions may be
+   restructured but their text sequence is frozen.
+3. Applier hardening. Region patches may not contain `<script>`, inline event
+   handlers, `javascript:` URIs, `iframe`/`object`/`embed`/`base`/`meta`,
+   inline `<style>` or redefined `data-region` attributes.
+4. Escalation. `insufficient: true` (content cannot realize the measured
+   geometry without fabrication) is `REALIZATION_REPAIR_INSUFFICIENT` ->
+   `HUMAN_REVIEW_REQUIRED`. Schema-invalid patches are deterministic review
+   markers. No additional repair budget is created by this path; the QA
+   repair batch counts are untouched.
+5. Anti-Goodharting. Repair prompts receive the current effective page, the
+   frozen CSS, the explicit authorized/passing region scope, honest crop
+   descriptors (per #50.4) and the rule that meeting a measured number by
+   empty or degenerate structure is not a repair. Craft attempt 2 confirms
+   the repaired candidate only after the guard held.
+6. Trust-lint presentation rule (issue #53 completion): eyebrow/kicker
+   presentation (`class="eyebrow"`/`class="kicker"` on non-heading elements)
+   classifies as descriptive heading prose. This is a presentation-based
+   classification — a third-party entity name wearing an eyebrow class is
+   still `FABRICATED_TRUST_ENTITY`.

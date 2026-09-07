@@ -11,22 +11,42 @@
     "fact_updates_do_not_mutate_historical_onboarding_submission": true
   },
   "modes": {
-    "implementation_order": ["REFERENCE_BOUND", "ORIGINAL_DESIGN"],
+    "implementation_order": [
+      "REFERENCE_BOUND",
+      "ORIGINAL_DESIGN"
+    ],
     "reference_proof_required_before_original_design": true
   },
   "site_output": {
-    "pages": ["home", "about", "services", "contact"],
+    "pages": [
+      "home",
+      "about",
+      "services",
+      "contact"
+    ],
     "arbitrary_page_count": false,
     "cms": false,
     "blog": false,
     "architecture": "STATIC_FRAMEWORK_LIGHT",
-    "default_shared_files": ["site.css", "site.js"],
+    "default_shared_files": [
+      "site.css",
+      "site.js"
+    ],
     "large_frameworks_default_allowed": false
   },
   "reference": {
     "static_composition_authority": "REFERENCE_SCREENSHOT",
-    "live_url_role": ["COMPUTED_STYLE", "RESPONSIVE_BEHAVIOR", "MOTION", "INTERACTION"],
-    "suitability_outcomes": ["SUPPORTED", "SUPPORTED_WITH_LIMITATIONS", "UNSUPPORTED"],
+    "live_url_role": [
+      "COMPUTED_STYLE",
+      "RESPONSIVE_BEHAVIOR",
+      "MOTION",
+      "INTERACTION"
+    ],
+    "suitability_outcomes": [
+      "SUPPORTED",
+      "SUPPORTED_WITH_LIMITATIONS",
+      "UNSUPPORTED"
+    ],
     "adaptation_contract_required_for_limitations": true,
     "measurement_allowed": true,
     "wholesale_source_copying_allowed": false,
@@ -58,7 +78,10 @@
     "normal_accepted_target": 12,
     "generation_waves": 2,
     "hard_kie_budget_usd": 3.0,
-    "repair_reserve_percent_range": [20, 25],
+    "repair_reserve_percent_range": [
+      20,
+      25
+    ],
     "temporary_provider_urls_allowed_in_release": false,
     "mobile_variant_policy": "ONLY_WHEN_SINGLE_MASTER_CANNOT_SATISFY_REQUIRED_COMPOSITION"
   },
@@ -77,7 +100,12 @@
     "release_blocker_fix_batches": 1,
     "material_repair_creates_new_build_version": true,
     "unbounded_retry_allowed": false,
-    "human_review_after_exhaustion": true
+    "human_review_after_exhaustion": true,
+    "informed_realization_repair_rounds": 1,
+    "realization_repair_full_page_regeneration_allowed": false,
+    "realization_repair_content_mutation_allowed": false,
+    "realization_repair_escalation_code": "REALIZATION_REPAIR_INSUFFICIENT",
+    "repair_scope_violation_is_deterministic_review": true
   },
   "benchmark": {
     "fixed_site_count": 5,
