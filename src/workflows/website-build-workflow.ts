@@ -48,13 +48,20 @@ export function toWorkflowStepError(error: unknown): unknown {
   return error;
 }
 
-// Retry policy for every pipeline stage step (retry-liveness directive §1–§9).
-// Platform facts this is derived from (Workflows docs, "Sleeping and
-// retrying"): retries.limit is the TOTAL number of attempts (limit 8 = one
-// initial + 7 retries); the delay may be a WorkflowDelayFunction receiving the
-// thrown error; the timeout is per attempt. The static exponential backoff
-// formula is NOT documented by the platform, so the repo owns the whole
-// schedule explicitly:
+// Retry policy for every pipeline stage step (retry-liveness directive §1–§9;
+// issue #61 single-ownership correction).
+//
+// Platform facts, CORRECTED by the 2026-09-07 production forensics (raw REST
+// evidence, .tmp-wedge-forensics/): retries.limit is the TOTAL number of
+// attempts (limit 8 = one initial + 7 retries); the delay may be a
+// WorkflowDelayFunction receiving the thrown error; the timeout is per
+// attempt. The engine COMBINES the delay with the `backoff` curve — and
+// `backoff` DEFAULTS TO "exponential" when unspecified, multiplying the
+// delay value by 2^(attempt-1) on top of whatever the delay function returns.
+// The omitted backoff key here therefore compounded the repo-owned 10→20→40s
+// schedule into 10→40→160→640→2560s… (~15h horizon over 7 retries) and
+// produced the 2026-09-06/07 "wedge". With backoff: "constant" the dynamic
+// function below is the SINGLE owner of the schedule:
 //
 // - STAGE_EXECUTION_IN_PROGRESS (a live owner holds the claim): wait until
 //   that owner's lease expires (+ margin) via stageInProgressRetryAfterMs, so
@@ -64,7 +71,8 @@ export function toWorkflowStepError(error: unknown): unknown {
 //   storm (directive §6).
 // - Every other transient error: repo-owned exponential schedule (10s, 20s,
 //   40s, ... capped at 1280s). Its cumulative horizon (~21 min over 7
-//   retries) stays beyond the 660s lease, so the fallback path alone
+//   retries; ~64 min even if the engine reads limit as one additional
+//   attempt) stays beyond the 660s lease, so the fallback path alone
 //   satisfies the invariant; the IN_PROGRESS wait makes it exact.
 //
 // timeout ("10 minutes", per attempt) is explicit and derived, not incidental:
@@ -74,22 +82,29 @@ export function toWorkflowStepError(error: unknown): unknown {
 // attempt (600s < 660s < IN_PROGRESS wait horizon).
 // Repo-owned exponential fallback schedule (milliseconds) for ordinary
 // transient errors: starts at the documented 10s and doubles per attempt,
-// capped at 1280s (the 8th/final attempt's delay). The horizon is
-// indexing-proof: whether the engine's ctx.attempt is 0- or 1-based, the
-// cumulative fallback schedule from the first failure (10+20+...+640 =
-// ~21 min) stays far beyond the 660s claim lease.
+// capped at 1280s. The horizon is indexing-proof: whether the engine's
+// ctx.attempt is 0- or 1-based, and whether retries.limit counts the initial
+// attempt or adds one, the clamp caps every delay at 1280s and the cumulative
+// fallback schedule stays bounded (issue #61 §4).
 export function stageStepFallbackDelayMs(attempt: number): number {
   return 10_000 * 2 ** Math.min(Math.max(attempt - 1, 0), 7);
 }
 
-const STAGE_STEP_RETRIES = {
+// Exported for config-pinning tests (issue #61 §3): the Workflow
+// configuration MUST be delay = dynamic function + backoff = "constant";
+// do not rely on the platform default.
+export const STAGE_STEP_RETRIES = {
   limit: 8,
+  // Issue #61: WITHOUT this key the engine defaults to "exponential" and
+  // multiplies the delay function's return by 2^(attempt-1) — the production
+  // 2026-09-07 forensic finding. "constant" pins single ownership.
+  backoff: "constant",
   delay: ({ ctx, error }: { ctx: { attempt: number }; error: unknown }) => {
     const retryAfterMs = stageInProgressRetryAfterMs(error);
     if (retryAfterMs !== null) return `${Math.ceil(retryAfterMs / 1000)} seconds`;
     return stageStepFallbackDelayMs(ctx.attempt);
   },
-};
+} as const;
 
 export interface WebsiteBuildParams {
   siteGenerationId: string;

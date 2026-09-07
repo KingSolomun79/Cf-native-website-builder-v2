@@ -35,7 +35,7 @@ import {
   stageInProgressRetryAfterMs,
   StageExecutionInProgressError,
 } from "../src/domain/stage-execution";
-import { stageStepFallbackDelayMs, WebsiteBuildWorkflow } from "../src/workflows/website-build-workflow";
+import { STAGE_STEP_RETRIES, stageStepFallbackDelayMs, WebsiteBuildWorkflow } from "../src/workflows/website-build-workflow";
 import { submitOnboardingSubmission } from "../src/routes/v2.onboarding-submit";
 import { generateId, hmacSha256 } from "../src/lib/crypto";
 import { createPipelineScripts, persistPipelineScreenshot } from "./helpers/pipeline-scripts";
@@ -207,20 +207,30 @@ class RetryEngine {
     }
   }
 
-  // The delay-resolution half of the platform contract: delay function wins,
-  // then static config, then the documented default (10s, exponential).
+  // The delay-resolution half of the platform contract, CORRECTED by the
+  // 2026-09-07 forensics (raw REST evidence): the resolved delay — delay
+  // function wins, then static config, then the documented default (10s) —
+  // is then MULTIPLIED by the backoff curve. backoff defaults to
+  // "exponential" (×2 per retry) when unspecified; "constant" applies the
+  // delay value verbatim (issue #61 single ownership).
   private resolveDelay(config: StepConfig | undefined, failedAttempt: number, error: unknown): number {
     const raw = config?.retries?.delay;
+    let resolved: number;
     if (typeof raw === "function") {
-      const resolved = (raw as (input: { ctx: { attempt: number }; error: Error }) => unknown)({
+      const returned = (raw as (input: { ctx: { attempt: number }; error: Error }) => unknown)({
         ctx: { attempt: failedAttempt },
         error: error instanceof Error ? error : new Error(String(error)),
       });
-      return typeof resolved === "number" ? resolved : parseDurationSeconds(resolved as string);
+      resolved = typeof returned === "number" ? returned : parseDurationSeconds(returned as string);
+    } else if (typeof raw === "number") {
+      resolved = raw;
+    } else if (typeof raw === "string") {
+      resolved = parseDurationSeconds(raw);
+    } else {
+      resolved = 10_000;
     }
-    if (typeof raw === "number") return raw;
-    if (typeof raw === "string") return parseDurationSeconds(raw);
-    return 10_000 * 2 ** (failedAttempt - 1);
+    const backoff = config?.retries?.backoff ?? "exponential"; // platform default
+    return backoff === "exponential" ? resolved * 2 ** (failedAttempt - 1) : resolved;
   }
 
   /** Advance the virtual clock by a retry wait and simulate wall-clock
@@ -343,6 +353,57 @@ describe("single-flight retry liveness (workflow level)", () => {
     expect(horizon).toBeGreaterThan(660_000);
   });
 
+  // Issue #61 §4: the actual repo-owned schedule for the configured attempt
+  // count, recorded (attempt -> delay, cumulative), with the horizon bounded
+  // EVEN under limit-semantics ambiguity (the application must stay correct
+  // if Cloudflare interprets retries.limit as one additional attempt).
+  it("records the repo-owned fallback attempt schedule and bounds the horizon under limit ambiguity (issue #61 §4)", () => {
+    const schedule: Array<{ attempt: number; delaySeconds: number; cumulativeSeconds: number }> = [];
+    let cumulative = 0;
+    for (let attempt = 1; attempt <= 8; attempt++) {
+      const delay = stageStepFallbackDelayMs(attempt);
+      cumulative += delay;
+      schedule.push({ attempt, delaySeconds: delay / 1000, cumulativeSeconds: cumulative / 1000 });
+    }
+    // The schedule table (delay = 10s doubling per attempt, clamped at 1280s):
+    expect(schedule.map((row) => row.delaySeconds)).toEqual([10, 20, 40, 80, 160, 320, 640, 1280]);
+    // 8 total attempts (limit 8 = one initial + 7 retries): the 8th entry is
+    // the clamp cap that only materializes if a further retry followed.
+    expect(schedule[6].cumulativeSeconds).toEqual(1270); // ~21 min over 7 retries
+    // Delay values are finite, non-negative, clamped (issue #61 §26):
+    for (const row of schedule) {
+      expect(Number.isFinite(row.delaySeconds)).toBe(true);
+      expect(row.delaySeconds).toBeGreaterThanOrEqual(0);
+      expect(row.delaySeconds).toBeLessThanOrEqual(1280);
+    }
+    // Ambiguity bound: one extra attempt adds at most the 1280s clamp, so the
+    // worst-case fallback horizon stays operationally bounded either way.
+    const ambiguousHorizon = [1, 2, 3, 4, 5, 6, 7, 8, 9].reduce((sum, attempt) => sum + stageStepFallbackDelayMs(attempt), 0);
+    expect(ambiguousHorizon).toEqual(3_830_000); // ~64 min worst case, not 15 hours
+    expect(ambiguousHorizon / 1000).toBeLessThan(75 * 60);
+  });
+
+  // Issue #61 §3: the Workflow configuration is pinned to
+  // delay = dynamic function + backoff = "constant". The 2026-09-07 forensic
+  // run proved the engine DEFAULTS backoff to "exponential" when the key is
+  // omitted and multiplies the delay function's return by 2^(attempt-1) —
+  // turning the 10→20→40s schedule into 10→40→160→640→2560s (the "wedge").
+  // Do not rely on the platform to infer single ownership.
+  it("pins the stage-step retry config to a dynamic delay with constant backoff (issue #61 §1/§3)", () => {
+    expect(STAGE_STEP_RETRIES.limit).toEqual(8);
+    expect(STAGE_STEP_RETRIES.backoff).toEqual("constant");
+    expect(typeof STAGE_STEP_RETRIES.delay).toEqual("function");
+    // The dynamic function keeps both branches: the lease-aware IN_PROGRESS
+    // wait (never multiplied in config — backoff is constant) and the
+    // repo-owned fallback.
+    const future = new Date(Date.now() + 600_000).toISOString();
+    const leaseAware = STAGE_STEP_RETRIES.delay({ ctx: { attempt: 3 }, error: new StageExecutionInProgressError("k", future) });
+    expect(leaseAware).toMatch(/^\d+ seconds$/);
+    expect(leaseAware).not.toEqual("10 seconds");
+    const fallback = STAGE_STEP_RETRIES.delay({ ctx: { attempt: 3 }, error: new Error("provider 503") });
+    expect(fallback).toEqual(40_000); // repo-owned schedule, number-of-ms form
+  });
+
   it("dead owner: stale takeover is reachable before retry exhaustion; the replacement owner alone completes the provider call (§7)", async () => {
     const env = runtimeEnv();
     const siteGenerationId = await postScreenshotSubmission(env);
@@ -409,11 +470,14 @@ describe("single-flight retry liveness (workflow level)", () => {
     expect(claim?.state).toEqual("COMPLETED");
 
     // The production config the engine observed for the generate step
-    // (directive §1's required record, pinned against drift).
+    // (directive §1's required record, pinned against drift). backoff is
+    // pinned "constant" (issue #61 §3): the dynamic function owns the whole
+    // schedule; the engine must not multiply it.
     const config = engine.configsSeen.get("pipeline: generate site (v1)") ?? {};
     expect((config.retries as { limit?: number }).limit).toEqual(8);
     expect(config.timeout).toEqual("10 minutes");
     expect(typeof (config.retries as { delay?: unknown }).delay).toEqual("function");
+    expect((config.retries as { backoff?: string }).backoff).toEqual("constant");
   });
 
   it("healthy slow owner: overlapping execution never calls the provider, never steals the lease, and reuses the COMPLETED artifact (§8)", async () => {
