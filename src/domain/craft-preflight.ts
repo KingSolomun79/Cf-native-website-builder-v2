@@ -81,6 +81,14 @@ export interface RegionCropPair {
   regionId: string;
   reference: CropProvenance | null;
   candidate: CropProvenance | null;
+  /** Issue #65: ordered normalized REFERENCE slices for the region. A region
+   *  whose evidence maps to separated bands carries one crop per slice; the
+   *  single-slice case also populates `reference` for convenience. Absent or
+   *  ambiguous reference mapping yields [] — never a fabricated crop. */
+  referenceSlices: CropProvenance[];
+  candidateBytes?: Uint8Array;
+  /** In-memory only: PNG bytes parallel to referenceSlices. */
+  referenceSliceBytes?: Uint8Array[];
 }
 
 export interface CraftPreflightVerdict {
@@ -108,13 +116,15 @@ export interface CraftPreflightInput {
    *  extraction channel (issue #41); null when unmeasured. */
   referenceImageMassRatio: number | null;
   /** Frozen Reference side for deterministic region crops: the normalized
-   *  full-page screenshot bytes, its CSS viewport width and the measured
-   *  evidence region coordinates. Null (or missing coordinates) skips the
-   *  reference side of a crop — coordinates are never invented. */
+   *  full-page screenshot bytes, its CSS viewport width and the MEASURED
+   *  evidence region intervals in normalized page space (issue #65 — one
+   *  coordinate space, resolved through the canonical mapping authority).
+   *  Null (or a region without slices) skips the reference side of that
+   *  crop — coordinates are never invented. */
   reference?: {
     screenshot: Uint8Array;
     cssViewportWidth: number;
-    regions: Array<{ id: string; startY?: number; endY?: number }>;
+    regions: Array<{ id: string; slices: Array<{ startY: number; endY: number }> }>;
   } | null;
 }
 
@@ -374,7 +384,7 @@ export async function runCraftPreflight(input: CraftPreflightInput, attempt: num
   const failedRegions = [...new Set(findings.map((finding) => finding.regionId).filter((id): id is string => id !== null))].slice(0, MAX_CROP_REGIONS);
   const crops: RegionCropPair[] = [];
   for (const regionId of failedRegions) {
-    const pair: RegionCropPair = { regionId, reference: null, candidate: null };
+    const pair: RegionCropPair = { regionId, reference: null, candidate: null, referenceSlices: [] };
     const box = canonical.get(regionId);
     if (box && box.height >= 4) {
       const candidateCrop = await cropPngBand(capture.fullPageScreenshot, box.y, box.y + box.height);
@@ -392,23 +402,31 @@ export async function runCraftPreflight(input: CraftPreflightInput, attempt: num
         pair.candidateBytes = candidateCrop.bytes;
       }
     }
+    // Reference side (issue #65): normalized page-space slices resolved by the
+    // canonical mapping authority — one crop per ordered slice, coordinates
+    // never invented. A region without valid mapping keeps referenceSlices []
+    // and the repair gate refuses to run blind on it.
     const referenceRegion = input.reference?.regions.find((region) => region.id === regionId);
-    if (input.reference && referenceRegion && typeof referenceRegion.startY === "number" && typeof referenceRegion.endY === "number") {
+    if (input.reference && referenceRegion && referenceRegion.slices.length > 0) {
       const scale = (await pngWidthOf(input.reference.screenshot)) / input.reference.cssViewportWidth;
-      const referenceCrop = await cropPngBand(input.reference.screenshot, referenceRegion.startY * scale, referenceRegion.endY * scale);
-      if (referenceCrop) {
-        pair.reference = {
-          sourceSha256: await sha256Hex(input.reference.screenshot),
+      const referenceSourceSha = await sha256Hex(input.reference.screenshot);
+      for (const slice of referenceRegion.slices) {
+        const referenceCrop = await cropPngBand(input.reference.screenshot, slice.startY * scale, slice.endY * scale);
+        if (!referenceCrop) continue;
+        const provenance: CropProvenance = {
+          sourceSha256: referenceSourceSha,
           cropSha256: await sha256Hex(referenceCrop.bytes),
-          yStart: Math.round(referenceRegion.startY),
-          yEnd: Math.round(referenceRegion.endY),
+          yStart: Math.round(slice.startY),
+          yEnd: Math.round(slice.endY),
           scale,
           artifactR2Key: "",
           width: referenceCrop.width,
           height: referenceCrop.height,
         };
-        pair.referenceBytes = referenceCrop.bytes;
+        pair.referenceSlices.push(provenance);
+        (pair.referenceSliceBytes ??= []).push(referenceCrop.bytes);
       }
+      if (pair.referenceSlices.length === 1) pair.reference = pair.referenceSlices[0];
     }
     crops.push(pair);
   }
@@ -423,7 +441,7 @@ export interface RegionCropPair {
   reference: CropProvenance | null;
   candidate: CropProvenance | null;
   candidateBytes?: Uint8Array;
-  referenceBytes?: Uint8Array;
+  referenceSliceBytes?: Uint8Array[];
 }
 
 async function pngWidthOf(png: Uint8Array): Promise<number> {
@@ -434,7 +452,8 @@ async function pngWidthOf(png: Uint8Array): Promise<number> {
 
 // Persists the crop pairs deterministically (issue #49 E): coordinates and
 // hashes bind every crop to its immutable source; keys derive from
-// build/version/attempt/region — never manual selection.
+// build/version/attempt/region — never manual selection. Reference slices
+// (issue #65) persist as ordered `-reference-slice-N` artifacts.
 export async function storeCraftCrops(
   env: Env,
   input: { buildId: string; buildVersionNumber: number; attempt: number; crops: RegionCropPair[] }
@@ -445,10 +464,19 @@ export async function storeCraftCrops(
       await putImmutableObjectTolerant(env, key, pair.candidateBytes, { httpMetadata: { contentType: "image/png" } });
       pair.candidate.artifactR2Key = key;
     }
-    if (pair.reference && pair.referenceBytes) {
-      const key = buildVersionEvidenceKey(input.buildId, input.buildVersionNumber, `craft/attempt-${input.attempt}/${pair.regionId}-reference.png`);
-      await putImmutableObjectTolerant(env, key, pair.referenceBytes, { httpMetadata: { contentType: "image/png" } });
-      pair.reference.artifactR2Key = key;
+    for (let index = 0; index < pair.referenceSlices.length; index++) {
+      const bytes = pair.referenceSliceBytes?.[index];
+      if (!bytes) continue;
+      const key = buildVersionEvidenceKey(input.buildId, input.buildVersionNumber, `craft/attempt-${input.attempt}/${pair.regionId}-reference-slice-${index}.png`);
+      await putImmutableObjectTolerant(env, key, bytes, { httpMetadata: { contentType: "image/png" } });
+      pair.referenceSlices[index].artifactR2Key = key;
+      if (pair.reference === pair.referenceSlices[index] && !pair.reference.artifactR2Key) {
+        // keep convenience alias pointing at the same stored provenance
+      }
+    }
+    if (pair.reference && !pair.reference.artifactR2Key) {
+      const alias = pair.referenceSlices.find((slice) => slice.cropSha256 === pair.reference!.cropSha256);
+      if (alias?.artifactR2Key) pair.reference.artifactR2Key = alias.artifactR2Key;
     }
   }
 }
@@ -465,6 +493,8 @@ export interface StoredCraftPreflight {
     regionId: string;
     reference: CropProvenance | null;
     candidate: CropProvenance | null;
+    /** Issue #65: ordered reference slice provenance (may be empty). */
+    referenceSlices: CropProvenance[];
   }>;
 }
 
@@ -479,6 +509,7 @@ export function storedVerdict(verdict: CraftPreflightVerdict): StoredCraftPrefli
       regionId: pair.regionId,
       reference: pair.reference,
       candidate: pair.candidate,
+      referenceSlices: pair.referenceSlices.map((slice) => ({ ...slice })),
     })),
   };
 }

@@ -92,6 +92,9 @@ export interface ReferenceCaptureOutput {
     mimeType: string;
   }>;
   regions: ReferenceEvidence["regions"];
+  /** Issue #65: scrollY at DOM measurement time — page-space normalization
+   *  offset for the viewport-relative region bounds. */
+  captureScrollY?: number;
   measuredElements: ReferenceEvidence["measuredElements"];
   responsiveObservations: unknown[];
   motionObservations: StructuredObservation[];
@@ -430,6 +433,11 @@ export async function runReferenceIntake(
       height: band.height,
       viewportHeightRatio: band.viewportHeightRatio,
     })),
+    // Issue #65: recorded page-space normalization offset for the DOM-measured
+    // region bounds (pixels — extractionBands are already in page space).
+    ...(captureOutput?.regions && typeof captureOutput.captureScrollY === "number"
+      ? { captureScrollY: captureOutput.captureScrollY }
+      : {}),
     measuredElements: [
       ...(captureOutput?.measuredElements ?? []),
       // The canonical Reference Screenshot itself is a measured artifact
@@ -848,13 +856,20 @@ async function captureReferenceSignals(
     const mobile = await captureMobilePass(browser, referenceUrl);
 
     const viewportHeight = desktop.height;
+    // Issue #65: section bounds from getBoundingClientRect are
+    // viewport-RELATIVE, and the layout is extracted after the scroll sweep —
+    // production (Build 282f9b9d) recorded sections at negative page
+    // coordinates while the full-page screenshot lives in page space. Both
+    // the regions and the captureScrollY offset are frozen so the canonical
+    // mapping authority can normalize deterministically.
+    const captureScrollY = layout.scrollY ?? 0;
     const regions: ReferenceEvidence["regions"] = layout.sections.map((section) => ({
       id: `region-${section.order}`,
-      startY: section.bounds.y,
-      endY: section.bounds.y + section.bounds.height,
+      startY: section.bounds.y + captureScrollY,
+      endY: section.bounds.y + captureScrollY + section.bounds.height,
       height: section.bounds.height,
       viewportHeightRatio: Number((section.bounds.height / viewportHeight).toFixed(3)),
-      boundingBox: section.bounds,
+      boundingBox: { ...section.bounds, y: section.bounds.y + captureScrollY },
     }));
 
     const measuredElements: ReferenceEvidence["measuredElements"] = [
@@ -976,6 +991,7 @@ async function captureReferenceSignals(
       },
       captures,
       regions,
+      captureScrollY,
       measuredElements,
       responsiveObservations: [
         { kind: "viewport_matrix", viewports: REFERENCE_VIEWPORTS.map((viewport) => viewport.name) },

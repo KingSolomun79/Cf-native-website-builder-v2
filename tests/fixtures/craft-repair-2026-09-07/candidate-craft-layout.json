@@ -1,0 +1,105 @@
+{
+ "_provenance": "Production-measured candidate geometry for Build 282f9b9d v1 (initial candidate), 1440x900 desktop capture. Region y-origins/heights frozen from craft_preflight/attempt-1.json crop provenance (yStart/yEnd) and the REGION_HEIGHT_DEVIATION measured px (561/1142/807/1026/768) and PREVIEW event boundaries; H1 box and services-image box frozen from the HEADLINE_CLIPPING and IMAGE_ROLE_REALIZATION findings (x=1376 width=313; 72x72). Region boxes the verdict did not print (hero, services, closing_cta, process/testimonial image boxes) are reproduction-derived: the forensic local re-render (.tmp-craft-forensics/render/measurements.json) reproduced every verdict-frozen value exactly. Tests must never mutate this fixture.",
+ "viewportWidth": 1440,
+ "viewportHeight": 900,
+ "sections": [
+  {
+   "dataRegion": "region_hero",
+   "y": 0,
+   "height": 1024,
+   "width": 1440
+  },
+  {
+   "dataRegion": "region_intro_trust",
+   "y": 1024,
+   "height": 561,
+   "width": 1440
+  },
+  {
+   "dataRegion": "region_editorial_split",
+   "y": 1585,
+   "height": 1142,
+   "width": 1440
+  },
+  {
+   "dataRegion": "region_services",
+   "y": 2727,
+   "height": 1088,
+   "width": 1440
+  },
+  {
+   "dataRegion": "region_process",
+   "y": 3815,
+   "height": 807,
+   "width": 1440
+  },
+  {
+   "dataRegion": "region_mid_content",
+   "y": 4622,
+   "height": 1026,
+   "width": 1440
+  },
+  {
+   "dataRegion": "region_testimonial_break",
+   "y": 5648,
+   "height": 768,
+   "width": 1440
+  },
+  {
+   "dataRegion": "region_closing_cta",
+   "y": 6416,
+   "height": 695,
+   "width": 1440
+  }
+ ],
+ "headline": {
+  "text": "Get found when your customers are already searching.",
+  "x": 1376,
+  "y": 219,
+  "width": 313,
+  "height": 396,
+  "fontSize": "60px"
+ },
+ "images": [
+  {
+   "imageId": "home-region_hero",
+   "regionId": "region_hero",
+   "displayedWidth": 1344,
+   "displayedHeight": 768,
+   "naturalWidth": 1344,
+   "naturalHeight": 768
+  },
+  {
+   "imageId": "home-region_editorial_split",
+   "regionId": "region_editorial_split",
+   "displayedWidth": 1440,
+   "displayedHeight": 640,
+   "naturalWidth": 1152,
+   "naturalHeight": 2048
+  },
+  {
+   "imageId": "home-region_services",
+   "regionId": "region_services",
+   "displayedWidth": 72,
+   "displayedHeight": 72,
+   "naturalWidth": 1024,
+   "naturalHeight": 1024
+  },
+  {
+   "imageId": "home-region_process",
+   "regionId": "region_process",
+   "displayedWidth": 237,
+   "displayedHeight": 237,
+   "naturalWidth": 1536,
+   "naturalHeight": 1536
+  },
+  {
+   "imageId": "home-region_testimonial_break",
+   "regionId": "region_testimonial_break",
+   "displayedWidth": 1440,
+   "displayedHeight": 768,
+   "naturalWidth": 1344,
+   "naturalHeight": 768
+  }
+ ]
+}

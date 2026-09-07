@@ -224,6 +224,8 @@ describe("V2 domain lifecycle backbone", () => {
     expect(result.buildId).toBeTruthy();
     expect(result.buildVersionId).toBeTruthy();
 
+    const evs = await env.DB.prepare("SELECT stage, detail FROM build_workflow_events WHERE build_id = ? ORDER BY created_at").bind(result.buildId).all();
+    console.log("DEBUG_LIFECYCLE_EVENTS", JSON.stringify((evs.results??[]).map(e=>e.stage+": "+e.detail.slice(0,90))));
     const buildResponse = await app.request(`https://test.example.com/api/v2/builds/${result.buildId}`, {}, env);
     expect(buildResponse.status).toBe(200);
     const buildView = (await buildResponse.json()) as {

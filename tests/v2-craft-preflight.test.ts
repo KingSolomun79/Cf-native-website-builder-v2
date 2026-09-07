@@ -324,7 +324,9 @@ describe("craft preflight deterministic checks (issue #49)", () => {
         reference: {
           screenshot: referencePng,
           cssViewportWidth: 200,
-          regions: [{ id: "hero", startY: 0, endY: 600 }],
+          // Issue #65: reference regions arrive as normalized page-space
+          // slices resolved by the canonical mapping authority.
+          regions: [{ id: "hero", slices: [{ startY: 0, endY: 600 }] }],
         },
       },
       1
@@ -349,7 +351,7 @@ describe("craft preflight deterministic checks (issue #49)", () => {
     // Reference crop: scale 0.5 shrinks the CSS band to 300 blue rows.
     if (pair!.reference) {
       expect(pair!.reference.scale).toBeCloseTo(0.5, 5);
-      const referenceCrop = await decodePng(pair!.referenceBytes!);
+      const referenceCrop = await decodePng(pair!.referenceSliceBytes![0]);
       expect(referenceCrop.ok).toBe(true);
       if (referenceCrop.ok) {
         expect(referenceCrop.png.height).toBe(300);
@@ -377,7 +379,7 @@ describe("craft preflight deterministic checks (issue #49)", () => {
 describe("craft preflight pipeline integration (issue #49)", () => {
   it("runs the preflight, repairs once from measured findings, and never consumes the QA repair budget", async () => {
     const screenshotKey = `references/uploads/craft-${Math.random().toString(36).slice(2)}.png`;
-    await persistPipelineScreenshot(env, screenshotKey);
+    await persistPipelineScreenshot(env, screenshotKey, { decodable: true });
     const started = await startSiteGeneration(env, {
       payload: {
         buildMode: "REFERENCE_BOUND",
@@ -387,7 +389,7 @@ describe("craft preflight pipeline integration (issue #49)", () => {
     });
     const created = await createInitialBuild(env, { siteGenerationId: started.siteGenerationId });
 
-    const base = createPipelineScripts();
+    const base = createPipelineScripts({ visionReference: true });
     let craftCalls = 0;
     const failingCapture: CraftCapture = {
       layout: {

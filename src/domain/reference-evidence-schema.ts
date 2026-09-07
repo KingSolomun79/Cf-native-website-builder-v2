@@ -30,9 +30,15 @@ const BoundsSchema = Type.Object({
 // PRD section 11 minimum versioned schema.
 export const ReferenceEvidenceSchema = Type.Object(
   {
-    version: Type.String({ minLength: 1 }),
-    referenceUrl: Type.Optional(Type.String({ minLength: 1 })),
-    screenshotId: Type.String({ minLength: 1 }),
+  version: Type.String({ minLength: 1 }),
+  referenceUrl: Type.Optional(Type.String({ minLength: 1 })),
+  screenshotId: Type.String({ minLength: 1 }),
+  // Issue #65: the page's scrollY at the moment the DOM region bounds were
+  // measured. Region bounding boxes from getBoundingClientRect are
+  // viewport-relative; page-space normalization adds this offset. Evidence
+  // captured before #65 lacks the field and is normalized through the
+  // deterministic recovery transform in reference-geometry.ts instead.
+  captureScrollY: Type.Optional(Type.Number({ minimum: 0 })),
     screenshotMetadata: Type.Object(
       {
         pixelWidth: Type.Optional(Type.Number()),

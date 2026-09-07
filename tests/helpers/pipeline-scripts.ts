@@ -13,14 +13,17 @@ import type { PreviewDeployer } from "../../src/domain/assembly";
 import type { ReferenceCaptureFn } from "../../src/domain/reference-intake";
 import { putObject } from "../../src/lib/assets";
 import { QA_A_HARD_GATE_IDS, QA_B_MANDATORY_GATE_IDS, type QaAReport, type QaBReport } from "../../src/domain/qa-stages";
-import { buildPng } from "./png";
+import { buildDecodableSolidPng, buildPng } from "./png";
 
 export const PIPELINE_SCRIPTS_BUSINESS = "Pipeline Wiring Smoke Business";
 const BUSINESS = PIPELINE_SCRIPTS_BUSINESS;
 
-/** Persists a valid screenshot-only Reference PNG for a pipeline smoke. */
-export async function persistPipelineScreenshot(env: Env, key: string): Promise<void> {
-  await putObject(env, key, buildPng({ width: 1440, height: 3200 }));
+/** Persists a screenshot-only Reference PNG for a pipeline smoke. The default
+ *  payload is structurally valid but opaque to the strict decoder (fast
+ *  intake, no vision path); `decodable: true` emits a real low-ink surface
+ *  image so the craft reference-crop channel can cut crops from it. */
+export async function persistPipelineScreenshot(env: Env, key: string, options?: { decodable?: boolean }): Promise<void> {
+  await putObject(env, key, options?.decodable ? await buildDecodableSolidPng(1440, 3200) : buildPng({ width: 1440, height: 3200 }));
 }
 
 const REGIONS = [
@@ -197,6 +200,11 @@ function contactHtml(endpoint: string, siteFormId: string): string {
 
 export function createPipelineScripts(
   options: {
+    /** Issue #65: emit decodable low-ink reference screenshots and script the
+     *  multimodal vision seam, so the craft reference-crop channel runs
+     *  end-to-end. Default false keeps intake opaque and vision-free for the
+     *  retry-semantics suites. */
+    visionReference?: boolean;
     /** Only the FIRST full QA-A evaluation fails (then always passes). */
     firstQaAFails?: boolean;
     /** Every full QA-A evaluation fails (repair-resistance scenarios). */
@@ -310,14 +318,14 @@ export function createPipelineScripts(
   // dimensions-only evidence is INSUFFICIENT by design, so pipeline fixtures
   // model the valid screenshot+URL mode with a real measured capture.
   const capture: ReferenceCaptureFn = async () => ({    canonicalScreenshot: {
-      content: buildPng({ width: 1440, height: 3200 }),
+      content: options.visionReference ? await buildDecodableSolidPng(1440, 3200) : buildPng({ width: 1440, height: 3200 }),
       mimeType: "image/png",
       pixelWidth: 1440,
       pixelHeight: 3200,
       likelyCssViewportWidth: 1440,
     },
     captures: [
-      { viewportWidth: 1440, viewportHeight: 900, content: buildPng({ width: 1440, height: 900 }), mimeType: "image/png" },
+      { viewportWidth: 1440, viewportHeight: 900, content: options.visionReference ? await buildDecodableSolidPng(1440, 3200) : buildPng({ width: 1440, height: 3200 }), mimeType: "image/png" },
     ],
     regions: REGIONS.map((region, index) => ({
       id: region.id,
@@ -382,13 +390,17 @@ export function createPipelineScripts(
       viewportHeight: 900,
       viewportWidth: 1440,
     },
-    fullPageScreenshot: buildPng({ width: 1440, height: 3200 }),
+    fullPageScreenshot: options.visionReference ? await buildDecodableSolidPng(1440, 3200) : buildPng({ width: 1440, height: 3200 }),
     viewportWidth: 1440,
     viewportHeight: 900,
   });
 
   return {
     generate,
+    // Decodable reference screenshots make the visualInputs non-empty, so the
+    // analyzer/generator legitimately run through the multimodal seam; the
+    // same scripted answers serve both paths.
+    ...(options.visionReference ? { visionGenerate: generate } : {}),
     imageProvider,
     previewDeployer,
     capture,

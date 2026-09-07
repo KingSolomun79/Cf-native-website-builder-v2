@@ -145,3 +145,39 @@ export async function buildDecodablePng(width: number, height: number): Promise<
   }
   return out.buffer;
 }
+
+// Structurally valid, DECODABLE PNG with a uniform surface (ink density ~0):
+// the deterministic extraction classifies it as surface bands with no
+// image-mass, so pipeline fixtures do not accidentally trip the
+// image-mass / macro-fidelity geometry gates (issue #65 harness fix).
+export async function buildDecodableSolidPng(width: number, height: number): Promise<ArrayBuffer> {
+  const stride = width * 3;
+  const raw = new Uint8Array(height * (stride + 1));
+  for (let y = 0; y < height; y++) {
+    const rowStart = y * (stride + 1);
+    raw[rowStart] = 0; // filter type: None
+    for (let x = 0; x < width; x++) {
+      const px = rowStart + 1 + x * 3;
+      raw[px] = 250;
+      raw[px + 1] = 247;
+      raw[px + 2] = 242;
+    }
+  }
+  const idatPayload = await new Response(
+    new Blob([raw]).stream().pipeThrough(new CompressionStream("deflate"))
+  ).arrayBuffer();
+  const parts = [
+    new Uint8Array(PNG_SIGNATURE),
+    ihdr(width, height),
+    idat(new Uint8Array(idatPayload)),
+    iend(),
+  ];
+  const total = parts.reduce((sum, p) => sum + p.length, 0);
+  const out = new Uint8Array(total);
+  let offset = 0;
+  for (const p of parts) {
+    out.set(p, offset);
+    offset += p.length;
+  }
+  return out.buffer;
+}

@@ -119,6 +119,10 @@ export interface RawLayout {
   headline?: RawHeadline | null;
   viewportHeight?: number;
   viewportWidth?: number;
+  /** Issue #65: window.scrollY at measurement time. Section/headline bounds
+   *  from getBoundingClientRect are viewport-relative; page-space consumers
+   *  must add this offset. Optional for pre-#65 fixture adapters. */
+  scrollY?: number;
 }
 
 export interface RawCandidate {
@@ -425,7 +429,7 @@ const EXTRACT_LAYOUT_SCRIPT = `(() => {
   const effectiveBackground = (el) => { const layers = []; let node = el; while (node && node.nodeType === 1) { const parsed = parseColor(getComputedStyle(node).backgroundColor); if (parsed && parsed.a > 0) layers.push(parsed); node = node.parentElement; } let color = { r: 255, g: 255, b: 255, a: 1 }; layers.reverse().forEach((layer) => { color = composite(layer, color); }); return "rgb(" + Math.round(color.r) + ", " + Math.round(color.g) + ", " + Math.round(color.b) + ")"; };
   const contrastTargets = "h1, h2, h3, h4, p, a[href], button, label, li, summary, .stat__value, .stat__label, .footer__copy";
   const contrastSamples = Array.from(document.querySelectorAll(contrastTargets)).filter((el) => { const r = el.getBoundingClientRect(); const s = getComputedStyle(el); return r.width > 0 && r.height > 0 && s.display !== "none" && s.visibility !== "hidden" && Number(s.opacity || 1) > 0 && trim(el.textContent); }).slice(0, 160).map((el) => { const s = getComputedStyle(el); const id = eid(el); return { selector: id ? "[data-cf-evidence-id=\\\"" + id + "\\\"]" : el.tagName.toLowerCase(), evidenceId: id, text: trim(el.textContent), color: s.color, backgroundColor: effectiveBackground(el), fontSize: s.fontSize, fontWeight: s.fontWeight }; });
-  return { finalUrl: location.href, title: trim(document.title), lang: document.documentElement.lang || null, description: trim(description), viewportMeta, sections, typography, colors: { background: bodyStyle.backgroundColor, text: bodyStyle.color, accents }, nav, images, spacing, contrastSamples, consentDetected, headline, viewportHeight, viewportWidth };
+  return { finalUrl: location.href, title: trim(document.title), lang: document.documentElement.lang || null, description: trim(description), viewportMeta, sections, typography, colors: { background: bodyStyle.backgroundColor, text: bodyStyle.color, accents }, nav, images, spacing, contrastSamples, consentDetected, headline, viewportHeight, viewportWidth, scrollY: Math.round(window.scrollY) };
 })()`;
 
 const DISCOVER_INTERACTABLES_SCRIPT = `(() => {

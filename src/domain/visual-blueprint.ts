@@ -24,6 +24,7 @@ import { appendBuildWorkflowEvent } from "./lifecycle";
 import { getBuildStageArtifact, storeBuildStageArtifact, type StoredStageArtifact } from "./stage-artifacts";
 import type { ReferenceAnalysis } from "./reference-analysis";
 import type { AdaptationContract, ReferenceEvidence } from "./reference-evidence-schema";
+import { resolveReferenceGeometry } from "./reference-geometry";
 import type { BusinessFacts } from "./lifecycle-schema";
 
 export const VISUAL_BLUEPRINT_SCHEMA_VERSION = "visual-blueprint/2";
@@ -499,13 +500,18 @@ export function evaluateBlueprintCoverage(input: BlueprintCoverageInput): Bluepr
   };
 }
 
-// Aggregated canonical composition (issue #37): the Blueprint region order is
-// the binding topology; the frozen evidence measurements of the contributing
-// segments are summed per canonical region so generation receives numeric
+// Aggregated canonical composition (issue #37, union-aware since #65): the
+// Blueprint region order is the binding topology; the frozen evidence
+// measurements of the contributing segments are resolved through the ONE
+// reference-geometry mapping function so generation receives numeric
 // per-region targets and QA compares measured geometry against the SAME
-// canonical regions. Regions without measurements (provenance absent or
-// yielding no measurable segment) carry null and exclude themselves from
-// numeric composition targets.
+// canonical regions. When the evidence carries coordinates (the normal URL
+// capture case since #65) geometry is the interval UNION of the contributing
+// bands in normalized page space — overlap is never double-counted and
+// ambiguous mappings carry no numeric target (fail closed). Legacy evidence
+// without any coordinates keeps the historical band summation. Regions
+// without measurements (provenance absent or yielding no measurable segment)
+// carry null and exclude themselves from numeric composition targets.
 export interface CanonicalRegionComposition {
   regionId: string;
   order: number;
@@ -513,33 +519,82 @@ export interface CanonicalRegionComposition {
   sourceEvidenceRegionIds: string[];
   heightPx: number | null;
   viewportHeightRatio: number | null;
+  /** Issue #65: mapping validity + normalized reference slices. */
+  status: "MEASURED" | "AMBIGUOUS";
+  reason: string | null;
+  slices: Array<{ startY: number; endY: number }> | null;
 }
 
 export function canonicalRegionComposition(
   blueprint: VisualBlueprint,
-  evidenceRegions: Array<{ id: string; height?: number; viewportHeightRatio?: number }>
+  evidenceRegions: Array<{ id: string; startY?: number; endY?: number; height?: number; viewportHeightRatio?: number }>,
+  options?: { captureScrollY?: number }
 ): CanonicalRegionComposition[] {
-  const byId = new Map(evidenceRegions.map((region) => [region.id, region]));
-  return blueprint.homepageRegions.map((region, index) => {
-    let heightPx = 0;
-    let ratio = 0;
-    let measured = false;
-    for (const sourceId of region.sourceEvidenceRegionIds ?? []) {
-      const segment = byId.get(sourceId);
-      if (!segment) continue;
-      measured = true;
-      heightPx += segment.height ?? 0;
-      ratio += segment.viewportHeightRatio ?? 0;
-    }
-    return {
-      regionId: region.id,
-      order: index + 1,
-      purpose: region.purpose,
-      sourceEvidenceRegionIds: [...(region.sourceEvidenceRegionIds ?? [])],
-      heightPx: measured ? heightPx : null,
-      viewportHeightRatio: measured ? Number(ratio.toFixed(3)) : null,
-    };
+  const hasCoordinates = evidenceRegions.some(
+    (region) => typeof region.startY === "number" && typeof region.endY === "number"
+  );
+  if (!hasCoordinates) {
+    // Legacy summation path: coordinate-free evidence cannot be normalized,
+    // so the historical per-band sum remains the documented composition rule.
+    const byId = new Map(evidenceRegions.map((region) => [region.id, region]));
+    return blueprint.homepageRegions.map((region, index) => {
+      let heightPx = 0;
+      let ratio = 0;
+      let measured = false;
+      for (const sourceId of region.sourceEvidenceRegionIds ?? []) {
+        const segment = byId.get(sourceId);
+        if (!segment) continue;
+        measured = true;
+        heightPx += segment.height ?? 0;
+        ratio += segment.viewportHeightRatio ?? 0;
+      }
+      return {
+        regionId: region.id,
+        order: index + 1,
+        purpose: region.purpose,
+        sourceEvidenceRegionIds: [...(region.sourceEvidenceRegionIds ?? [])],
+        heightPx: measured ? heightPx : null,
+        viewportHeightRatio: measured ? Number(ratio.toFixed(3)) : null,
+        status: measured ? ("MEASURED" as const) : ("AMBIGUOUS" as const),
+        reason: measured ? null : "canonical region carries no measurable evidence segment",
+        slices: null,
+      };
+    });
+  }
+
+  // Union path (issue #65): resolve through the single mapping authority.
+  const geometry = resolveReferenceGeometry({
+    blueprint,
+    evidence: {
+      version: "legacy-projection",
+      screenshotId: "canonicalRegionComposition",
+      screenshotMetadata: {},
+      captures: [],
+      ...(typeof options?.captureScrollY === "number" ? { captureScrollY: options.captureScrollY } : {}),
+      regions: evidenceRegions.map((region) => ({
+        id: region.id,
+        ...(typeof region.startY === "number" ? { startY: region.startY } : {}),
+        ...(typeof region.endY === "number" ? { endY: region.endY } : {}),
+        ...(typeof region.height === "number" ? { height: region.height } : {}),
+        ...(typeof region.viewportHeightRatio === "number" ? { viewportHeightRatio: region.viewportHeightRatio } : {}),
+      })),
+      measuredElements: [],
+      responsiveObservations: [],
+      motionObservations: [],
+      discrepancies: [],
+    },
   });
+  return geometry.regions.map((region) => ({
+    regionId: region.regionId,
+    order: region.order,
+    purpose: region.purpose,
+    sourceEvidenceRegionIds: region.sourceEvidenceRegionIds,
+    heightPx: region.referenceHeightPx,
+    viewportHeightRatio: region.referenceViewportRatio,
+    status: region.status,
+    reason: region.reason,
+    slices: region.slices ? region.slices.map((slice) => ({ ...slice })) : null,
+  }));
 }
 
 export function buildBlueprintUserPrompt(input: {

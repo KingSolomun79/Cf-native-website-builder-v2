@@ -1,0 +1,65 @@
+{
+ "_provenance": "Verbatim homepageRegions provenance (id/purpose/sourceEvidenceRegionIds) of builds/282f9b9d.../v1/visual_blueprint.json.",
+ "homepageRegions": [
+  {
+   "id": "region_hero",
+   "purpose": "Dark purple-tinted full-bleed photographic hero (~1.07 viewport) with headline, supporting copy, primary and secondary CTAs, and the header; establishes agency identity and conversion entry.",
+   "sourceEvidenceRegionIds": [
+    "region-0",
+    "region-1",
+    "region-2"
+   ]
+  },
+  {
+   "id": "region_intro_trust",
+   "purpose": "Light post-hero band for a short positioning statement plus non-fabricated trust signals (capability statements, service-scope pills); replaces the reference logo/stat strip without inventing clients, stats or logos.",
+   "sourceEvidenceRegionIds": [
+    "region-3",
+    "region-4"
+   ]
+  },
+  {
+   "id": "region_editorial_split",
+   "purpose": "Asymmetric editorial split (~55/45) pairing copy about RankForge's approach with one large portrait-oriented editorial image; expresses expertise and philosophy.",
+   "sourceEvidenceRegionIds": [
+    "region-6"
+   ]
+  },
+  {
+   "id": "region_services",
+   "purpose": "Long (~1.8 viewport) lavender/white card field presenting the six RankForge services through uniform repetition with small square icons; the page's dominant card mass.",
+   "sourceEvidenceRegionIds": [
+    "region-5"
+   ]
+  },
+  {
+   "id": "region_process",
+   "purpose": "Four-stage process sequence (01 Diagnose, 02 Prioritise, 03 Execute, 04 Improve) in card/step language consistent with the services card system.",
+   "sourceEvidenceRegionIds": [
+    "region-7",
+    "region-8"
+   ]
+  },
+  {
+   "id": "region_mid_content",
+   "purpose": "Supporting light content band: FAQ/accordion-style or problem-awareness content addressing customer pain points without statistics or claims.",
+   "sourceEvidenceRegionIds": [
+    "region-9"
+   ]
+  },
+  {
+   "id": "region_testimonial_break",
+   "purpose": "Full-bleed photographic break (~1440x630 mass) before the closing dark zone; carries closing-message overlay. Given strict content constraints, this is a proof-of-work/positioning overlay rather than fabricated testimonials.",
+   "sourceEvidenceRegionIds": [
+    "region-10"
+   ]
+  },
+  {
+   "id": "region_closing_cta",
+   "purpose": "Combined dark closing region implementing the full dark sandwich: conversion banner ('Ready to make organic search work harder for your business?' with 'Talk to RankForge' CTA) above the dark footer (navigation, contact email, service links, Nairobi Kenya location line), all on the rgb(16,16,16) surface of the reference's final ~0.8-viewport dark band.",
+   "sourceEvidenceRegionIds": [
+    "region-11"
+   ]
+  }
+ ]
+}

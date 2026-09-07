@@ -25,6 +25,7 @@ import { appendBuildWorkflowEvent, createInitialBuild } from "./lifecycle";
 import { runReferenceIntake, getFrozenReferenceEvidence, type ReferenceCaptureFn } from "./reference-intake";
 import { runReferenceAnalysisStage, ReferenceAnalysisError, createProductionVisionGenerate } from "./reference-analysis";
 import { runVisualBlueprintStage, VisualBlueprintError, canonicalRegionComposition, evaluateBlueprintCoverage } from "./visual-blueprint";
+import { resolveReferenceGeometry, unmappedHeightFindingRegions, type ReferenceGeometryPackage } from "./reference-geometry";
 import { produceImplementationContract } from "./implementation-planner";
 import { generateCompleteSite, regeneratePagesForRealization, SiteGenerationValidationError, type GeneratedSite, type AssemblyFinding, type ImageSlot } from "./site-generator";
 import {
@@ -156,8 +157,10 @@ function deterministicReviewOutcome(
   qa: { qaA: BuildPipelineOutcome["qaA"]; qaB: BuildPipelineOutcome["qaB"] }
 ): BuildPipelineOutcome {
   const findings = review.findings.map((finding) => `${finding.id} (${finding.detail})`);
+  // The marker's own message is the precise deterministic cause (assembly
+  // validation, or a #65 mapping/crop refusal); findings ride after it.
   const reasons = [
-    "SITE_GENERATION_REVIEW_REQUIRED: deterministic assembly validation still failing after the stage's bounded informed repair — automation stopped deterministically; candidate retained for review in the Build Version artifacts (#62 §8)",
+    `SITE_GENERATION_REVIEW_REQUIRED: ${review.message.slice(0, 400)}`,
     ...findings,
   ];
   return {
@@ -623,19 +626,45 @@ export async function runBuildPipeline(
       };
     }
 
-    // ── Canonical region composition (issue #37) ───────────────────────────
+    // ── Canonical region composition (issue #37; union-aware since #65) ────
     // The Blueprint's canonical region topology is the ONLY binding structure
     // for generation and QA. Frozen Reference Evidence measurements are
-    // aggregated per canonical region through provenance, so the generator
-    // receives numeric per-region targets and QA compares measured geometry
-    // against the SAME canonical regions. Blueprints frozen before the
-    // provenance field carry no aggregation mapping — those keep the legacy
-    // raw-evidence mapping so a re-entered old version still evaluates
-    // instead of silently losing its measured-fidelity evidence.
-    const canonicalComposition = canonicalRegionComposition(blueprint.blueprint, frozen.evidence.regions);
-    const compositionFullyMeasured =
-      canonicalComposition.length > 0 &&
-      canonicalComposition.every((region) => region.viewportHeightRatio !== null);
+    // resolved per canonical region through the ONE reference-geometry
+    // mapping authority (coordinate normalization + interval union +
+    // semantic ordinal validation), so the generator receives numeric
+    // per-region targets and QA compares measured geometry against the SAME
+    // canonical regions. AMBIGUOUS mappings fail closed: the region carries
+    // no numeric target and never participates in automated geometry repair
+    // (#65 §7) — a suspect coordinate space must not manufacture findings.
+    const referenceGeometry: ReferenceGeometryPackage = resolveReferenceGeometry({
+      blueprint: blueprint.blueprint,
+      evidence: frozen.evidence,
+    });
+    const canonicalComposition = canonicalRegionComposition(blueprint.blueprint, frozen.evidence.regions, {
+      captureScrollY: frozen.evidence.captureScrollY,
+    });
+    if (referenceGeometry.status === "AMBIGUOUS") {
+      await appendBuildWorkflowEvent(env, {
+        buildId,
+        buildVersionId: version.buildVersionId,
+        fromState: "BLUEPRINT",
+        toState: "BLUEPRINT",
+        stage: "reference_geometry",
+        detail: `REFERENCE_REGION_MAPPING_AMBIGUOUS: ${referenceGeometry.regions
+          .filter((region) => region.status === "AMBIGUOUS")
+          .map((region) => `${region.regionId} (${region.reason})`)
+          .join("; ")
+          .slice(0, 320)} — excluded from numeric geometry targets`,
+      });
+    }
+    // Only MEASURED regions produce composition targets (#65 §7 fail-closed).
+    const compositionTargets = canonicalComposition
+      .filter((region) => region.viewportHeightRatio !== null)
+      .map((region) => ({
+        regionId: region.regionId,
+        viewportHeightRatio: region.viewportHeightRatio!,
+        evidenceSegmentCount: region.sourceEvidenceRegionIds.length,
+      }));
 
     // ── Candidate production (generation -> images -> assembly -> preview) ─
     // NOTE: step results are capped at 1MiB by the Workflows engine — the
@@ -648,13 +677,6 @@ export async function runBuildPipeline(
       | { kind: "ok"; manifestHash: string; previewUrl: string }
       | { kind: "deterministic-review"; review: DeterministicReviewMarker["deterministicReview"] }
     > => {
-      const compositionTargets = compositionFullyMeasured
-        ? canonicalComposition.map((region) => ({
-            regionId: region.regionId,
-            viewportHeightRatio: region.viewportHeightRatio!,
-            evidenceSegmentCount: region.sourceEvidenceRegionIds.length,
-          }))
-        : undefined;
       const site = await stepDo(
         `pipeline: generate site (v${ctx.buildVersionNumber})`,
         async (): Promise<GeneratedSite | DeterministicReviewMarker> => {
@@ -731,22 +753,29 @@ export async function runBuildPipeline(
           siteId: ctx.siteId,
           buildVersionNumber: ctx.buildVersionNumber,
         };
-        // Deterministic Reference side for the craft preflight (issue #49 D/E):
-        // the frozen normalized screenshot + its measured region coordinates.
-        // Absent evidence simply loses the reference side of a crop — the
-        // coordinates are never invented.
+        // Deterministic Reference side for the craft preflight (issue #49 D/E;
+        // normalized through the canonical mapping authority since #65): the
+        // frozen normalized screenshot + each MEASURED canonical region's
+        // page-space slices. Ambiguous mappings carry no slices — the
+        // reference side of their crop is honestly absent, never fabricated.
         const buildReferenceSide = async () => {
-          const primary = frozen.evidence.visualInputs?.find((entry) => entry.kind === "full-page") ?? frozen.evidence.visualInputs?.[0];
-          if (!primary) return null;
-          const body = await getObject(env, primary.artifact);
+          // The frozen canonical Reference Screenshot is the crop authority
+          // (full resolution, page space); the normalized model-facing visual
+          // inputs are only a fallback.
+          const screenshotKey = frozen.evidence.screenshotId;
+          const fallback = frozen.evidence.visualInputs?.find((entry) => entry.kind === "full-page") ?? frozen.evidence.visualInputs?.[0];
+          const body = (screenshotKey ? await getObject(env, screenshotKey) : null) ?? (fallback ? await getObject(env, fallback.artifact) : null);
           if (!body) return null;
+          const measuredRegions = referenceGeometry.regions.filter(
+            (region) => region.status === "MEASURED" && region.slices && region.slices.length > 0
+          );
+          if (measuredRegions.length === 0) return null;
           return {
             screenshot: new Uint8Array(await new Response(body).arrayBuffer()),
             cssViewportWidth: frozen.evidence.screenshotMetadata.likelyCssViewportWidth ?? 1440,
-            regions: frozen.evidence.regions.map((region) => ({
-              id: region.id,
-              ...(typeof region.startY === "number" ? { startY: region.startY } : {}),
-              ...(typeof region.endY === "number" ? { endY: region.endY } : {}),
+            regions: measuredRegions.map((region) => ({
+              id: region.regionId,
+              slices: region.slices!.map((slice) => ({ startY: slice.startY, endY: slice.endY })),
             })),
           };
         };
@@ -792,7 +821,7 @@ export async function runBuildPipeline(
               blueprint: blueprint.blueprint,
               contract: contract.contract,
               slots: site.imagePlan.slots,
-              ...(compositionTargets ? { compositionTargets: compositionTargets.map(({ regionId, viewportHeightRatio }) => ({ regionId, viewportHeightRatio })) } : {}),
+              ...(compositionTargets.length > 0 ? { compositionTargets: compositionTargets.map(({ regionId, viewportHeightRatio }) => ({ regionId, viewportHeightRatio })) } : {}),
               referenceImageMassRatio: frozen.evidence.extraction?.imageMassRatio ?? null,
               ...(referenceSide ? { reference: referenceSide } : {}),
             },
@@ -822,9 +851,28 @@ export async function runBuildPipeline(
         // budget, reusing the #47 entry point's immutable subkeys.
         if (!craft.passed && craft.pageRepairable) {
           const affected = [...new Set(craft.findings.filter((finding) => finding.repairScope === "page-realization").map((finding) => finding.affectedPage))];
+          // Issue #65 §7/§9 — fail closed before any repair: every region-height
+          // finding needs a MEASURED canonical mapping AND an existing stored
+          // reference crop. Repairing toward an unverifiable target, or claiming
+          // reference evidence that does not exist, is prohibited; the candidate
+          // is retained for review instead.
+          const unmapped = unmappedHeightFindingRegions(craft.findings, referenceGeometry, craft.crops);
+          if (unmapped.length > 0) {
+            const message = `Informed geometry repair refused — the Reference side of the measured findings is not validly mapped (${unmapped.join("; ")}). Repairing toward an unverifiable target is prohibited (issue #65); the candidate is retained for review.`;
+            await appendBuildWorkflowEvent(env, {
+              buildId: ctx.buildId, buildVersionId: ctx.buildVersionId,
+              fromState: "PREVIEW", toState: "PREVIEW", stage: "craft_preflight",
+              detail: message.slice(0, 400),
+            });
+            return {
+              deterministicReview: { findings: [], message, previewUrl: preview.previewUrl },
+            };
+          }
           const cropVisualInputs = craft.crops.flatMap((pair, index) => {
             const inputs: Array<{ kind: "slice"; artifact: string; sha256: string; width: number; height: number; sliceIndex: number }> = [];
-            if (pair.reference) inputs.push({ kind: "slice" as const, artifact: pair.reference.artifactR2Key, sha256: pair.reference.cropSha256, width: pair.reference.width, height: pair.reference.height, sliceIndex: index * 2 });
+            pair.referenceSlices.forEach((slice, sliceIndex) => {
+              inputs.push({ kind: "slice" as const, artifact: slice.artifactR2Key, sha256: slice.cropSha256, width: slice.width, height: slice.height, sliceIndex: index * 2 + sliceIndex * 2 });
+            });
             if (pair.candidate) inputs.push({ kind: "slice" as const, artifact: pair.candidate.artifactR2Key, sha256: pair.candidate.cropSha256, width: pair.candidate.width, height: pair.candidate.height, sliceIndex: index * 2 + 1 });
             return inputs;
           });
@@ -844,7 +892,7 @@ export async function runBuildPipeline(
               imagePlan: site.imagePlan,
               affected,
               findingDirectives: craft.directiveText,
-              ...(compositionTargets ? { compositionTargets } : {}),
+              ...(compositionTargets.length > 0 ? { compositionTargets } : {}),
               ...(cropVisualInputs.length > 0 ? { visualInputs: cropVisualInputs } : {}),
               visionGenerate:
                 cropVisualInputs.length > 0
@@ -892,7 +940,7 @@ export async function runBuildPipeline(
                 blueprint: blueprint.blueprint,
                 contract: contract.contract,
                 slots: site.imagePlan.slots,
-                ...(compositionTargets ? { compositionTargets: compositionTargets.map(({ regionId, viewportHeightRatio }) => ({ regionId, viewportHeightRatio })) } : {}),
+                ...(compositionTargets.length > 0 ? { compositionTargets: compositionTargets.map(({ regionId, viewportHeightRatio }) => ({ regionId, viewportHeightRatio })) } : {}),
                 referenceImageMassRatio: frozen.evidence.extraction?.imageMassRatio ?? null,
                 ...(referenceSide2 ? { reference: referenceSide2 } : {}),
               },
@@ -1004,23 +1052,26 @@ export async function runBuildPipeline(
         (capture) => capture.page === "home" && capture.viewportWidth === 1440
       );
       const referenceImageMass = frozen.evidence.extraction?.imageMassRatio ?? null;
-      const referenceProfile = compositionFullyMeasured
-        ? geometryFromRegions(
-            canonicalComposition.map((region) => ({
-              id: region.regionId,
-              height: region.heightPx ?? 0,
-              viewportHeightRatio: region.viewportHeightRatio!,
-            })),
-            referenceImageMass
-          )
-        : geometryFromRegions(
-            frozen.evidence.regions.flatMap((region) =>
-              typeof region.height === "number" && typeof region.viewportHeightRatio === "number"
-                ? [{ id: region.id, height: region.height, viewportHeightRatio: region.viewportHeightRatio }]
-                : []
-            ),
-            referenceImageMass
-          );
+      // Issue #65: the reference profile covers only MEASURED canonical
+      // regions — an ambiguous mapping never contributes a geometry metric.
+      // Coordinate-free legacy evidence keeps the raw-evidence profile.
+      const referenceProfile = geometryFromRegions(
+        [
+          ...canonicalComposition.flatMap((region) =>
+            region.viewportHeightRatio !== null && region.heightPx !== null
+              ? [{ id: region.regionId, height: region.heightPx, viewportHeightRatio: region.viewportHeightRatio }]
+              : []
+          ),
+          ...(canonicalComposition.every((region) => region.viewportHeightRatio === null)
+            ? frozen.evidence.regions.flatMap((region) =>
+                typeof region.height === "number" && typeof region.viewportHeightRatio === "number"
+                  ? [{ id: region.id, height: region.height, viewportHeightRatio: region.viewportHeightRatio }]
+                  : []
+              )
+            : []),
+        ],
+        referenceImageMass
+      );
       const candidateProfile = homeDesktop?.geometry ?? null;
       const geometryComparison = candidateProfile
         ? compareGeometry(referenceProfile, candidateProfile)
@@ -1082,7 +1133,7 @@ export async function runBuildPipeline(
       // Deterministic direct-fidelity gate (issue #44): non-averageable —
       // appended to the QA-A hard gates so no aggregate score can compensate.
       // An unmeasured reference FAILS closed.
-      const macroFidelity = evaluateReferenceMacroFidelity(geometryComparison);
+            const macroFidelity = evaluateReferenceMacroFidelity(geometryComparison);
       const qaAForRelease = {
         ...qaA.report,
         hardGates: [
@@ -1162,7 +1213,11 @@ export async function runBuildPipeline(
       const craft = (await getBuildStageArtifact<StoredCraftPreflight>(env, version.buildVersionId, "craft_preflight", "attempt-2"))
         ?? (await getBuildStageArtifact<StoredCraftPreflight>(env, version.buildVersionId, "craft_preflight", "attempt-1"));
       const regionCropKeys = (craft?.value.crops ?? [])
-        .flatMap((pair) => [pair.reference?.artifactR2Key, pair.candidate?.artifactR2Key])
+        .flatMap((pair) => [
+          pair.reference?.artifactR2Key,
+          pair.candidate?.artifactR2Key,
+          ...pair.referenceSlices.map((slice) => slice.artifactR2Key),
+        ])
         .filter((key): key is string => Boolean(key));
       return buildRepairContext({
         blueprint: blueprint.blueprint,

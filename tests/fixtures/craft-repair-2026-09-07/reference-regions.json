@@ -1,0 +1,164 @@
+{
+ "_provenance": "Verbatim regions array of builds/282f9b9d-e618-4e81-a0eb-76f51dfa9b1f/v1/evidence/reference/evidence.json (frozen production evidence, Site Generation 036539c6). screenshotHeight from extraction.coverage.height; screenshotSha256 from extraction.sourceSha256.",
+ "screenshotHeight": 7660,
+ "screenshotSha256": "26af3341e70c33d9dc68e99415b7e226d44e582e6d7302364b8ebfeb9f1442f4",
+ "likelyCssViewportWidth": 1440,
+ "regions": [
+  {
+   "id": "region-0",
+   "startY": -1600,
+   "endY": -1457,
+   "height": 143,
+   "viewportHeightRatio": 0.159,
+   "boundingBox": {
+    "x": 0,
+    "y": -1600,
+    "width": 1440,
+    "height": 143
+   }
+  },
+  {
+   "id": "region-1",
+   "startY": 49,
+   "endY": 74,
+   "height": 25,
+   "viewportHeightRatio": 0.028,
+   "boundingBox": {
+    "x": 401,
+    "y": 49,
+    "width": 568,
+    "height": 25
+   }
+  },
+  {
+   "id": "region-2",
+   "startY": -1600,
+   "endY": -636,
+   "height": 964,
+   "viewportHeightRatio": 1.071,
+   "boundingBox": {
+    "x": 0,
+    "y": -1600,
+    "width": 1440,
+    "height": 964
+   }
+  },
+  {
+   "id": "region-3",
+   "startY": -636,
+   "endY": 234,
+   "height": 870,
+   "viewportHeightRatio": 0.967,
+   "boundingBox": {
+    "x": 0,
+    "y": -636,
+    "width": 1440,
+    "height": 870
+   }
+  },
+  {
+   "id": "region-4",
+   "startY": 34,
+   "endY": 664,
+   "height": 630,
+   "viewportHeightRatio": 0.7,
+   "boundingBox": {
+    "x": 0,
+    "y": 34,
+    "width": 1440,
+    "height": 630
+   }
+  },
+  {
+   "id": "region-5",
+   "startY": 564,
+   "endY": 2234,
+   "height": 1670,
+   "viewportHeightRatio": 1.856,
+   "boundingBox": {
+    "x": 0,
+    "y": 564,
+    "width": 1440,
+    "height": 1670
+   }
+  },
+  {
+   "id": "region-6",
+   "startY": 2233,
+   "endY": 2934,
+   "height": 701,
+   "viewportHeightRatio": 0.779,
+   "boundingBox": {
+    "x": 0,
+    "y": 2233,
+    "width": 1440,
+    "height": 701
+   }
+  },
+  {
+   "id": "region-7",
+   "startY": 2934,
+   "endY": 3804,
+   "height": 870,
+   "viewportHeightRatio": 0.967,
+   "boundingBox": {
+    "x": 0,
+    "y": 2934,
+    "width": 1440,
+    "height": 870
+   }
+  },
+  {
+   "id": "region-8",
+   "startY": 3804,
+   "endY": 4565,
+   "height": 761,
+   "viewportHeightRatio": 0.846,
+   "boundingBox": {
+    "x": 0,
+    "y": 3804,
+    "width": 1440,
+    "height": 761
+   }
+  },
+  {
+   "id": "region-9",
+   "startY": 4565,
+   "endY": 4997,
+   "height": 432,
+   "viewportHeightRatio": 0.48,
+   "boundingBox": {
+    "x": 0,
+    "y": 4565,
+    "width": 1440,
+    "height": 432
+   }
+  },
+  {
+   "id": "region-10",
+   "startY": 4997,
+   "endY": 5338,
+   "height": 341,
+   "viewportHeightRatio": 0.379,
+   "boundingBox": {
+    "x": 0,
+    "y": 4997,
+    "width": 1440,
+    "height": 341
+   }
+  },
+  {
+   "id": "region-11",
+   "startY": 5338,
+   "endY": 6059,
+   "height": 721,
+   "viewportHeightRatio": 0.801,
+   "boundingBox": {
+    "x": 0,
+    "y": 5338,
+    "width": 1440,
+    "height": 721
+   }
+  }
+ ]
+}
