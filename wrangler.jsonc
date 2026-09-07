@@ -50,6 +50,17 @@
       "name": "website-build-workflow",
       "binding": "WEBSITE_BUILD_WORKFLOW",
       "class_name": "WebsiteBuildWorkflow"
+    },
+    // Issue #63 diagnostic canary (operator-only): no route, no cron, no
+    // Business data, no spend — instances are created exclusively by the
+    // operator via wrangler/REST instance creation to validate retry-delay
+    // semantics (lease-aware dynamic delay + constant backoff) against the
+    // real engine. Retained as an operator diagnostic, never exposed
+    // publicly.
+    {
+      "name": "retry-semantics-canary",
+      "binding": "RETRY_SEMANTICS_CANARY",
+      "class_name": "RetrySemanticsCanaryWorkflow"
     }
   ],
 

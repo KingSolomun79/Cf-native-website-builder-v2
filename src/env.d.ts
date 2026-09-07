@@ -19,6 +19,8 @@ export interface Env {
   DB: D1Database;
   SITE_BUCKET: R2Bucket;
   WEBSITE_BUILD_WORKFLOW: Workflow;
+  /** Issue #63 operator-only diagnostic canary (no route/cron/spend). */
+  RETRY_SEMANTICS_CANARY: Workflow;
   BROWSER: BrowserWorker;
   IMAGES: ImagesBinding;
 
