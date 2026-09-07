@@ -182,6 +182,7 @@ export default defineWorkersConfig({
       "tests/v2-cpu-budget.test.ts",
       "tests/v2-workflow-reconciliation.test.ts",
       "tests/v2-workflow-retry-liveness.test.ts",
+      "tests/v2-deterministic-stage-failures.test.ts",
       "tests/v2-workflow-granularity.test.ts",
       "tests/v2-image-orchestration.test.ts",
       // Retained platform infrastructure tests.

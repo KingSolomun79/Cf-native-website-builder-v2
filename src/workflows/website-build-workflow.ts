@@ -25,25 +25,22 @@ import type { Env } from "../env.d";
 import type { InitialBuildCreated } from "../domain/lifecycle";
 import type { BuildPipelineDeps } from "../domain/build-pipeline";
 import { stageInProgressRetryAfterMs } from "../domain/stage-execution";
-import { StageExecutionCollisionError } from "../domain/stage-execution";
-import { StageArtifactError } from "../domain/stage-artifacts";
-import { ImageBudgetExceededError } from "../domain/image-pipeline";
+import { classifyStageFailure } from "../domain/stage-failure";
 
-// Terminal state/provenance corruption must not burn the workflow step retry
-// budget (issue #54 §11): a foreign artifact under an immutable slot cannot
-// heal through retries, so these errors fail the step non-retryably and the
-// failure becomes domain-visible (issue #56 reconciliation). The hard KIE
-// spend gate (issue #58) is equally deterministic — retries cannot lower the
-// ledger — so it also fails fast into the domain-visible terminal path.
+// Terminal/provenance corruption, the hard KIE spend gate, and deterministic
+// stage failures must not burn the workflow step retry budget (issues #54 §11
+// and #62): collisions under immutable slots, a ledger-capped spend gate, and
+// post-repair deterministic validation findings cannot change their verdict
+// by repeating, so these fail the step non-retryably ON THE THROWING ATTEMPT.
+// Deterministic stage failures carry a richer domain outcome than this
+// boundary mapping (candidate exists -> HUMAN_REVIEW_REQUIRED) — the pipeline
+// handles those in-step with terminal-result markers before they ever reach
+// here (issue #62 §7); this classification is the backstop for any stray one.
 // Everything else — including the transient STAGE_EXECUTION_IN_PROGRESS
 // single-flight yield — stays retryable under the step policy below.
 export function toWorkflowStepError(error: unknown): unknown {
-  if (
-    error instanceof StageExecutionCollisionError ||
-    error instanceof ImageBudgetExceededError ||
-    (error instanceof StageArtifactError && error.code === "REPAIR_ARTIFACT_MISMATCH")
-  ) {
-    return new NonRetryableError(error.message);
+  if (classifyStageFailure(error) !== "TRANSIENT_RETRYABLE") {
+    return new NonRetryableError((error as Error).message);
   }
   return error;
 }
@@ -199,18 +196,21 @@ export class WebsiteBuildWorkflow extends WorkflowEntrypoint<Env, WebsiteBuildPa
           // every step is idempotent (artifact reuse / spend-resume /
           // single-flight provider claims — issue #54).
           step: async <T,>(name: string, fn: () => Promise<T>) => {
-            try {
-              return (await step.do(
-                name,
-                {
-                  retries: { ...STAGE_STEP_RETRIES } as never,
-                  timeout: "10 minutes",
-                } as never,
-                () => fn() as never
-              )) as T;
-            } catch (error) {
-              throw toWorkflowStepError(error);
-            }
+            // Issue #62: the classification converts INSIDE the step closure
+            // so a NonRetryableError reaches the engine on the throwing
+            // attempt. Converting after step.do rejects would only run once
+            // the retry budget was already burned.
+            return (await step.do(
+              name,
+              {
+                retries: { ...STAGE_STEP_RETRIES } as never,
+                timeout: "10 minutes",
+              } as never,
+              () =>
+                fn().catch((error: unknown): unknown => {
+                  throw toWorkflowStepError(error);
+                }) as never
+            )) as T;
           },
           // Durable image-poll waiting (issue #58 §11): provider PENDING
           // sleeps the INSTANCE via step.sleep instead of occupying a running

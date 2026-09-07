@@ -26,7 +26,7 @@ import { runReferenceIntake, getFrozenReferenceEvidence, type ReferenceCaptureFn
 import { runReferenceAnalysisStage, ReferenceAnalysisError, createProductionVisionGenerate } from "./reference-analysis";
 import { runVisualBlueprintStage, VisualBlueprintError, canonicalRegionComposition, evaluateBlueprintCoverage } from "./visual-blueprint";
 import { produceImplementationContract } from "./implementation-planner";
-import { generateCompleteSite, type ImageSlot } from "./site-generator";
+import { generateCompleteSite, regeneratePagesForRealization, SiteGenerationValidationError, type GeneratedSite, type AssemblyFinding, type ImageSlot } from "./site-generator";
 import {
   getAcceptedImageMap,
   expandSlotsToTarget,
@@ -46,7 +46,6 @@ import {
   type StoredCraftPreflight,
 } from "./craft-preflight";
 import { runQaAStage, runQaBStage, type QaAReport, type QaAReportAugmented, type QaBReport, type QaFinding } from "./qa-stages";
-import { regeneratePagesForRealization } from "./site-generator";
 import { buildRepairContext, evaluateRepairRegression, type RepairEvaluationSnapshot } from "./repair-guard";
 import { assignReleaseReady, ReleaseGateError } from "./release";
 import { getBuildStageArtifact, storeBuildStageArtifactIdempotent } from "./stage-artifacts";
@@ -132,6 +131,49 @@ export type PipelineTerminalStatus =
   | "HUMAN_REVIEW_REQUIRED"
   | "DEGRADED"
   | "FAILED";
+
+// Deterministic terminal marker (issue #62 §7): returned from inside a
+// pipeline step when the stage's own authorized bounded repair is exhausted
+// and a deterministic validation blocker persists. Repeating the step reuses
+// the same frozen immutable artifacts and re-derives the same findings — it
+// can never heal — so the marker is RETURNED instead of thrown to Workflow
+// retries (the #60 blueprint-escalation pattern). The generated artifacts
+// stay stored and inspectable, so where a candidate exists the pipeline
+// escalates to HUMAN_REVIEW_REQUIRED with the precise findings (#62 §8).
+interface DeterministicReviewMarker {
+  deterministicReview: {
+    findings: AssemblyFinding[];
+    message: string;
+    /** Deployed preview evidence when one exists (realization-repair path). */
+    previewUrl: string | null;
+  };
+}
+
+function deterministicReviewOutcome(
+  ids: { siteGenerationId: string; siteId: string; buildId: string; buildVersionId: string },
+  review: DeterministicReviewMarker["deterministicReview"],
+  repairApplied: boolean,
+  qa: { qaA: BuildPipelineOutcome["qaA"]; qaB: BuildPipelineOutcome["qaB"] }
+): BuildPipelineOutcome {
+  const findings = review.findings.map((finding) => `${finding.id} (${finding.detail})`);
+  const reasons = [
+    "SITE_GENERATION_REVIEW_REQUIRED: deterministic assembly validation still failing after the stage's bounded informed repair — automation stopped deterministically; candidate retained for review in the Build Version artifacts (#62 §8)",
+    ...findings,
+  ];
+  return {
+    terminal: "HUMAN_REVIEW_REQUIRED",
+    reasons,
+    siteGenerationId: ids.siteGenerationId,
+    siteId: ids.siteId,
+    buildId: ids.buildId,
+    releaseReadyBuildVersionId: null,
+    artifactManifestHash: null,
+    previewUrl: review.previewUrl,
+    qaA: qa.qaA,
+    qaB: qa.qaB,
+    repairApplied,
+  };
+}
 
 export interface BuildPipelineOutcome {
   terminal: PipelineTerminalStatus;
@@ -602,7 +644,10 @@ export async function runBuildPipeline(
     const produceCandidate = async (
       ctx: VersionContext,
       repairDirectives?: string
-    ): Promise<{ manifestHash: string; previewUrl: string }> => {
+    ): Promise<
+      | { kind: "ok"; manifestHash: string; previewUrl: string }
+      | { kind: "deterministic-review"; review: DeterministicReviewMarker["deterministicReview"] }
+    > => {
       const compositionTargets = compositionFullyMeasured
         ? canonicalComposition.map((region) => ({
             regionId: region.regionId,
@@ -610,22 +655,43 @@ export async function runBuildPipeline(
             evidenceSegmentCount: region.sourceEvidenceRegionIds.length,
           }))
         : undefined;
-      const site = await stepDo(`pipeline: generate site (v${ctx.buildVersionNumber})`, () => generateCompleteSite(env, {
-        siteGenerationId: ctx.siteGenerationId,
-        siteId: ctx.siteId,
-        buildId: ctx.buildId,
-        buildVersionId: ctx.buildVersionId,
-        visualInputs: frozen.evidence.visualInputs,
-        visionGenerate: deps.visionGenerate,
-        buildVersionNumber: ctx.buildVersionNumber,
-        blueprint: blueprint.blueprint,
-        blueprintR2Key: blueprint.artifactR2Key,
-        contract: contract.contract,
-        contractR2Key: contract.artifactR2Key,
-        generate: deps.generate,
-        compositionTargets,
-        ...(repairDirectives ? { repairDirectives } : {}),
-      }));
+      const site = await stepDo(
+        `pipeline: generate site (v${ctx.buildVersionNumber})`,
+        async (): Promise<GeneratedSite | DeterministicReviewMarker> => {
+          try {
+            return await generateCompleteSite(env, {
+              siteGenerationId: ctx.siteGenerationId,
+              siteId: ctx.siteId,
+              buildId: ctx.buildId,
+              buildVersionId: ctx.buildVersionId,
+              visualInputs: frozen.evidence.visualInputs,
+              visionGenerate: deps.visionGenerate,
+              buildVersionNumber: ctx.buildVersionNumber,
+              blueprint: blueprint.blueprint,
+              blueprintR2Key: blueprint.artifactR2Key,
+              contract: contract.contract,
+              contractR2Key: contract.artifactR2Key,
+              generate: deps.generate,
+              compositionTargets,
+              ...(repairDirectives ? { repairDirectives } : {}),
+            });
+          } catch (error) {
+            // Issue #62 §7: deterministic assembly validation after the ONE
+            // informed assembly repair (e.g. ORPHANED_CLASS,
+            // FABRICATED_TRUST_ENTITY). Repeating the step reloads the same
+            // frozen artifacts and returns the same findings — it must not
+            // burn the Workflow retry budget. Candidate exists (pages/CSS/JS
+            // are stored immutable) -> HUMAN_REVIEW_REQUIRED via the marker.
+            if (error instanceof SiteGenerationValidationError) {
+              return { deterministicReview: { findings: error.findings, message: error.message, previewUrl: null } };
+            }
+            throw error;
+          }
+        }
+      );
+      if ("deterministicReview" in site) {
+        return { kind: "deterministic-review", review: site.deterministicReview };
+      }
 
       // Normal 12-Accepted-Image target with spend-resume idempotency: expand
       // to the target, then generate only slots without an acceptance for THIS
@@ -655,7 +721,9 @@ export async function runBuildPipeline(
 
       const acceptedImageEntries = await getAcceptedImageMap(env, ctx.buildVersionId);
       const acceptedImages = new Map([...acceptedImageEntries].map(([slotId, entry]) => [slotId, entry.r2Key] as const));
-      const candidate = await stepDo(`pipeline: assemble + preview (v${ctx.buildVersionNumber})`, async () => {
+      const candidate = await stepDo(
+        `pipeline: assemble + preview (v${ctx.buildVersionNumber})`,
+        async (): Promise<{ manifestHash: string; previewUrl: string } | DeterministicReviewMarker> => {
         const craftInputs = {
           buildId: ctx.buildId,
           buildVersionId: ctx.buildVersionId,
@@ -760,27 +828,40 @@ export async function runBuildPipeline(
             if (pair.candidate) inputs.push({ kind: "slice" as const, artifact: pair.candidate.artifactR2Key, sha256: pair.candidate.cropSha256, width: pair.candidate.width, height: pair.candidate.height, sliceIndex: index * 2 + 1 });
             return inputs;
           });
-          const regenerated = await regeneratePagesForRealization(env, {
-            ...craftInputs,
-            blueprint: blueprint.blueprint,
-            blueprintR2Key: blueprint.artifactR2Key,
-            contract: contract.contract,
-            contractR2Key: contract.artifactR2Key,
-            imagePlan: site.imagePlan,
-            affected,
-            findingDirectives: craft.directiveText,
-            ...(compositionTargets ? { compositionTargets } : {}),
-            ...(cropVisualInputs.length > 0 ? { visualInputs: cropVisualInputs } : {}),
-            visionGenerate:
-              cropVisualInputs.length > 0
-                ? deps.visionGenerate ??
-                  createProductionVisionGenerate(env, cropVisualInputs, {
-                    buildId: ctx.buildId,
-                    buildVersionNumber: ctx.buildVersionNumber,
-                  })
-                : deps.generate,
-            generate: deps.generate,
-          });
+          // Issue #62 §7: the same deterministic-terminal rule applies to the
+          // realization repair's re-validation — after its one bounded round,
+          // a persisting validation blocker returns the review marker (with
+          // the deployed preview as inspectable evidence) instead of throwing
+          // into Workflow retries.
+          let regenerated: Awaited<ReturnType<typeof regeneratePagesForRealization>>;
+          try {
+            regenerated = await regeneratePagesForRealization(env, {
+              ...craftInputs,
+              blueprint: blueprint.blueprint,
+              blueprintR2Key: blueprint.artifactR2Key,
+              contract: contract.contract,
+              contractR2Key: contract.artifactR2Key,
+              imagePlan: site.imagePlan,
+              affected,
+              findingDirectives: craft.directiveText,
+              ...(compositionTargets ? { compositionTargets } : {}),
+              ...(cropVisualInputs.length > 0 ? { visualInputs: cropVisualInputs } : {}),
+              visionGenerate:
+                cropVisualInputs.length > 0
+                  ? deps.visionGenerate ??
+                    createProductionVisionGenerate(env, cropVisualInputs, {
+                      buildId: ctx.buildId,
+                      buildVersionNumber: ctx.buildVersionNumber,
+                    })
+                  : deps.generate,
+              generate: deps.generate,
+            });
+          } catch (error) {
+            if (error instanceof SiteGenerationValidationError) {
+              return { deterministicReview: { findings: error.findings, message: error.message, previewUrl: preview.previewUrl } };
+            }
+            throw error;
+          }
 
           built = await buildAssembledCandidate(env, {
             siteGenerationId: ctx.siteGenerationId,
@@ -848,7 +929,10 @@ export async function runBuildPipeline(
         });
         return { manifestHash: built.artifactManifestHash, previewUrl: preview.previewUrl };
       });
-      return candidate;
+      if ("deterministicReview" in candidate) {
+        return { kind: "deterministic-review", review: candidate.deterministicReview };
+      }
+      return { kind: "ok", manifestHash: candidate.manifestHash, previewUrl: candidate.previewUrl };
     };
 
     const evaluate = async (
@@ -1039,6 +1123,25 @@ export async function runBuildPipeline(
       siteGenerationId: input.siteGenerationId, siteId, buildId,
       buildVersionId: version.buildVersionId, buildVersionNumber: version.buildVersionNumber,
     }, currentVersionRepairPlan ? repairDirectivesFromPlan(currentVersionRepairPlan) : undefined);
+    if (first.kind === "deterministic-review") {
+      // Issue #62 §8: a useful inspectable candidate exists (the generated
+      // pages/CSS/JS are stored immutable) but automatic compliance failed —
+      // automation stopped deterministically, operator intervention required.
+      await appendBuildWorkflowEvent(env, {
+        buildId,
+        buildVersionId: version.buildVersionId,
+        fromState: "SITE_GENERATION",
+        toState: "HUMAN_REVIEW_REQUIRED",
+        stage: "site_generation",
+        detail: `SITE_GENERATION_REVIEW_REQUIRED: ${first.review.message.slice(0, 380)}`,
+      });
+      return deterministicReviewOutcome(
+        { siteGenerationId: input.siteGenerationId, siteId, buildId, buildVersionId: version.buildVersionId },
+        first.review,
+        repairApplied,
+        { qaA: null, qaB: null }
+      );
+    }
     const firstQa = await evaluate(
       { siteGenerationId: input.siteGenerationId, siteId, buildId, buildVersionId: version.buildVersionId, buildVersionNumber: version.buildVersionNumber },
       first.previewUrl,
@@ -1254,6 +1357,28 @@ export async function runBuildPipeline(
       // repaired version with the SAME directives (runOrReuse then reuses
       // whatever the interrupted pass already produced).
       const regenerated = await produceCandidate(repairedCtx, repairDirectivesFromPlan(plan));
+      if (regenerated.kind === "deterministic-review") {
+        // Issue #62 §8/§14: the repaired candidate deterministically failed
+        // assembly validation after its own bounded repair. No Release Ready,
+        // no Approval — escalate with the precise findings; the retained
+        // artifacts remain the review candidate and the blocker stays
+        // recorded. No Workflow retry burn.
+        await appendBuildWorkflowEvent(env, {
+          buildId,
+          buildVersionId: version.buildVersionId,
+          fromState: "SITE_GENERATION",
+          toState: "HUMAN_REVIEW_REQUIRED",
+          stage: "site_generation",
+          detail: `SITE_GENERATION_REVIEW_REQUIRED (repaired v${version.buildVersionNumber}): ${regenerated.review.message.slice(0, 380)}`,
+        });
+        outcome = deterministicReviewOutcome(
+          repairedCtx,
+          regenerated.review,
+          repairApplied,
+          { qaA: currentQa.qaA, qaB: currentQa.qaB }
+        );
+        break;
+      }
       currentPreviewUrl = regenerated.previewUrl;
 
       const confirmation = await runConfirmationQa(env, {
