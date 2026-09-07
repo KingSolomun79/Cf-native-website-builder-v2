@@ -47,7 +47,8 @@ export class RetrySemanticsCanaryWorkflow extends WorkflowEntrypoint<Env, RetryS
     event: WorkflowEvent<RetrySemanticsCanaryParams>,
     step: WorkflowStep
   ): Promise<{ variant: string; pass: string; elapsedMs: number }> {
-    const { variant } = event.payload;
+    // Normalize: REST-created payloads have arrived lowercased in practice.
+    const variant = (event.payload?.variant ?? "A").toUpperCase() as "A" | "B";
     const threshold = PASS_THRESHOLD_MS[variant] ?? PASS_THRESHOLD_MS.A;
 
     // Cached forever after its first completion: the stable elapsed-time
