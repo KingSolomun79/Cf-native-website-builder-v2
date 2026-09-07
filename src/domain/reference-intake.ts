@@ -92,8 +92,16 @@ export interface ReferenceCaptureOutput {
     mimeType: string;
   }>;
   regions: ReferenceEvidence["regions"];
-  /** Issue #65: scrollY at DOM measurement time — page-space normalization
-   *  offset for the viewport-relative region bounds. */
+  /** Issue #68: the coordinate space of the frozen region coordinates.
+   *  The production capture freezes PAGE_SPACE (adapter layout bounds are
+   *  measured as viewport rect + scrollY in one evaluation). Optional so
+   *  pre-#68 fixture capture functions remain valid; evidence frozen without
+   *  a declaration normalizes through the legacy inference in
+   *  reference-geometry.ts. */
+  coordinateSpace?: "PAGE_SPACE" | "VIEWPORT_SPACE";
+  /** Issue #65/#68: scrollY at DOM measurement time — observational
+   *  provenance recorded alongside the frozen coordinates, never a
+   *  normalization instruction for PAGE_SPACE evidence. */
   captureScrollY?: number;
   measuredElements: ReferenceEvidence["measuredElements"];
   responsiveObservations: unknown[];
@@ -417,6 +425,12 @@ export async function runReferenceIntake(
     });
   }
 
+  // Issue #68 coordinate-space declaration: the production capture freezes
+  // PAGE_SPACE coordinates and screenshot-only extraction bands ARE
+  // screenshot rows (page space). A capture output without an explicit
+  // declaration (pre-#68 fixture adapters) freezes undeclared so the
+  // geometry authority's legacy inference keeps normalizing it.
+  const declaredCoordinateSpace = captureOutput ? captureOutput.coordinateSpace : ("PAGE_SPACE" as const);
   const evidence: ReferenceEvidence = {
     version: REFERENCE_EVIDENCE_VERSION,
     ...(reference.url ? { referenceUrl: reference.url } : {}),
@@ -433,8 +447,9 @@ export async function runReferenceIntake(
       height: band.height,
       viewportHeightRatio: band.viewportHeightRatio,
     })),
-    // Issue #65: recorded page-space normalization offset for the DOM-measured
-    // region bounds (pixels — extractionBands are already in page space).
+    ...(declaredCoordinateSpace ? { coordinateSpace: declaredCoordinateSpace } : {}),
+    // Issue #65/#68: captureScrollY is observational provenance for the
+    // frozen coordinates (pixels — never reapplied to PAGE_SPACE evidence).
     ...(captureOutput?.regions && typeof captureOutput.captureScrollY === "number"
       ? { captureScrollY: captureOutput.captureScrollY }
       : {}),
@@ -856,20 +871,20 @@ async function captureReferenceSignals(
     const mobile = await captureMobilePass(browser, referenceUrl);
 
     const viewportHeight = desktop.height;
-    // Issue #65: section bounds from getBoundingClientRect are
-    // viewport-RELATIVE, and the layout is extracted after the scroll sweep —
-    // production (Build 282f9b9d) recorded sections at negative page
-    // coordinates while the full-page screenshot lives in page space. Both
-    // the regions and the captureScrollY offset are frozen so the canonical
-    // mapping authority can normalize deterministically.
+    // Issue #68: the adapter freezes every layout bound in PAGE_SPACE
+    // (viewport rect + scrollY measured in one evaluation), so region
+    // coordinates are frozen identity — captureScrollY is recorded as
+    // observational provenance only and is NEVER reapplied here or by the
+    // geometry authority (the double normalization that failed Build
+    // 436c357a is structurally impossible under the declared contract).
     const captureScrollY = layout.scrollY ?? 0;
     const regions: ReferenceEvidence["regions"] = layout.sections.map((section) => ({
       id: `region-${section.order}`,
-      startY: section.bounds.y + captureScrollY,
-      endY: section.bounds.y + captureScrollY + section.bounds.height,
+      startY: section.bounds.y,
+      endY: section.bounds.y + section.bounds.height,
       height: section.bounds.height,
       viewportHeightRatio: Number((section.bounds.height / viewportHeight).toFixed(3)),
-      boundingBox: { ...section.bounds, y: section.bounds.y + captureScrollY },
+      boundingBox: { ...section.bounds },
     }));
 
     const measuredElements: ReferenceEvidence["measuredElements"] = [
@@ -991,6 +1006,7 @@ async function captureReferenceSignals(
       },
       captures,
       regions,
+      coordinateSpace: "PAGE_SPACE",
       captureScrollY,
       measuredElements,
       responsiveObservations: [

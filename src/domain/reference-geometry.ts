@@ -100,11 +100,29 @@ function screenshotHeightOf(evidence: ReferenceEvidence): number | null {
 }
 
 // Deterministic transform from raw evidence coordinates to the frozen
-// screenshot's page space. Recorded capture scroll wins; legacy scrolled
-// evidence is recovered from its own minimum and validated against the
-// screenshot height when that height is known. Coordinates are never
-// invented: an unrecoverable or contradicted space fails closed.
-export function resolveGeometryTransform(evidence: ReferenceEvidence): { transform: GeometryTransform; bands: RawBand[] } {
+// screenshot's page space (issue #68 contract):
+//
+// - coordinateSpace=PAGE_SPACE: the frozen coordinates ARE screenshot page
+//   space. The identity transform is authoritative and captureScrollY is
+//   observational provenance — applying it would double-normalize (the
+//   Build 436c357a production failure).
+// - coordinateSpace=VIEWPORT_SPACE: coordinates are getBoundingClientRect
+//   values; the recorded captureScrollY is the normalization offset.
+// - No declaration (legacy immutable artifacts): deterministic compatibility
+//   inference. The identity and the scroll-offset candidates (recorded
+//   captureScrollY, and the historical min(startY) recovery for negative
+//   evidence) are each evaluated against the screenshot bounds with the
+//   span/bottom-slack validation. A transform is accepted ONLY when uniquely
+//   valid; both-or-neither fails closed as REFERENCE_REGION_MAPPING_AMBIGUOUS.
+//   When no screenshot height exists the bounds cannot discriminate, so the
+//   documented historical precedence (recorded > recovered > identity) keeps
+//   legacy evidence inspectable, marked unverified.
+export function resolveGeometryTransform(evidence: ReferenceEvidence): {
+  transform: GeometryTransform;
+  bands: RawBand[];
+  spaceValid: boolean;
+  spaceError: string | null;
+} {
   const bands: RawBand[] = evidence.regions.map((region, index) => ({
     id: region.id,
     index,
@@ -116,42 +134,125 @@ export function resolveGeometryTransform(evidence: ReferenceEvidence): { transfo
   const measured = bands.filter((band) => band.startY !== null && band.endY !== null);
   const screenshotHeightPx = screenshotHeightOf(evidence);
 
-  let transform: GeometryTransform;
-  if (typeof evidence.captureScrollY === "number" && evidence.captureScrollY >= 0) {
-    transform = {
-      kind: "recorded",
-      offsetPx: evidence.captureScrollY,
-      basis: `evidence.captureScrollY=${evidence.captureScrollY}`,
-      verified: false,
+  // Full-page-capture span validation: the translated span must sit INSIDE
+  // the screenshot and cover essentially all of it (body padding/slack).
+  const spanFits = (offsetPx: number): boolean | null => {
+    if (measured.length === 0 || screenshotHeightPx === null) return null;
+    const spanStart = Math.min(...measured.map((band) => band.startY!)) + offsetPx;
+    const spanEnd = Math.max(...measured.map((band) => band.endY!)) + offsetPx;
+    const bottomSlack = screenshotHeightPx - spanEnd;
+    return (
+      spanStart >= -PX_ROUNDING_TOLERANCE &&
+      spanEnd <= screenshotHeightPx + PX_ROUNDING_TOLERANCE &&
+      bottomSlack <= Math.max(120, 0.05 * screenshotHeightPx)
+    );
+  };
+
+  const declared = evidence.coordinateSpace ?? null;
+
+  if (declared === "PAGE_SPACE") {
+    return {
+      transform: {
+        kind: "identity",
+        offsetPx: 0,
+        basis: `coordinateSpace=PAGE_SPACE — frozen coordinates are screenshot page space (captureScrollY=${evidence.captureScrollY ?? "unrecorded"} is observational provenance, never reapplied)`,
+        verified: spanFits(0) === true,
+      },
+      bands,
+      spaceValid: true,
+      spaceError: null,
     };
-  } else {
-    const minStart = measured.length ? Math.min(...measured.map((band) => band.startY!)) : 0;
-    if (minStart < 0) {
-      transform = {
-        kind: "recovered",
-        offsetPx: -minStart,
-        basis: `legacy scrolled capture recovered from min(startY)=${minStart}`,
-        verified: false,
-      };
-    } else {
-      transform = { kind: "identity", offsetPx: 0, basis: "evidence already in page space", verified: true };
-    }
   }
 
-  if (transform.kind !== "identity" && screenshotHeightPx !== null) {
-    if (measured.length > 0) {
-      const spanStart = Math.min(...measured.map((band) => band.startY!)) + transform.offsetPx;
-      const spanEnd = Math.max(...measured.map((band) => band.endY!)) + transform.offsetPx;
-      const bottomSlack = screenshotHeightPx - spanEnd;
-      // The lowest section may legitimately end above the page bottom (body
-      // padding, trailing scripts), but the span must sit INSIDE the
-      // screenshot and cover essentially all of it for a full-page capture.
-      if (spanStart >= -PX_ROUNDING_TOLERANCE && spanEnd <= screenshotHeightPx + PX_ROUNDING_TOLERANCE && bottomSlack <= Math.max(120, 0.05 * screenshotHeightPx)) {
-        transform = { ...transform, verified: true };
-      }
+  if (declared === "VIEWPORT_SPACE") {
+    if (typeof evidence.captureScrollY === "number" && evidence.captureScrollY >= 0) {
+      const fits = spanFits(evidence.captureScrollY);
+      return {
+        transform: {
+          kind: "recorded",
+          offsetPx: evidence.captureScrollY,
+          basis: `coordinateSpace=VIEWPORT_SPACE normalized once by captureScrollY=${evidence.captureScrollY}`,
+          verified: fits === true,
+        },
+        bands,
+        spaceValid: fits !== false,
+        spaceError: fits === false ? "declared VIEWPORT_SPACE offset contradicts the frozen screenshot bounds" : null,
+      };
     }
+    return {
+      transform: {
+        kind: "identity",
+        offsetPx: 0,
+        basis: "coordinateSpace=VIEWPORT_SPACE without a recorded captureScrollY — no deterministic normalization exists",
+        verified: false,
+      },
+      bands,
+      spaceValid: false,
+      spaceError: "VIEWPORT_SPACE evidence lacks the captureScrollY required to normalize into page space",
+    };
   }
-  return { transform, bands };
+
+  // Legacy compatibility inference (no declared coordinate space).
+  interface LegacyCandidate {
+    kind: GeometryTransformKind;
+    offsetPx: number;
+    basis: string;
+  }
+  const candidates: LegacyCandidate[] = [];
+  if (typeof evidence.captureScrollY === "number" && evidence.captureScrollY > 0) {
+    candidates.push({
+      kind: "recorded",
+      offsetPx: evidence.captureScrollY,
+      basis: `legacy evidence normalized by recorded captureScrollY=${evidence.captureScrollY}`,
+    });
+  }
+  const minStart = measured.length ? Math.min(...measured.map((band) => band.startY!)) : 0;
+  if (minStart < 0 && !candidates.some((candidate) => candidate.offsetPx === -minStart)) {
+    candidates.push({
+      kind: "recovered",
+      offsetPx: -minStart,
+      basis: `legacy scrolled capture recovered from min(startY)=${minStart}`,
+    });
+  }
+  if (!candidates.some((candidate) => candidate.offsetPx === 0)) {
+    candidates.push({ kind: "identity", offsetPx: 0, basis: "legacy evidence already in page space" });
+  }
+
+  // Historical precedence for the (unverifiable) no-height case: recorded >
+  // recovered > identity — exactly the pre-#68 selection order.
+  const precedence = (kind: GeometryTransformKind): number => (kind === "recorded" ? 0 : kind === "recovered" ? 1 : 2);
+  const byPrecedence = [...candidates].sort((a, b) => precedence(a.kind) - precedence(b.kind));
+  const fallback = byPrecedence[0];
+
+  if (screenshotHeightPx === null) {
+    return {
+      transform: { ...fallback, verified: false },
+      bands,
+      spaceValid: true,
+      spaceError: null,
+    };
+  }
+
+  const valid = candidates.filter((candidate) => spanFits(candidate.offsetPx) === true);
+  if (valid.length === 1) {
+    return {
+      transform: { ...valid[0], verified: true },
+      bands,
+      spaceValid: true,
+      spaceError: null,
+    };
+  }
+
+  const spaceError =
+    valid.length === 0
+      ? "legacy evidence normalizes to no transform consistent with the frozen screenshot bounds"
+      : `legacy coordinate space is ambiguous: ${valid.length} distinct transforms (identity and scroll-offset) are consistent with the frozen screenshot`;
+  return {
+    transform: { ...fallback, verified: false },
+    bands,
+    spaceValid: false,
+    spaceError,
+  };
 }
 
 export interface ResolveReferenceGeometryInput {
@@ -200,16 +301,9 @@ export function unmappedHeightFindingRegions(
 // consumer (composition targets, craft preflight crops, QA reference
 // profile) resolves through here — mapping logic is never reimplemented.
 export function resolveReferenceGeometry(input: ResolveReferenceGeometryInput): ReferenceGeometryPackage {
-  const { transform, bands } = resolveGeometryTransform(input.evidence);
+  const { transform, bands, spaceValid, spaceError } = resolveGeometryTransform(input.evidence);
   const screenshotHeightPx = screenshotHeightOf(input.evidence);
   const referenceSha256 = input.evidence.extraction?.sourceSha256 ?? null;
-
-  // Validate the recovered/recorded space where possible; a contradicted
-  // space poisons every region (fail closed, no numeric targets at all).
-  let spaceValid = true;
-  if (transform.kind !== "identity" && screenshotHeightPx !== null && !transform.verified) {
-    spaceValid = false;
-  }
 
   // Viewport height: the recorded capture viewport wins (it is the exact
   // denominator the evidence's own ratios were computed against); the median
@@ -222,7 +316,13 @@ export function resolveReferenceGeometry(input: ResolveReferenceGeometryInput): 
   const medianViewportHeight = viewportCandidates.length ? viewportCandidates[Math.floor(viewportCandidates.length / 2)] : null;
   const viewportHeightPx = recordedViewportHeight ?? medianViewportHeight;
 
+  // Per-band normalization with the #68 §7 screenshot-authority check: for
+  // any declared or inferred space, a band whose normalized interval leaves
+  // the frozen screenshot (0 <= startY, endY <= height, tiny capture
+  // tolerance) contradicts its own space and fails closed for the canonical
+  // regions claiming it.
   const normalizedById = new Map<string, NormalizedInterval | null>();
+  const bandErrors = new Map<string, string>();
   for (const band of bands) {
     if (band.startY === null || band.endY === null) {
       normalizedById.set(band.id, null);
@@ -231,6 +331,12 @@ export function resolveReferenceGeometry(input: ResolveReferenceGeometryInput): 
     const startY = band.startY + transform.offsetPx;
     const endY = band.endY + transform.offsetPx;
     if (!spaceValid || startY < -PX_ROUNDING_TOLERANCE || endY <= startY) {
+      bandErrors.set(band.id, `normalizes to invalid page-space interval ${Math.round(startY)}..${Math.round(endY)}`);
+      normalizedById.set(band.id, null);
+      continue;
+    }
+    if (screenshotHeightPx !== null && endY > screenshotHeightPx + PX_ROUNDING_TOLERANCE) {
+      bandErrors.set(band.id, `end ${Math.round(endY)} exceeds the frozen screenshot height ${screenshotHeightPx}`);
       normalizedById.set(band.id, null);
       continue;
     }
@@ -281,7 +387,10 @@ export function resolveReferenceGeometry(input: ResolveReferenceGeometryInput): 
 
   if (!spaceValid) {
     for (const region of regions) {
-      markAmbiguous(region.regionId, `reference coordinate space is not recoverable against the frozen screenshot (transform: ${transform.basis})`);
+      markAmbiguous(
+        region.regionId,
+        `${spaceError ?? "reference coordinate space is not recoverable against the frozen screenshot"} (transform: ${transform.basis})`
+      );
     }
   }
 
@@ -341,7 +450,11 @@ export function resolveReferenceGeometry(input: ResolveReferenceGeometryInput): 
         break;
       }
       if (interval === null) {
-        markAmbiguous(region.regionId, `evidence region '${sourceId}' has no valid normalized coordinates`);
+        const bandError = bandErrors.get(sourceId);
+        markAmbiguous(
+          region.regionId,
+          `evidence region '${sourceId}' ${bandError ?? "has no valid normalized coordinates"}`
+        );
         break;
       }
       intervals.push(interval);

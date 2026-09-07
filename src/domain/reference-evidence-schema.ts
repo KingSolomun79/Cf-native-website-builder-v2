@@ -33,11 +33,22 @@ export const ReferenceEvidenceSchema = Type.Object(
   version: Type.String({ minLength: 1 }),
   referenceUrl: Type.Optional(Type.String({ minLength: 1 })),
   screenshotId: Type.String({ minLength: 1 }),
-  // Issue #65: the page's scrollY at the moment the DOM region bounds were
-  // measured. Region bounding boxes from getBoundingClientRect are
-  // viewport-relative; page-space normalization adds this offset. Evidence
-  // captured before #65 lacks the field and is normalized through the
-  // deterministic recovery transform in reference-geometry.ts instead.
+  // Issue #68: explicit frozen declaration of the coordinate space every
+  // frozen Y coordinate (regions, measuredElement boxes) lives in.
+  //   PAGE_SPACE    — coordinates are already the screenshot's page space;
+  //                   geometry must apply the identity transform.
+  //   VIEWPORT_SPACE — coordinates are getBoundingClientRect values; geometry
+  //                   normalizes by adding captureScrollY.
+  // New captures always freeze PAGE_SPACE. Evidence captured before #68 lacks
+  // the field and is normalized through the deterministic legacy inference in
+  // reference-geometry.ts (bounds + ordering evaluated; only a uniquely valid
+  // transform is accepted, otherwise the mapping fails closed).
+  coordinateSpace: Type.Optional(Type.Union([Type.Literal("PAGE_SPACE"), Type.Literal("VIEWPORT_SPACE")])),
+  // Issue #65/#68: the page's scrollY at the moment the DOM bounds were
+  // measured — OBSERVATIONAL PROVENANCE ONLY. It is never a normalization
+  // instruction for PAGE_SPACE evidence; applying it there would double-
+  // normalize (the production 436c357a failure). Only the explicit
+  // VIEWPORT_SPACE contract consumes it as the normalization offset.
   captureScrollY: Type.Optional(Type.Number({ minimum: 0 })),
     screenshotMetadata: Type.Object(
       {

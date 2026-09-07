@@ -119,9 +119,11 @@ export interface RawLayout {
   headline?: RawHeadline | null;
   viewportHeight?: number;
   viewportWidth?: number;
-  /** Issue #65: window.scrollY at measurement time. Section/headline bounds
-   *  from getBoundingClientRect are viewport-relative; page-space consumers
-   *  must add this offset. Optional for pre-#65 fixture adapters. */
+  /** Issue #65/#68: window.scrollY at measurement time — OBSERVATIONAL
+   *  PROVENANCE ONLY. Every coordinate channel of this layout (section and
+   *  headline bounds, image boundsY) is already frozen in PAGE_SPACE
+   *  (viewport rect + scrollY, measured in one evaluation), so consumers
+   *  must NOT re-apply this offset. Optional for pre-#65 fixture adapters. */
   scrollY?: number;
 }
 
@@ -397,11 +399,17 @@ function makePlaywrightPage(page: import("@cloudflare/playwright").Page): Browse
   };
 }
 
-const EXTRACT_LAYOUT_SCRIPT = `(() => {
+// Issue #68: one coordinate space for every frozen channel. All rects are
+// measured in a single evaluate() call, so window.scrollY is constant across
+// them; adding it to each rect's viewport-relative y freezes sections,
+// headline and images uniformly in PAGE_SPACE (image boundsY already did
+// this — the previous sections/headline gap was the mixed-space defect).
+// Exported for the coordinate-space contract test only.
+export const EXTRACT_LAYOUT_SCRIPT = `(() => {
   const trim = (s) => (s ? String(s).replace(/\\s+/g, " ").trim().slice(0, 300) : null);
   const round = (n) => Math.round(n);
   const eid = (el) => el.getAttribute("data-cf-evidence-id");
-  const boundsOf = (el) => { const r = el.getBoundingClientRect(); return { x: round(r.x), y: round(r.y), width: round(r.width), height: round(r.height) }; };
+  const boundsOf = (el) => { const r = el.getBoundingClientRect(); return { x: round(r.x), y: round(r.y + window.scrollY), width: round(r.width), height: round(r.height) }; };
   const styleOf = (el) => { const s = getComputedStyle(el); return { fontFamily: s.fontFamily, fontSize: s.fontSize, fontWeight: s.fontWeight, lineHeight: s.lineHeight, letterSpacing: s.letterSpacing, textTransform: s.textTransform }; };
   const landmark = "header, [role=banner], nav, [role=navigation], main, [role=main], section, article, aside, footer, [role=contentinfo]";
   const sections = Array.from(document.querySelectorAll(landmark)).filter((el) => el.getBoundingClientRect().width > 0 && el.getBoundingClientRect().height > 0).slice(0, 40).map((el, i) => { const h = el.querySelector("h1, h2, h3, h4"); return { order: i, tag: el.tagName.toLowerCase(), role: el.getAttribute("role"), heading: h ? trim(h.textContent) : null, text: trim(el.textContent), bounds: boundsOf(el), evidenceId: eid(el), dataRegion: el.getAttribute("data-region") }; });

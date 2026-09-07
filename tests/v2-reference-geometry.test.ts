@@ -124,6 +124,10 @@ describe("reference geometry mapping authority (issue #65)", () => {
     const geometry = resolveReferenceGeometry({
       blueprint: { homepageRegions: [{ id: "region_a", purpose: "top band", sourceEvidenceRegionIds: ["region-0"] }, { id: "region_b", purpose: "bottom band", sourceEvidenceRegionIds: ["region-missing"] }] },
       evidence: fixtureEvidence({
+        // Issue #68: the synthetic screenshot height matches the synthetic
+        // regions so the identity transform passes the full-page span check —
+        // this test exercises unknown-id refusal, not space inference.
+        screenshotMetadata: { pixelHeight: 600, likelyCssViewportWidth: 1440 },
         regions: [
           { id: "region-0", startY: 0, endY: 500, height: 500, viewportHeightRatio: 0.55 },
         ],
@@ -164,6 +168,9 @@ describe("reference geometry mapping authority (issue #65)", () => {
     const geometry = resolveReferenceGeometry({
       blueprint: { homepageRegions: [{ id: "region_split", purpose: "two separated bands", sourceEvidenceRegionIds: ["region-0", "region-1"] }] },
       evidence: fixtureEvidence({
+        // Issue #68: synthetic screenshot height consistent with the
+        // synthetic band span (full-page slack check satisfied).
+        screenshotMetadata: { pixelHeight: 1300, likelyCssViewportWidth: 1440 },
         regions: [
           { id: "region-0", startY: 100, endY: 400, height: 300, viewportHeightRatio: 0.33 },
           { id: "region-1", startY: 900, endY: 1200, height: 300, viewportHeightRatio: 0.33 },
