@@ -1,18 +1,25 @@
 // Workflow-level single-flight retry-liveness tests (retry-liveness directive
-// §7–§8, on top of issues #54–#56).
+// §7–§8, on top of issues #54–#56, #61, #64).
 //
 // The #54 single-flight yield (STAGE_EXECUTION_IN_PROGRESS) is only safe if a
 // stale claim can actually be taken over BEFORE the Workflow step exhausts its
 // retries. These tests prove that end to end with a policy-faithful simulated
 // Workflow engine:
 //
-//   - retries.limit is the TOTAL number of attempts (Workflows docs,
-//     "Sleeping and retrying": "The total number of attempts to make for a
-//     step"), so limit 8 = one initial attempt + 7 retries.
+//   - retries.limit counts RETRIES, so limit 8 = the initial attempt + 8
+//     retries = 9 attempts total. The Workflows docs describe limit as the
+//     "total number of attempts"; the 2026-09-07 production canary proved
+//     the engine's actual semantics (limit 2 produced 3 attempts, 30/30
+//     instances). Issue #64 §3 pins the timeline against the PROVEN model.
 //   - retries.delay may be a delay function receiving { ctx, error } (the
-//     production config under test uses exactly this).
+//     production config under test uses exactly this), and backoff
+//     "constant" applies the returned value verbatim (#61).
 //   - timeout ("10 minutes") is per attempt and is observed from the real
 //     config the workflow hands the engine.
+//   - The engine may rehydrate thrown errors so the delay function cannot
+//     recognize them (#63 canary: 0/10 recognitions in production). The
+//     rehydrateErrors option simulates that: correctness must hold on the
+//     fallback schedule alone (#64 normative contract).
 //
 // The engine never sleeps: retry waits advance a virtual clock, and wall-time
 // progression past a claim lease is simulated by backdating expired
@@ -133,6 +140,11 @@ class RetryEngine {
       /** §8: end the drive cleanly as soon as a step with this name prefix
        *  resolves. */
       completeAfterResultOf?: string;
+      /** #64 §4/§5: simulate the production rehydration proven by the #63
+       *  canary — the delay function receives a GENERIC Error with no
+       *  recognizable identity or message structure, so the lease-aware
+       *  branch can never fire and the fallback schedule governs. */
+      rehydrateErrors?: boolean;
     } = {}
   ) {}
 
@@ -188,18 +200,26 @@ class RetryEngine {
       return result;
     } catch (error) {
       if (error instanceof ScenarioComplete) throw error;
+      // Proven platform semantics (#63 canary, 30/30 instances): limit counts
+      // RETRIES — total attempts = limit + 1.
       const limit = config?.retries?.limit ?? 5; // documented platform default
-      if (attempt >= limit) {
+      if (attempt >= limit + 1) {
         this.events.push({ step: name, kind: "exhausted", attempt });
         throw error;
       }
-      const delayMs = this.resolveDelay(config, attempt, error);
+      // #64: under rehydrateErrors the delay function — and the wait
+      // classification — observe the generic rehydrated shape, exactly as
+      // production hands it to the WorkflowDelayFunction.
+      const observedError = this.options.rehydrateErrors
+        ? new Error("rehydrated: original error identity not preserved by the runtime")
+        : error;
+      const delayMs = this.resolveDelay(config, attempt, observedError);
       this.events.push({
         step: name,
         kind: "wait",
         attempt,
         delayMs,
-        waitKind: stageInProgressRetryAfterMs(error) !== null ? "in_progress_wait" : "fallback_backoff",
+        waitKind: stageInProgressRetryAfterMs(observedError) !== null ? "in_progress_wait" : "fallback_backoff",
       });
       if (this.options.holdClockUntil) await this.options.holdClockUntil;
       await this.advanceClock(delayMs);
@@ -353,34 +373,44 @@ describe("single-flight retry liveness (workflow level)", () => {
     expect(horizon).toBeGreaterThan(660_000);
   });
 
-  // Issue #61 §4: the actual repo-owned schedule for the configured attempt
-  // count, recorded (attempt -> delay, cumulative), with the horizon bounded
-  // EVEN under limit-semantics ambiguity (the application must stay correct
-  // if Cloudflare interprets retries.limit as one additional attempt).
-  it("records the repo-owned fallback attempt schedule and bounds the horizon under limit ambiguity (issue #61 §4)", () => {
-    const schedule: Array<{ attempt: number; delaySeconds: number; cumulativeSeconds: number }> = [];
+  // Issue #64 §3: the exact fallback timeline under the PROVEN limit
+  // semantics (limit counts retries — #63 canary, 30/30 instances; the old
+  // "limit ambiguity" language is retired). Required invariant: the first
+  // stale-eligible retry occurs before retry exhaustion, with at least one
+  // attempt to spare.
+  it("records the proven fallback timeline: stale takeover at retry 7 of 8, one spare attempt (issue #64 §3)", () => {
+    const LEASE_HORIZON_MS = STAGE_EXECUTION_LEASE_MS + STAGE_EXECUTION_RETRY_MARGIN_MS; // 675s
+    const LIMIT = 8; // production STAGE_STEP_RETRIES.limit = 8 retries
+    const retryDelays = Array.from({ length: LIMIT }, (_, index) => stageStepFallbackDelayMs(index + 1));
+    expect(retryDelays).toEqual([10_000, 20_000, 40_000, 80_000, 160_000, 320_000, 640_000, 1_280_000]);
+
+    // Wake time of each post-initial attempt (attempt k starts after retries
+    // 1..k-1 have elapsed).
+    const timeline: Array<{ attempt: number; retry: number | null; wakeSeconds: number }> = [
+      { attempt: 1, retry: null, wakeSeconds: 0 },
+    ];
     let cumulative = 0;
-    for (let attempt = 1; attempt <= 8; attempt++) {
-      const delay = stageStepFallbackDelayMs(attempt);
-      cumulative += delay;
-      schedule.push({ attempt, delaySeconds: delay / 1000, cumulativeSeconds: cumulative / 1000 });
+    for (let retry = 1; retry <= LIMIT; retry++) {
+      cumulative += retryDelays[retry - 1];
+      timeline.push({ attempt: retry + 1, retry, wakeSeconds: cumulative / 1000 });
     }
-    // The schedule table (delay = 10s doubling per attempt, clamped at 1280s):
-    expect(schedule.map((row) => row.delaySeconds)).toEqual([10, 20, 40, 80, 160, 320, 640, 1280]);
-    // 8 total attempts (limit 8 = one initial + 7 retries): the 8th entry is
-    // the clamp cap that only materializes if a further retry followed.
-    expect(schedule[6].cumulativeSeconds).toEqual(1270); // ~21 min over 7 retries
+    expect(timeline.map((row) => row.wakeSeconds)).toEqual([0, 10, 30, 70, 150, 310, 630, 1270, 2550]);
+
+    // The invariant: the FIRST retry whose wake passes the lease horizon
+    // (lease 660s + margin 15s = 675s) is retry 7 (attempt 8, t=1270s) —
+    // before exhaustion (retry 8 / attempt 9 still unused).
+    const firstStaleEligible = timeline.find((row) => row.retry !== null && row.wakeSeconds * 1000 >= LEASE_HORIZON_MS)!;
+    expect(firstStaleEligible).toEqual({ attempt: 8, retry: 7, wakeSeconds: 1270 });
+    const spareAttempts = LIMIT + 1 - firstStaleEligible.attempt;
+    expect(spareAttempts).toBeGreaterThanOrEqual(1);
     // Delay values are finite, non-negative, clamped (issue #61 §26):
-    for (const row of schedule) {
-      expect(Number.isFinite(row.delaySeconds)).toBe(true);
-      expect(row.delaySeconds).toBeGreaterThanOrEqual(0);
-      expect(row.delaySeconds).toBeLessThanOrEqual(1280);
+    for (const delay of retryDelays) {
+      expect(Number.isFinite(delay)).toBe(true);
+      expect(delay).toBeGreaterThanOrEqual(0);
+      expect(delay).toBeLessThanOrEqual(1_280_000);
     }
-    // Ambiguity bound: one extra attempt adds at most the 1280s clamp, so the
-    // worst-case fallback horizon stays operationally bounded either way.
-    const ambiguousHorizon = [1, 2, 3, 4, 5, 6, 7, 8, 9].reduce((sum, attempt) => sum + stageStepFallbackDelayMs(attempt), 0);
-    expect(ambiguousHorizon).toEqual(3_830_000); // ~64 min worst case, not 15 hours
-    expect(ambiguousHorizon / 1000).toBeLessThan(75 * 60);
+    // The full fallback horizon is bounded: 2550s (~42.5 min), not hours.
+    expect(cumulative).toEqual(2_550_000);
   });
 
   // Issue #61 §3: the Workflow configuration is pinned to
@@ -574,5 +604,168 @@ describe("single-flight retry liveness (workflow level)", () => {
       .bind(resultA.buildId)
       .first<{ workflow_instance_id: string | null }>();
     expect(buildRow?.workflow_instance_id).toEqual("wf-liveness-owner-a");
+  });
+
+  // ---------------------------------------------------------------------------
+  // #64 §4/§5: the NORMATIVE fallback-only contract. The engine rehydrates
+  // every thrown error into a generic Error (as the #63 canary proved
+  // production does), so the lease-aware branch can never fire. Correctness
+  // must come from the atomic claim + immutable reuse + bounded fallback
+  // schedule + stale takeover — never from error recognition.
+  // ---------------------------------------------------------------------------
+
+  it("fallback-only dead owner: takeover lands on attempt 8 of 9 via the fallback schedule; exactly one replacement provider call (§4)", async () => {
+    const env = runtimeEnv();
+    const siteGenerationId = await postScreenshotSubmission(env);
+    const buildIdRef = { current: null as string | null };
+
+    const entries = { siteCss: 0 };
+    let triggerKill: (() => void) | null = null;
+    const killSignal = new Promise<null>((resolveKill) => {
+      triggerKill = () => resolveKill(null);
+    });
+
+    const base = createPipelineScripts();
+    const generate: RawAiGenerate = async (system, user) => {
+      if (user.includes("shared stylesheet")) {
+        entries.siteCss += 1;
+        if (entries.siteCss === 1) {
+          triggerKill!(); // owner dies mid-provider-call; claim stays IN_PROGRESS
+          return new Promise<never>(() => {});
+        }
+      }
+      return base.generate(system, user);
+    };
+    const deps: BuildPipelineDeps = { ...base, generate };
+
+    const engine = new RetryEngine(env, buildIdRef, {
+      killFirstGenerateAttempt: () => killSignal,
+      rehydrateErrors: true, // recognition deliberately disabled — generic Errors only
+    });
+    const result = (await driveWorkflow(env, siteGenerationId, engine, deps, "wf-fallback-dead-owner")) as {
+      buildId: string;
+      terminal: string;
+      reasons?: string[];
+    };
+
+    // The workflow completed on the fallback schedule alone.
+    if (result.terminal !== "RELEASE_READY") {
+      const events = await env.DB.prepare("SELECT to_state, stage, detail FROM build_workflow_events WHERE build_id = ?1 ORDER BY created_at DESC LIMIT 6")
+        .bind(result.buildId)
+        .all<{ to_state: string; stage: string; detail: string }>();
+      console.log(
+        `(diag) fallback_only_dead_owner_failure ${JSON.stringify(
+          { terminal: result.terminal, reasons: result.reasons, exhausted: engine.events.filter((event) => event.kind === "exhausted"), tail: events.results },
+          null,
+          1
+        )}`
+      );
+    }
+    expect(result.terminal).toEqual("RELEASE_READY");
+    expect(engine.events.some((event) => event.kind === "exhausted")).toBe(false);
+
+    // No lease-aware wait ever fired: every retry wait is the plain fallback.
+    expect(engine.waits("in_progress_wait")).toHaveLength(0);
+    // Retry 1 (after the kill) is the engine's own 10s re-schedule (not a
+    // recorded wait); retries 2-7 record the fallback values 20s..640s.
+    const fallbackWaits = engine.waits("fallback_backoff").filter((event) => event.step.startsWith("pipeline: generate site"));
+    expect(fallbackWaits.map((event) => event.delayMs)).toEqual([20_000, 40_000, 80_000, 160_000, 320_000, 640_000]);
+
+    // Attempt timeline: killed owner -> 6 protected IN_PROGRESS yields while
+    // the lease is live -> takeover on attempt 8 (t=1270s, past the 660s
+    // lease) -> success. Attempt 9 stays unused (one spare).
+    const generateEvents = engine.events.filter((event) => event.step.startsWith("pipeline: generate site"));
+    expect(generateEvents.map((event) => event.kind)).toEqual([
+      "attempt", "killed",
+      "attempt", "wait",
+      "attempt", "wait",
+      "attempt", "wait",
+      "attempt", "wait",
+      "attempt", "wait",
+      "attempt", "wait",
+      "attempt", "result",
+    ]);
+    const attempts = generateEvents.filter((event) => event.kind === "attempt").length;
+    expect(attempts).toEqual(8);
+
+    // Exactly one replacement provider call; the hung initial call never
+    // produced an artifact; the claim ended COMPLETED under the new owner.
+    expect(entries.siteCss).toEqual(2);
+    const claim = await env.DB.prepare(
+      `SELECT state FROM stage_execution_claims WHERE build_id = ?1 AND stage_kind = 'generated_shared_source' AND subkey = 'site.css'`
+    )
+      .bind(result.buildId)
+      .first<ClaimRow>();
+    expect(claim?.state).toEqual("COMPLETED");
+  });
+
+  it("fallback-only healthy owner: the contender's fallback re-entry finds the COMPLETED artifact and never calls the provider (§5)", async () => {
+    const env = runtimeEnv();
+    const siteGenerationId = await postScreenshotSubmission(env);
+    const buildIdRef = { current: null as string | null };
+
+    const entries = { siteCss: 0 };
+    const base = createPipelineScripts();
+    const releaseGate: { release: (() => void) | null } = { release: null };
+    const generate: RawAiGenerate = async (system, user) => {
+      if (user.includes("shared stylesheet")) {
+        entries.siteCss += 1;
+        if (entries.siteCss === 1) {
+          // Owner A hangs in the provider until released; it legitimately
+          // owns the claim and finishes well inside its lease.
+          return new Promise((resolve, reject) => {
+            releaseGate.release = () => {
+              void base.generate(system, user).then(resolve, reject);
+            };
+          });
+        }
+      }
+      return base.generate(system, user);
+    };
+    const deps: BuildPipelineDeps = { ...base, generate };
+
+    // Drive A: the legitimate slow owner (its own drive, no rehydration —
+    // the owner never yields anyway).
+    const engineA = new RetryEngine(env, buildIdRef);
+    const driveA = driveWorkflow(env, siteGenerationId, engineA, deps, "wf-fallback-owner-a");
+    await waitForLiveSiteCssClaim(env, buildIdRef);
+    expect(entries.siteCss).toEqual(1);
+
+    // Drive B: overlapping contender with recognition DISABLED. Its yield is
+    // classified as an ordinary fallback wait, never a lease-aware one.
+    const ownerCompleted = new Promise<null>((resolve) => {
+      void driveA.then(() => resolve(null), () => resolve(null));
+    });
+    const engineB = new RetryEngine(env, buildIdRef, {
+      completeAfterResultOf: "pipeline: generate site",
+      holdClockUntil: ownerCompleted,
+      rehydrateErrors: true,
+    });
+    const driveB = driveWorkflow(env, siteGenerationId, engineB, deps, "wf-fallback-overlap-b").catch((error) => {
+      if (error instanceof ScenarioComplete) return error.result;
+      throw error;
+    });
+
+    // B yields once on the fallback schedule while A's claim is live.
+    await waitFor(
+      () => (engineB.waits("fallback_backoff").some((event) => event.step.startsWith("pipeline: generate site")) ? true : null),
+      "B's fallback yield"
+    );
+    const bWait = engineB.waits("fallback_backoff").find((event) => event.step.startsWith("pipeline: generate site"))!;
+    expect(bWait.delayMs).toEqual(10_000);
+    expect(engineB.waits("in_progress_wait")).toHaveLength(0);
+    // The live claim was never stolen and never re-called the provider.
+    expect(entries.siteCss).toEqual(1);
+
+    // A finishes; B's next fallback wake loads the COMPLETED artifact.
+    releaseGate.release!();
+    const resultA = (await driveA) as { buildId: string; terminal: string };
+    expect(resultA.terminal).toEqual("RELEASE_READY");
+    const resultB = (await driveB) as unknown;
+    expect(resultB).toBeDefined();
+    expect(entries.siteCss).toEqual(1); // contender provider calls = 0
+
+    const bGenerateEvents = engineB.events.filter((event) => event.step.startsWith("pipeline: generate site"));
+    expect(bGenerateEvents.map((event) => event.kind)).toEqual(["attempt", "wait", "attempt", "result"]);
   });
 });

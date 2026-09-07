@@ -243,9 +243,11 @@ class PolicyFaithfulEngine {
     } catch (error) {
       // Documented platform contract: NonRetryableError fails the step
       // immediately; anything else retries up to the configured limit.
+      // Proven semantics (#63 canary): limit counts retries, so total
+      // attempts = limit + 1.
       if (error instanceof NonRetryableError) throw error;
       const limit = config?.retries?.limit ?? 5;
-      if (attempt >= limit) throw error;
+      if (attempt >= limit + 1) throw error;
       return await this.do(name, a, b);
     }
   }

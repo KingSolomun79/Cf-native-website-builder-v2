@@ -31,9 +31,17 @@ export type StageExecutionClaimState =
   | "FAILED_TERMINAL";
 
 /** Transient: another attempt owns a fresh lease for this exact stage slot.
- *  Thrown to the Workflow step, whose existing retry policy (bounded, with
- *  backoff) re-enters the stage later — never a busy-loop inside one
- *  invocation. */
+ *  Thrown to the Workflow step, whose retry policy re-enters the stage later —
+ *  never a busy-loop inside one invocation.
+ *
+ *  Issue #64: the typed identity and the stable message prefix are a
+ *  BEST-EFFORT OPTIMIZATION (lease-aware wake at lease-expiry + margin), not
+ *  a safety requirement. The production runtime may rehydrate this error
+ *  into a shape that defeats both (canary-proven 2026-09-07: 0/10
+ *  recognitions). Correctness never depends on recognition: an unrecognized
+ *  yield takes the ordinary transient fallback schedule, and the normative
+ *  chain — atomic single-flight claim + immutable artifact reuse + bounded
+ *  fallback retries + stale-claim takeover — still completes the stage. */
 export class StageExecutionInProgressError extends Error {
   readonly code = "STAGE_EXECUTION_IN_PROGRESS" as const;
   constructor(
@@ -68,9 +76,10 @@ export class StageExecutionCollisionError extends Error {
 // per-attempt timeout ("10 minutes") is deliberately SHORTER than the lease,
 // so an attempt is always dead before its claim could be stolen while still
 // running. A dead owner delays takeover until expiry; the workflow's retry
-// delay policy (stageInProgressRetryAfterMs) waits out exactly that horizon,
-// so stale takeover is reachable on the very next attempt with retries to
-// spare — independent of the platform's undocumented static backoff formula.
+// schedule makes a stale claim takeover-eligible by retry 7 of 8
+// (fallback-only timeline in website-build-workflow.ts, issue #64) — the
+// lease-aware wait (stageInProgressRetryAfterMs) would make it exact, but is
+// an opportunistic optimization the contract never requires.
 export const STAGE_EXECUTION_LEASE_MS = 660_000;
 
 /** Wake margin added to a lease expiry before a waiting contender re-enters:
@@ -80,11 +89,15 @@ export const STAGE_EXECUTION_LEASE_MS = 660_000;
 export const STAGE_EXECUTION_RETRY_MARGIN_MS = 15_000;
 
 /** Retry-after milliseconds for the transient STAGE_EXECUTION_IN_PROGRESS
- *  yield (issue #54): wake once past the live owner's lease expiry so stale
- *  takeover is reachable on the next Workflow attempt (retry-liveness
- *  directive §3). Returns null for any other error. Recognizes rehydrated
- *  errors by the stable message prefix — the engine may not preserve the
- *  error class across invocation boundaries. */
+ *  yield: wake once past the live owner's lease expiry so stale takeover is
+ *  reachable on the next Workflow attempt. Returns null for any other error.
+ *
+ *  Issue #64: OPPORTUNISTIC ONLY. Production (canary 2026-09-07) rehydrates
+ *  thrown errors into shapes that defeat BOTH the instanceof branch and the
+ *  message-prefix branch below, so the normative wake schedule is the
+ *  repo-owned fallback — this function only shortens the wait when the
+ *  runtime happens to preserve error identity. Recognition here must never
+ *  be load-bearing for correctness or for any production GO decision. */
 export function stageInProgressRetryAfterMs(error: unknown, now: number = Date.now()): number | null {
   let expiresAtMs: number | null = null;
   if (error instanceof StageExecutionInProgressError) {

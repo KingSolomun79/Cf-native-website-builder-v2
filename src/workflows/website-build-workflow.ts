@@ -46,43 +46,58 @@ export function toWorkflowStepError(error: unknown): unknown {
 }
 
 // Retry policy for every pipeline stage step (retry-liveness directive §1–§9;
-// issue #61 single-ownership correction).
+// issue #61 single-ownership correction; issue #64 fallback-only contract).
 //
-// Platform facts, CORRECTED by the 2026-09-07 production forensics (raw REST
-// evidence, .tmp-wedge-forensics/): retries.limit is the TOTAL number of
-// attempts (limit 8 = one initial + 7 retries); the delay may be a
-// WorkflowDelayFunction receiving the thrown error; the timeout is per
-// attempt. The engine COMBINES the delay with the `backoff` curve — and
-// `backoff` DEFAULTS TO "exponential" when unspecified, multiplying the
-// delay value by 2^(attempt-1) on top of whatever the delay function returns.
-// The omitted backoff key here therefore compounded the repo-owned 10→20→40s
-// schedule into 10→40→160→640→2560s… (~15h horizon over 7 retries) and
-// produced the 2026-09-06/07 "wedge". With backoff: "constant" the dynamic
-// function below is the SINGLE owner of the schedule:
+// Platform facts, corrected by production evidence (raw REST, 2026-09-06/07
+// forensics + the #63 canary): the delay may be a WorkflowDelayFunction
+// receiving the thrown error; `backoff` defaults to "exponential" when
+// unspecified, multiplying the delay value by 2^(attempt-1); and
+// retries.limit counts RETRIES — limit 8 = 8 retries after the initial
+// attempt = 9 attempts total (canary-proven: limit 2 produced 3 attempts;
+// the docs' "total number of attempts" wording is not what the engine does).
+// The omitted backoff key here once compounded the repo-owned 10→20→40s
+// schedule into 10→40→160→640→2560s… (~15h horizon) and produced the
+// 2026-09-06/07 "wedge". With backoff: "constant" the dynamic function below
+// is the single owner of the schedule.
 //
-// - STAGE_EXECUTION_IN_PROGRESS (a live owner holds the claim): wait until
-//   that owner's lease expires (+ margin) via stageInProgressRetryAfterMs, so
-//   stale takeover is reachable on the very next attempt — the required
-//   liveness invariant does not depend on any backoff formula. One yield
-//   consumes one retry slot; it is a cheap waiting condition, not an error
-//   storm (directive §6).
-// - Every other transient error: repo-owned exponential schedule (10s, 20s,
-//   40s, ... capped at 1280s). Its cumulative horizon (~21 min over 7
-//   retries; ~64 min even if the engine reads limit as one additional
-//   attempt) stays beyond the 660s lease, so the fallback path alone
-//   satisfies the invariant; the IN_PROGRESS wait makes it exact.
+// NORMATIVE SAFETY PATH (issue #64): the engine may rehydrate thrown errors
+// into shapes the delay function cannot recognize (canary-proven — the
+// lease-aware branch never fired in 10/10 production instances), so
+// correctness NEVER depends on custom error recognition. The invariant chain
+// is: atomic single-flight claim + immutable artifact reuse + the bounded
+// repo-owned fallback schedule + stale-claim takeover:
+//
+//   attempt 1:  t=0      (initial)
+//   retry 1  -> attempt 2: t=10s
+//   retry 2  -> attempt 3: t=30s
+//   retry 3  -> attempt 4: t=70s
+//   retry 4  -> attempt 5: t=150s
+//   retry 5  -> attempt 6: t=310s
+//   retry 6  -> attempt 7: t=630s
+//   retry 7  -> attempt 8: t=1270s  <- first wake past the 660s lease (+15s margin)
+//   retry 8  -> attempt 9: t=2550s  (spare — takeover lands on attempt 8)
+//
+// First stale-eligible retry occurs BEFORE exhaustion, with one spare
+// attempt. While a claim is live, a contender's re-entry makes NO provider
+// call (it yields IN_PROGRESS); after expiry the atomic CAS takeover assigns
+// exactly one replacement owner.
+//
+// The lease-aware IN_PROGRESS wait below (stageInProgressRetryAfterMs) is an
+// OPPORTUNISTIC OPTIMIZATION ONLY (#64 §1/§6): when the runtime preserves
+// error identity it wakes takeover at lease-expiry + margin (~11.2 min
+// instead of ~21.2 min); when it does not, the fallback timeline above is
+// the contract. One yield consumes one retry slot either way.
 //
 // timeout ("10 minutes", per attempt) is explicit and derived, not incidental:
 // one owner attempt is bounded by 2 x 300s provider aborts plus
 // validation/store overhead, and it must be dead BEFORE its 660s claim lease
 // expires so a contender can never take over a claim from a still-running
-// attempt (600s < 660s < IN_PROGRESS wait horizon).
+// attempt (600s < 660s < lease horizon).
 // Repo-owned exponential fallback schedule (milliseconds) for ordinary
-// transient errors: starts at the documented 10s and doubles per attempt,
-// capped at 1280s. The horizon is indexing-proof: whether the engine's
-// ctx.attempt is 0- or 1-based, and whether retries.limit counts the initial
-// attempt or adds one, the clamp caps every delay at 1280s and the cumulative
-// fallback schedule stays bounded (issue #61 §4).
+// transient errors: starts at the documented 10s and doubles per retry,
+// capped at 1280s (the final retry's delay). Cumulative horizon over 8
+// retries: 2550s (~42.5 min) — bounded, and past the 660s claim lease from
+// retry 7 onward.
 export function stageStepFallbackDelayMs(attempt: number): number {
   return 10_000 * 2 ** Math.min(Math.max(attempt - 1, 0), 7);
 }

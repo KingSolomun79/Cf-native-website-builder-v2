@@ -84,4 +84,3 @@ export default {
   scheduled,
 };
 export { WebsiteBuildWorkflow } from "./workflows/website-build-workflow";
-export { RetrySemanticsCanaryWorkflow } from "./workflows/retry-semantics-canary";
