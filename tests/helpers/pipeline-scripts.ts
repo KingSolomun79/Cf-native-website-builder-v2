@@ -229,6 +229,19 @@ export function createPipelineScripts(
     });
 
     if (user.includes("Interpret the frozen versioned Reference Evidence")) return respond(analysisJson);
+    // Issue #67: the informed realization repair asks for a content-preserving
+    // PATCH (scoped cssPatch + optional regionPatches), not a page. The branch
+    // sits first: the repair prompt embeds the frozen stylesheet and would
+    // otherwise collide with the site.css marker below.
+    if (user.includes("Repair the GEOMETRY of the rendered page")) {
+      const pageId = /rendered page '([a-z]+)'/.exec(user)?.[1] ?? "home";
+      return respond({
+        targetPageId: pageId,
+        reasoning: "Scripted scoped CSS geometry fix; all content stays frozen.",
+        cssPatch: '[data-region="r1"] { min-height: 80vh; }\n[data-region="r1"] h1 { max-width: 900px; }',
+        regionPatches: [],
+      });
+    }
     if (user.includes("Produce the binding Visual Blueprint")) return respond(blueprintJson);
     if (user.includes("shared stylesheet")) return respond({ css: SHARED_CSS });
     if (user.includes("minimal shared runtime")) return respond({ js: SHARED_JS });

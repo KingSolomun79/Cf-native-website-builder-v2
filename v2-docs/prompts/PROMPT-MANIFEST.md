@@ -23,6 +23,7 @@ The domain contract is prepended at runtime and is authoritative over contradict
 | QA-A Confirmation | `qa-a-confirmation/v3` | `09-qa-a-confirmation-v2.md` |
 | QA-B Confirmation | `qa-b-confirmation/v3` | `10-qa-b-confirmation-v2.md` |
 | Release Blocker Fix | `release-blocker-fix/v2` | `11-release-blocker-fix-v1.md` |
+| Realization Repair | `realization-repair/v1` | `12-realization-repair-v1.md` |
 
 ## Mandatory stage-specific reconciliation
 

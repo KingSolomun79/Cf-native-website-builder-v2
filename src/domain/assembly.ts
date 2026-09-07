@@ -288,21 +288,26 @@ export async function deployPreview(env: Env, input: DeployPreviewInput): Promis
   const now = nowIso();
 
   // A superseding deploy of the SAME version (the one informed craft repair
-  // round, issue #49) replaces the earlier active deployment record; other
-  // versions' previews are superseded by the retention lifecycle below.
-  await env.DB.prepare(
-    `UPDATE build_deployments SET status = 'superseded', updated_at = ?
-     WHERE role = 'preview' AND status = 'active' AND build_version_id = ? AND artifact_manifest_hash != ?`
+  // round, issue #49/#67) REPOINTS the existing preview row at the new
+  // candidate bytes in place: the deployment's identity is
+  // UNIQUE(build_version_id, role) and artifact_manifest_hash stays the byte
+  // pin — a repaired candidate is a new deployment OF the same version, not
+  // a second deployment row.
+  const repoint = await env.DB.prepare(
+    `UPDATE build_deployments
+     SET worker_name = ?, preview_url = ?, artifact_manifest_hash = ?, status = 'active', updated_at = ?
+     WHERE build_version_id = ? AND role = 'preview' AND artifact_manifest_hash != ?`
   )
-    .bind(now, input.buildVersionId, input.candidate.artifactManifestHash)
+    .bind(workerName, deployed.previewUrl, input.candidate.artifactManifestHash, now, input.buildVersionId, input.candidate.artifactManifestHash)
     .run();
-
-  await env.DB.prepare(
-    `INSERT INTO build_deployments (id, build_id, build_version_id, role, worker_name, preview_url, artifact_manifest_hash, status, created_at, updated_at)
-     VALUES (?, ?, ?, 'preview', ?, ?, ?, 'active', ?, ?)`
-  )
-    .bind(deploymentId, input.buildId, input.buildVersionId, workerName, deployed.previewUrl, input.candidate.artifactManifestHash, now, now)
-    .run();
+  if ((repoint.meta?.changes ?? 0) === 0) {
+    await env.DB.prepare(
+      `INSERT INTO build_deployments (id, build_id, build_version_id, role, worker_name, preview_url, artifact_manifest_hash, status, created_at, updated_at)
+       VALUES (?, ?, ?, 'preview', ?, ?, ?, 'active', ?, ?)`
+    )
+      .bind(deploymentId, input.buildId, input.buildVersionId, workerName, deployed.previewUrl, input.candidate.artifactManifestHash, now, now)
+      .run();
+  }
 
   await appendBuildWorkflowEvent(env, {
     buildId: input.buildId, buildVersionId: input.buildVersionId,

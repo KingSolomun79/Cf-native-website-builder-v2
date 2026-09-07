@@ -27,7 +27,7 @@ import { runReferenceAnalysisStage, ReferenceAnalysisError, createProductionVisi
 import { runVisualBlueprintStage, VisualBlueprintError, canonicalRegionComposition, evaluateBlueprintCoverage } from "./visual-blueprint";
 import { resolveReferenceGeometry, unmappedHeightFindingRegions, type ReferenceGeometryPackage } from "./reference-geometry";
 import { produceImplementationContract } from "./implementation-planner";
-import { generateCompleteSite, regeneratePagesForRealization, SiteGenerationValidationError, type GeneratedSite, type AssemblyFinding, type ImageSlot } from "./site-generator";
+import { generateCompleteSite, regeneratePagesForRealization, RealizationRepairEscalationError, SiteGenerationValidationError, type GeneratedSite, type AssemblyFinding, type ImageSlot } from "./site-generator";
 import {
   getAcceptedImageMap,
   expandSlotsToTarget,
@@ -47,6 +47,7 @@ import {
   type StoredCraftPreflight,
 } from "./craft-preflight";
 import { runQaAStage, runQaBStage, type QaAReport, type QaAReportAugmented, type QaBReport, type QaFinding } from "./qa-stages";
+import { AiStageSchemaInvalidError } from "./ai-boundary";
 import { buildRepairContext, evaluateRepairRegression, type RepairEvaluationSnapshot } from "./repair-guard";
 import { assignReleaseReady, ReleaseGateError } from "./release";
 import { getBuildStageArtifact, storeBuildStageArtifactIdempotent } from "./stage-artifacts";
@@ -877,6 +878,30 @@ export async function runBuildPipeline(
             if (pair.candidate) inputs.push({ kind: "slice" as const, artifact: pair.candidate.artifactR2Key, sha256: pair.candidate.cropSha256, width: pair.candidate.width, height: pair.candidate.height, sliceIndex: index * 2 + 1 });
             return inputs;
           });
+          // Issue #67: the repair's mutation scope. Authorized regions are the
+          // failed regions plus, for region-less findings (headline clipping,
+          // display scale), the first-viewport regions those findings live in.
+          // Every other region is PASSING and must stay byte-identical.
+          const failedRegions = [...new Set(craft.findings.map((finding) => finding.regionId).filter((regionId): regionId is string => regionId !== null))];
+          const hasRegionlessFinding = craft.findings.some((finding) => finding.regionId === null && finding.repairScope === "page-realization");
+          const authorizedRegions = [...new Set([
+            ...failedRegions,
+            ...(hasRegionlessFinding ? blueprint.blueprint.homepageFirstViewport.regionIds : []),
+          ])];
+          const passingRegions = blueprint.blueprint.homepageRegions
+            .map((region) => region.id)
+            .filter((regionId) => !authorizedRegions.includes(regionId));
+          // Issue #65 §9: honest crop labels — the repair must never be told
+          // it is looking at Reference pixels when it is not.
+          const cropDescriptors = craft.crops
+            .map((pair) => {
+              const referenceCount = pair.referenceSlices.length;
+              const candidate = pair.candidate ? `candidate render ${pair.candidate.width}x${pair.candidate.height}px` : "candidate crop unavailable";
+              return referenceCount > 0
+                ? `region '${pair.regionId}': ${referenceCount} REFERENCE slice(s) from the frozen Reference Screenshot (${pair.referenceSlices.map((slice) => `page-space ${slice.yStart}-${slice.yEnd}`).join(", ")}) + ${candidate}`
+                : `region '${pair.regionId}': REFERENCE CROP UNAVAILABLE — ${candidate} only; work from the measured numbers, not guessed reference pixels`;
+            })
+            .join("\n");
           // Issue #62 §7: the same deterministic-terminal rule applies to the
           // realization repair's re-validation — after its one bounded round,
           // a persisting validation blocker returns the review marker (with
@@ -893,6 +918,9 @@ export async function runBuildPipeline(
               imagePlan: site.imagePlan,
               affected,
               findingDirectives: craft.directiveText,
+              authorizedRegions,
+              passingRegions,
+              cropDescriptors,
               ...(compositionTargets.length > 0 ? { compositionTargets } : {}),
               ...(cropVisualInputs.length > 0 ? { visualInputs: cropVisualInputs } : {}),
               visionGenerate:
@@ -908,6 +936,20 @@ export async function runBuildPipeline(
           } catch (error) {
             if (error instanceof SiteGenerationValidationError) {
               return { deterministicReview: { findings: error.findings, message: error.message, previewUrl: preview.previewUrl } };
+            }
+            if (error instanceof RealizationRepairEscalationError) {
+              // Issue #67 §21/§22: a scope violation or a declared
+              // insufficiency stops the repair deterministically — the
+              // candidate is retained for review, never regenerated blind.
+              await appendBuildWorkflowEvent(env, {
+                buildId: ctx.buildId, buildVersionId: ctx.buildVersionId,
+                fromState: "PREVIEW", toState: "PREVIEW", stage: "realization_repair",
+                detail: `${error.code}: ${error.details.join("; ").slice(0, 320)}`,
+              });
+              return { deterministicReview: { findings: [], message: error.message, previewUrl: preview.previewUrl } };
+            }
+            if (error instanceof AiStageSchemaInvalidError) {
+              return { deterministicReview: { findings: [], message: `realization-repair patch failed schema validation after its bounded repair attempts: ${error.message}`, previewUrl: preview.previewUrl } };
             }
             throw error;
           }

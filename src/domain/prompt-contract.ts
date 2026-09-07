@@ -35,7 +35,8 @@ export type PromptStageKey =
   | "fix-coordinator"
   | "qa-a-confirmation"
   | "qa-b-confirmation"
-  | "release-blocker-fix";
+  | "release-blocker-fix"
+  | "realization-repair";
 
 export const PROMPT_MANIFEST: Record<PromptStageKey, PromptManifestEntry> = {
   "reference-analyzer": {
@@ -93,6 +94,13 @@ export const PROMPT_MANIFEST: Record<PromptStageKey, PromptManifestEntry> = {
     promptId: "release-blocker-fix",
     promptVersion: "v2",
     bodyFile: "11-release-blocker-fix-v1.md",
+  },
+  // Issue #67: the informed realization repair is a content-preserving patch
+  // stage, not full-page regeneration — its contract lives in the stage body.
+  "realization-repair": {
+    promptId: "realization-repair",
+    promptVersion: "v1",
+    bodyFile: "12-realization-repair-v1.md",
   },
 };
 

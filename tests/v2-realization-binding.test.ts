@@ -531,13 +531,23 @@ describe("informed realization regeneration (issue #47 entry point)", () => {
     });
     expect(site.validation.passed).toBe(true);
 
-    const repairedHome = HOME_HTML.replace("<h1>Strategy for small teams</h1>", "<h1>Strategy for small teams, realized</h1>");
-    const repairGenerate: RawAiGenerate = async (_system, user) => {
+    // Issue #67: the repair answers with a content-preserving PATCH — a
+    // scoped CSS geometry fix; the page's words are never re-authored.
+    const repairGenerate: RawAiGenerate = async (system, user) => {
       regenCalls.push(user);
-      if (user.includes("Realization repair directives")) {
-        return { content: JSON.stringify({ html: repairedHome }), provider: "test", model: "m" };
+      if (user.includes("Repair the GEOMETRY of the rendered page")) {
+        return {
+          content: JSON.stringify({
+            targetPageId: "home",
+            reasoning: "scripted scoped CSS fix",
+            cssPatch: '[data-region="hero"] { min-height: 88vh; }',
+            regionPatches: [],
+          }),
+          provider: "test",
+          model: "m",
+        };
       }
-      return generate(_system, user);
+      return generate(system, user);
     };
 
     const result = await regeneratePagesForRealization(env, {
@@ -553,23 +563,37 @@ describe("informed realization regeneration (issue #47 entry point)", () => {
       imagePlan: deriveImagePlan(BLUEPRINT),
       affected: ["home"],
       findingDirectives: "hero: measured 0.31 viewport-heights, contract target 1.05; media contained, contract full-bleed",
+      authorizedRegions: ["hero"],
+      passingRegions: ["cta"],
+      cropDescriptors: "",
       generate: repairGenerate,
     });
 
     expect(result.regenerated).toEqual(["home"]);
-    expect(result.pages.home).toContain("realized");
+    // Content freeze: a cssPatch-only repair leaves the page bytes untouched.
+    expect(result.pages.home).toBe(site.pages.home);
     expect(result.pages.about).toBe(site.pages.about);
-    expect(result.sharedCss).toBe(site.sharedCss);
-    const directiveCall = regenCalls.find((call) => call.includes("Realization repair directives"));
-    expect(directiveCall).toContain("hero: measured 0.31 viewport-heights, contract target 1.05");
+    // The CSS patch is layered over the frozen stylesheet, never an edit.
+    expect(result.sharedCss.startsWith(site.sharedCss)).toBe(true);
+    expect(result.sharedCss).toContain("/* realization-repair-1 — scoped geometry patch (issue #67) */");
+    expect(result.sharedCss).toContain('[data-region="hero"] { min-height: 88vh; }');
+    const repairPrompt = regenCalls.find((call) => call.includes("Repair the GEOMETRY of the rendered page"));
+    expect(repairPrompt).toContain("hero: measured 0.31 viewport-heights, contract target 1.05");
+    expect(repairPrompt).toContain("<h1>Strategy for small teams</h1>");
+    expect(repairPrompt).toContain("Passing regions (MUST remain byte-identical): cta");
     const subkey = await env.DB.prepare(
       "SELECT id FROM build_stage_artifacts WHERE build_version_id = ? AND kind = 'generated_page' AND subkey = 'home.realization-repair-1'"
     ).bind(context.buildVersionId).first();
     expect(subkey).not.toBeNull();
+    const patchSubkey = await env.DB.prepare(
+      "SELECT id FROM build_stage_artifacts WHERE build_version_id = ? AND kind = 'generated_page' AND subkey = 'home.realization-repair-1.patch'"
+    ).bind(context.buildVersionId).first();
+    expect(patchSubkey).not.toBeNull();
 
-    // Bounded: a re-entered pipeline reuses the frozen repair artifact.
+    // Bounded: a re-entered pipeline replays the frozen patch — no model call,
+    // identical applied page.
     const before = regenCalls.length;
-    await regeneratePagesForRealization(env, {
+    const replayed = await regeneratePagesForRealization(env, {
       siteGenerationId: context.siteGenerationId,
       siteId: context.siteId,
       buildId: context.buildId,
@@ -582,9 +606,13 @@ describe("informed realization regeneration (issue #47 entry point)", () => {
       imagePlan: deriveImagePlan(BLUEPRINT),
       affected: ["home"],
       findingDirectives: "hero: measured 0.31 viewport-heights, contract target 1.05",
+      authorizedRegions: ["hero"],
+      passingRegions: ["cta"],
+      cropDescriptors: "",
       generate: repairGenerate,
     });
     expect(regenCalls.length).toBe(before);
+    expect(replayed.pages.home).toBe(result.pages.home);
 
     // The QA repair budget was never touched.
     const batches = await env.DB.prepare("SELECT COUNT(*) AS n FROM repair_batches WHERE build_id = ?")
@@ -625,12 +653,28 @@ describe("informed realization regeneration (issue #47 entry point)", () => {
         imagePlan: deriveImagePlan(BLUEPRINT),
         affected: ["home"],
         findingDirectives: "hero: measured 0.31 viewport-heights, contract target 1.05",
-        generate: async (_system, user) => {
-          if (user.includes("Realization repair directives")) {
-            // The "repair" drops a canonical region — validation must reject it.
-            return { content: JSON.stringify({ html: HOME_HTML.replace('data-region="cta"', 'data-region="renamed"') }), provider: "test", model: "m" };
+        authorizedRegions: ["hero"],
+        passingRegions: ["cta"],
+        cropDescriptors: "",
+        generate: async (system, user) => {
+          if (user.includes("Repair the GEOMETRY of the rendered page")) {
+            // Content-preserving but structurally invalid: the patch
+            // substitutes an orphaned vocabulary class — the words are frozen
+            // (the mutation guard passes) while assembly validation still
+            // rejects the orphaned class.
+            return {
+              content: JSON.stringify({
+                targetPageId: "home",
+                cssPatch: '[data-region="hero"] { min-height: 88vh; }',
+                regionPatches: [
+                  { regionId: "hero", html: '<div class="hero-bg"><h1>Strategy for small teams</h1><p>Consulting that fits.</p></div>' },
+                ],
+              }),
+              provider: "test",
+              model: "m",
+            };
           }
-          return generate(_system, user);
+          return generate(system, user);
         },
       })
     ).rejects.toBeInstanceOf(SiteGenerationValidationError);

@@ -27,6 +27,12 @@ import type { ImplementationContract } from "./implementation-planner";
 import type { BusinessFacts } from "./lifecycle-schema";
 import type { ReferenceEvidence } from "./reference-evidence-schema";
 import { createProductionVisionGenerate } from "./reference-analysis";
+import {
+  extractPageContentFingerprint,
+  diffPageContent,
+  applyRegionPatch,
+  validateCssPatchScope,
+} from "./content-fingerprint";
 
 export const IMAGE_PLAN_SCHEMA_VERSION = "image-plan/1";
 
@@ -473,10 +479,14 @@ function collectTrustLabels(innerHtml: string): Array<{ text: string; role: Trus
     if (!text) continue;
     const tagName = match[1].toLowerCase();
     const attributes = match[2] ?? "";
-    // h3-h6 are heading prose; an element whose own attributes signal a
-    // trust/logo presentation (class="client-logo", aria-label="Our clients")
-    // is an identity slot regardless of tag; everything else is copy.
-    const role: TrustTextRole = /^h[3-6]$/.test(tagName)
+    // h3-h6 are heading prose; eyebrow/kicker presentation is descriptive
+    // kicker text in a non-heading element — production (Build 282f9b9d)
+    // proved `<p class="eyebrow">Who We Serve</p>` is the same descriptive
+    // heading prose #53 already exempts, merely styled as a kicker (issue
+    // #67 §31); an element whose own attributes signal a trust/logo
+    // presentation (class="client-logo", aria-label="Our clients") is an
+    // identity slot regardless of tag; everything else is copy.
+    const role: TrustTextRole = /^h[3-6]$/.test(tagName) || /\b(?:eyebrow|kicker)\b/i.test(attributes)
       ? "heading"
       : TRUST_CONTEXT_PATTERN.test(attributes)
         ? "identity"
@@ -1317,6 +1327,12 @@ export interface RegeneratePagesForRealizationInput {
   findingDirectives: string;
   compositionTargets?: Array<{ regionId: string; viewportHeightRatio: number; evidenceSegmentCount: number }>;
   visualInputs?: NonNullable<ReferenceEvidence["visualInputs"]>;
+  /** Issue #67: deterministic mutation-scope authorization. */
+  authorizedRegions: string[];
+  passingRegions: string[];
+  /** Issue #67 §9/#65: honest per-region crop descriptions — which regions
+   *  carry REFERENCE slices and which are REFERENCE CROP UNAVAILABLE. */
+  cropDescriptors: string;
   visionGenerate?: RawAiGenerate;
   generate?: RawAiGenerate;
 }
@@ -1380,6 +1396,87 @@ export async function resolveEffectivePages(env: Env, buildVersionId: string): P
   };
 }
 
+// ── Realization repair patch contract (issue #67) ───────────────────────────
+//
+// The Level-4 "regenerate the COMPLETE page" repair is rejected: production
+// (Build 282f9b9d) showed it rewrites ~40% of visible text, invents content
+// mass and re-cases labels until the truth lint kills the build. The repair
+// is now a typed, content-preserving PATCH:
+//   Level 1/2 — scoped cssPatch (every selector pinned to this page's
+//               [data-region=]/[data-image-id=] ids)
+//   Level 3   — regionPatches: new inner HTML for named FAILED regions with
+//               text/hrefs/image identities frozen by fingerprint
+// Full-page regeneration is not part of this contract.
+
+export const REALIZATION_REPAIR_PATCH_SCHEMA_VERSION = "realization-repair-patch/1";
+
+export const RealizationRepairPatchSchema = Type.Object(
+  {
+    targetPageId: Type.Union([
+      Type.Literal("home"), Type.Literal("about"), Type.Literal("services"), Type.Literal("contact"),
+    ]),
+    reasoning: Type.Optional(Type.String({ maxLength: 2000 })),
+    /** True when the existing content cannot realize the stated geometry
+     *  without fabrication — escalates to human review instead. */
+    insufficient: Type.Optional(Type.Boolean()),
+    insufficientReason: Type.Optional(Type.String({ maxLength: 1000 })),
+    cssPatch: Type.String({ maxLength: 24000 }),
+    regionPatches: Type.Array(
+      Type.Object(
+        {
+          regionId: Type.String({ minLength: 1 }),
+          html: Type.String({ maxLength: 80000 }),
+        },
+        { additionalProperties: false }
+      ),
+      { maxItems: 8 }
+    ),
+  },
+  { additionalProperties: false }
+);
+export type RealizationRepairPatch = Static<typeof RealizationRepairPatchSchema>;
+
+// The repair declared the existing content insufficient for the measured
+// geometry — a deterministic escalation to human review (issue #67 §22),
+// never an invitation to fabricate mass.
+export class RealizationRepairEscalationError extends Error {
+  constructor(
+    readonly code: "REALIZATION_REPAIR_INSUFFICIENT" | "REPAIR_SCOPE_VIOLATION",
+    readonly details: string[]
+  ) {
+    super(`${code}: ${details.join("; ")}`);
+    this.name = "RealizationRepairEscalationError";
+  }
+}
+
+function realizationRepairUserPrompt(input: RegeneratePagesForRealizationInput, pageId: PageId, currentHtml: string, currentCss: string): string {
+  const authorized = input.authorizedRegions.join(", ");
+  const passing = input.passingRegions.join(", ");
+  const targets = (input.compositionTargets ?? []).length
+    ? `\nMEASURED COMPOSITION TARGETS (binding evaluation constraints, NOT implementation values): ${input.compositionTargets!.map((region) => `${region.regionId} ≈ ${region.viewportHeightRatio.toFixed(2)} viewport-heights`).join(", ")}.`
+    : "";
+  return `Repair the GEOMETRY of the rendered page '${pageId}'. A deterministic Craft Preflight measured the deviations below with full provenance. Repair structure, never content.
+
+## Measured findings (binding)
+${input.findingDirectives}${targets}
+
+## Mutation scope (mechanically enforced)
+- Authorized regions (regionPatches allowed): ${authorized || "(none)"}
+- Passing regions (MUST remain byte-identical): ${passing || "(none)"}
+- Everything not listed as authorized is frozen: visible text, title, meta description, hrefs, image identities (data-image-id), form fields, canonical region order.
+
+## Region crop evidence (labeled honestly)
+${input.cropDescriptors || "(no region crops attached for this repair)"}
+
+## Current ${pageId} HTML (the page you are repairing)
+${currentHtml}
+
+## Current shared stylesheet (frozen; your cssPatch is APPENDED under a scoped marker — it cannot edit these rules)
+${currentCss}
+
+Produce the patch JSON now. Remember: min-height equal to a measured target is not a repair; fix the structure. If the existing content cannot realize the stated geometry, set "insufficient": true with the reason — never invent content.`;
+}
+
 export async function regeneratePagesForRealization(
   env: Env,
   input: RegeneratePagesForRealizationInput
@@ -1395,8 +1492,6 @@ export async function regeneratePagesForRealization(
   const factsResult = await getEffectiveBusinessFacts(env, input.buildId);
   const facts = factsResult.facts;
   const visualInputs = input.visualInputs ?? [];
-  const referenceBlock = visualInputs.length > 0 ? referenceContextBlock(visualInputs) : "";
-  const cssClassInventory = extractCssClassInventory(cssArtifact.value.css);
   const stageInput = {
     buildId: input.buildId,
     siteGenerationId: input.siteGenerationId,
@@ -1406,45 +1501,100 @@ export async function regeneratePagesForRealization(
     generate: input.visionGenerate ?? input.generate,
     temperature: 0.35,
   };
-
+  const authorizedRegions = new Set(input.authorizedRegions);
   const pages: Partial<Record<PageId, string>> = {};
   const regenerated: PageId[] = [];
   const regeneratedEntries: Partial<Record<PageId, EffectivePageEntry>> = {};
   const unaffectedHashes: Array<{ pageId: PageId; beforeSha256: string; afterSha256: string }> = [];
+  let cssPatchApplied = "";
+  let cssPatchRules = 0;
+  let regionPatchCount = 0;
+
   for (const pageId of PAGE_IDS) {
     if (input.affected.includes(pageId)) {
-      const subkey = `${pageId}.realization-repair-1`;
-      const existing = await getBuildStageArtifact<PageHtml>(env, input.buildVersionId, "generated_page", subkey);
-      let pageValue: PageHtml;
-      if (existing) {
-        // Workflow-retry safety: the frozen repair artifact for this Build
-        // Version is reused verbatim (its schema is PageHtml, not a run).
-        pageValue = existing.value;
-        regeneratedEntries[pageId] = { subkey, checksum: existing.checksum };
+      const pageSubkey = `${pageId}.realization-repair-1`;
+      const patchSubkey = `${pageId}.realization-repair-1.patch`;
+      // Workflow-retry safety: the frozen patch artifact for this Build
+      // Version is reused verbatim and re-applied deterministically.
+      const existingPatch = await getBuildStageArtifact<RealizationRepairPatch>(env, input.buildVersionId, "generated_page", patchSubkey);
+      const currentHtml = (await getBuildStageArtifact<PageHtml>(env, input.buildVersionId, "generated_page", effective.pages[pageId].subkey))!.value.html;
+      let patch: RealizationRepairPatch;
+      let run: Awaited<ReturnType<typeof runSchemaValidatedAiStage<RealizationRepairPatch>>> | undefined;
+      if (existingPatch) {
+        patch = existingPatch.value;
       } else {
-        const run = await runSchemaValidatedAiStage<PageHtml>(env, {
+        run = await runSchemaValidatedAiStage<RealizationRepairPatch>(env, {
           ...stageInput,
-          stage: "website-generator",
-          schema: PageHtmlSchema as Parameters<typeof runSchemaValidatedAiStage>[1]["schema"],
-          schemaVersion: `generated-source/page-${pageId}/1`,
-          userPrompt:
-            pagePrompt({ pageId, blueprint: input.blueprint, contract: input.contract, facts, slots: input.imagePlan.slots, compositionTargets: input.compositionTargets, cssClassInventory }) +
-            referenceBlock +
-            (input.visualInputs && input.visualInputs.length > 0
-              ? "\n\nATTACHED REGION CROPS (issue #49): for each failed canonical region you receive TWO attached slices — the Reference region crop and this candidate's rendered crop of the SAME region, in that order. Compare them directly and realize the Reference/contract geometry."
-              : "") +
-            `\n\n## Realization repair directives (issue #47)
-The previously generated page was assembled and RENDERED, and a deterministic realization precheck measured these gross deviations from the binding Blueprint/Contract. Regenerate the COMPLETE page fixing every measured deviation. The numbers below are frozen measurements and binding targets — realize the stated geometry, do not reinterpret it:
-${input.findingDirectives}`,
+          stage: "realization-repair",
+          schema: RealizationRepairPatchSchema as Parameters<typeof runSchemaValidatedAiStage>[1]["schema"],
+          schemaVersion: REALIZATION_REPAIR_PATCH_SCHEMA_VERSION,
+          userPrompt: realizationRepairUserPrompt(input, pageId, currentHtml, cssArtifact.value.css),
         });
-        pageValue = run.value;
-        const stored = await storeBuildStageArtifact(env, {
-          buildId: input.buildId, buildVersionId: input.buildVersionId, siteGenerationId: input.siteGenerationId,
-          kind: "generated_page", subkey, schemaVersion: `generated-source/page-${pageId}/1`, value: run.value, provenance: run.provenance,
-        });
-        regeneratedEntries[pageId] = { subkey, checksum: stored.checksum };
+        patch = run.value;
+        if (patch.insufficient) {
+          throw new RealizationRepairEscalationError("REALIZATION_REPAIR_INSUFFICIENT", [
+            `${pageId}: the existing content cannot realize the measured geometry without fabrication (${patch.insufficientReason ?? "no reason given"}) — escalated for review instead of inventing content`,
+          ]);
+        }
       }
-      pages[pageId] = pageValue.html;
+      // ── Deterministic application + mutation guard (issue #67 §30) ──
+      // Runs on BOTH paths: a fresh patch and a replayed frozen patch must
+      // pass the same guards and produce the same applied page.
+      {
+        const before = extractPageContentFingerprint(currentHtml);
+        let patched = currentHtml;
+        const imageIdsOnPage = new Set(before.imageIds);
+        for (const regionPatch of patch.regionPatches) {
+          if (!authorizedRegions.has(regionPatch.regionId)) {
+            throw new RealizationRepairEscalationError("REPAIR_SCOPE_VIOLATION", [
+              `region patch targets '${regionPatch.regionId}' which is outside the authorized mutation scope`,
+            ]);
+          }
+          patched = applyRegionPatch(patched, regionPatch.regionId, regionPatch.html);
+          regionPatchCount += 1;
+        }
+        const cssRefusals = validateCssPatchScope(patch.cssPatch, authorizedRegions, imageIdsOnPage);
+        if (cssRefusals.length > 0) {
+          throw new RealizationRepairEscalationError("REPAIR_SCOPE_VIOLATION", cssRefusals);
+        }
+        cssPatchApplied = patch.cssPatch;
+        cssPatchRules = (patch.cssPatch.match(/\{/g) ?? []).length;
+        const after = extractPageContentFingerprint(patched);
+        const violations = diffPageContent({ before, after, authorizedRegions });
+        if (violations.length > 0) {
+          throw new RealizationRepairEscalationError(
+            "REPAIR_SCOPE_VIOLATION",
+            violations.map((violation) => `${violation.rule}: ${violation.detail}`)
+          );
+        }
+        if (existingPatch) {
+          // Replay: the patch and its applied page were already frozen by the
+          // first attempt. Determinism demands the re-application reproduce
+          // the stored page byte-for-byte; anything else is corruption.
+          const storedPage = await getBuildStageArtifact<PageHtml>(env, input.buildVersionId, "generated_page", pageSubkey);
+          if (!storedPage || storedPage.value.html !== patched) {
+            throw new Error(`REPAIR_REPLAY_MISMATCH: re-applying the frozen patch for '${pageId}' did not reproduce the stored repair artifact`);
+          }
+          regeneratedEntries[pageId] = { subkey: pageSubkey, checksum: storedPage.checksum };
+        } else {
+          // The patch output is frozen under its own immutable subkey; the
+          // applied page is frozen under the #66-compatible page subkey.
+          const storedPatch = await storeBuildStageArtifact(env, {
+            buildId: input.buildId, buildVersionId: input.buildVersionId, siteGenerationId: input.siteGenerationId,
+            kind: "generated_page", subkey: patchSubkey, schemaVersion: REALIZATION_REPAIR_PATCH_SCHEMA_VERSION,
+            value: patch, provenance: run!.provenance,
+          });
+          const pageValue: PageHtml = { html: patched };
+          const stored = await storeBuildStageArtifact(env, {
+            buildId: input.buildId, buildVersionId: input.buildVersionId, siteGenerationId: input.siteGenerationId,
+            kind: "generated_page", subkey: pageSubkey, schemaVersion: `generated-source/page-${pageId}/1`,
+            value: pageValue,
+            provenance: { ...run!.provenance, inputArtifactIds: [...run!.provenance.inputArtifactIds, storedPatch.artifactR2Key] },
+          });
+          regeneratedEntries[pageId] = { subkey: pageSubkey, checksum: stored.checksum };
+        }
+      }
+      pages[pageId] = (await getBuildStageArtifact<PageHtml>(env, input.buildVersionId, "generated_page", pageSubkey))!.value.html;
       regenerated.push(pageId);
       continue;
     }
@@ -1457,7 +1607,24 @@ ${input.findingDirectives}`,
     unaffectedHashes.push({ pageId, beforeSha256: effectiveEntry.checksum, afterSha256: frozen.checksum });
   }
 
-  const source: AssembledSiteSource = { pages: pages as Record<PageId, string>, sharedCss: cssArtifact.value.css, sharedJs: jsArtifact.value.js };
+  // Issue #67 §24: the CSS patch is a NEW immutable shared-source artifact
+  // layered over the frozen stylesheet at assembly — never an inline
+  // <style> in the page, never an edit of the frozen CSS.
+  const composedCss = cssPatchApplied
+    ? `${cssArtifact.value.css}\n\n/* realization-repair-1 — scoped geometry patch (issue #67) */\n${cssPatchApplied}`
+    : cssArtifact.value.css;
+  if (cssPatchApplied) {
+    await storeBuildStageArtifactIdempotent(env, {
+      buildId: input.buildId, buildVersionId: input.buildVersionId, siteGenerationId: input.siteGenerationId,
+      kind: "generated_shared_source", subkey: "site.css.realization-repair-1",
+      schemaVersion: "generated-source/site-css-realization-repair/1",
+      value: { css: composedCss } satisfies SharedCss,
+    });
+  }
+
+  const source: AssembledSiteSource = { pages: pages as Record<PageId, string>, sharedCss: composedCss, sharedJs: jsArtifact.value.js };
+  // Defense in depth: the deterministic Business Truth lint runs on the
+  // patched source AFTER the content freeze guard already held.
   const validation = validateAssembledSite(source, { contract: input.contract, slots: input.imagePlan.slots, facts, blueprint: input.blueprint });
   if (!validation.passed) {
     throw new SiteGenerationValidationError(validation.findings);
@@ -1481,7 +1648,9 @@ ${input.findingDirectives}`,
         ])
       ) as Record<PageId, EffectivePageEntry>),
     },
-    sharedCss: effective.sharedCss,
+    sharedCss: cssPatchApplied
+      ? { subkey: "site.css.realization-repair-1", checksum: (await getBuildStageArtifact<SharedCss>(env, input.buildVersionId, "generated_shared_source", "site.css.realization-repair-1"))!.checksum }
+      : effective.sharedCss,
     sharedJs: effective.sharedJs,
     unaffectedHashes,
   });
@@ -1493,7 +1662,7 @@ ${input.findingDirectives}`,
   await appendBuildWorkflowEvent(env, {
     buildId: input.buildId, buildVersionId: input.buildVersionId,
     fromState: "SITE_GENERATION", toState: "SITE_VALIDATION", stage: "realization_repair",
-    detail: `Realization repair regenerated ${regenerated.join(", ")} from measured precheck findings (one bounded round, no QA repair budget consumed; effective lineage ${effective.lineage}; ${unaffectedHashes.length} unaffected page(s) hash-preserved)`,
+    detail: `Content-preserving realization repair applied to ${regenerated.join(", ")}: ${regionPatchCount} region patch(es), ${cssPatchRules} scoped CSS rule(s); text/hrefs/image identities frozen by fingerprint guard; one bounded round, no QA repair budget consumed; effective lineage ${effective.lineage}; ${unaffectedHashes.length} unaffected page(s) hash-preserved`,
   });
   return { pages: source.pages, sharedCss: source.sharedCss, sharedJs: source.sharedJs, regenerated, unaffectedHashes };
 }
