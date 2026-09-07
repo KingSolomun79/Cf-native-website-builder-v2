@@ -477,16 +477,28 @@ describe("single-flight retry liveness (workflow level)", () => {
     expect(buildRow?.workflow_instance_id).toEqual("wf-liveness-dead-owner");
 
     // Attempt timeline for the generate step: killed owner -> IN_PROGRESS
-    // yield -> takeover. Comfortably inside the 8 total attempts.
+    // yield(s) -> takeover, comfortably inside the 8 total attempts. The
+    // exact interleaving of the async kill against the dead owner's claim
+    // insert is racy under load (issue #64 baseline flake) — assert the
+    // CONTRACT, not one interleaving: first attempt, the kill, exactly one
+    // final result, and every wait between attempts being a lease-timed
+    // IN_PROGRESS yield (asserted below).
     const generateEvents = engine.events.filter((event) => event.step.startsWith("pipeline: generate site"));
-    expect(generateEvents.map((event) => event.kind)).toEqual(["attempt", "killed", "attempt", "wait", "attempt", "result"]);
+    const kinds = generateEvents.map((event) => event.kind);
+    expect(kinds[0]).toEqual("attempt");
+    expect(kinds).toContain("killed");
+    expect(kinds[kinds.length - 1]).toEqual("result");
+    expect(kinds.filter((kind) => kind === "attempt").length).toEqual(kinds.filter((kind) => kind === "wait").length + 2);
+    expect(kinds.filter((kind) => kind === "attempt").length).toBeLessThanOrEqual(STAGE_STEP_RETRIES.limit);
 
-    // The IN_PROGRESS wait targeted lease expiry (+ margin), not a blind
+    // Every IN_PROGRESS wait targeted lease expiry (+ margin), not a blind
     // backoff step.
     const inProgressWaits = engine.waits("in_progress_wait").filter((event) => event.step.startsWith("pipeline: generate site"));
-    expect(inProgressWaits).toHaveLength(1);
-    expect(inProgressWaits[0].delayMs!).toBeGreaterThan(600_000);
-    expect(inProgressWaits[0].delayMs!).toBeLessThanOrEqual(STAGE_EXECUTION_LEASE_MS + STAGE_EXECUTION_RETRY_MARGIN_MS + 1_000);
+    expect(inProgressWaits.length).toBeGreaterThanOrEqual(1);
+    for (const wait of inProgressWaits) {
+      expect(wait.delayMs!).toBeGreaterThan(600_000);
+      expect(wait.delayMs!).toBeLessThanOrEqual(STAGE_EXECUTION_LEASE_MS + STAGE_EXECUTION_RETRY_MARGIN_MS + 1_000);
+    }
 
     // The dead owner's call never completed; exactly one provider call — by
     // the replacement owner — produced the artifact.

@@ -803,6 +803,7 @@ export async function runBuildPipeline(
           acceptedImages,
           formServiceEndpoint: contract.contract.formContract.formServiceEndpoint,
           expectedSiteFormId: contract.contract.formContract.siteFormId,
+          sourceSubkeys: Object.fromEntries(Object.entries(site.effectivePages).map(([pageId, entry]) => [pageId, entry.subkey])),
         });
         let preview = await deployPreview(env, {
           buildId: ctx.buildId,
@@ -923,6 +924,10 @@ export async function runBuildPipeline(
             acceptedImages,
             formServiceEndpoint: contract.contract.formContract.formServiceEndpoint,
             expectedSiteFormId: contract.contract.formContract.siteFormId,
+            sourceSubkeys: {
+              ...Object.fromEntries(Object.entries(site.effectivePages).map(([pageId, entry]) => [pageId, entry.subkey])),
+              ...Object.fromEntries(regenerated.regenerated.map((pageId) => [pageId, `${pageId}.realization-repair-1`])),
+            },
           });
           preview = await deployPreview(env, {
             buildId: ctx.buildId,

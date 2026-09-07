@@ -21,6 +21,7 @@ export type StageArtifactKind =
   | "generated_shared_source"
   | "image_plan"
   | "assembled_manifest"
+  | "candidate_manifest"
   | "qa_evidence_bundle"
   | "qa_report"
   | "release_record"

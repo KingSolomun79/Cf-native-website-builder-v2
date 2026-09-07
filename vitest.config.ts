@@ -190,6 +190,7 @@ export default defineWorkersConfig({
       "tests/v2-truth-lint.test.ts",
       "tests/v2-craft-preflight.test.ts",
       "tests/v2-reference-geometry.test.ts",
+      "tests/v2-effective-candidate.test.ts",
       "tests/v2-repair-guard.test.ts",
       "tests/v2-image-pipeline.test.ts",
       "tests/v2-form-service.test.ts",

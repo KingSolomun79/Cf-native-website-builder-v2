@@ -938,6 +938,60 @@ export interface GeneratedSite extends AssembledSiteSource {
   imagePlan: ImagePlan;
   validation: { passed: boolean; findings: AssemblyFinding[] };
   artifacts: Array<{ kind: string; subkey: string; r2Key: string }>;
+  /** Issue #66: the exact immutable artifact composing each page of THIS
+   *  candidate — base subkey or the informed assembly-repair subkey that
+   *  superseded it. Never a timestamp guess. */
+  effectivePages: Record<PageId, { subkey: string; checksum: string }>;
+  effectiveSharedSource: { css: { subkey: string; checksum: string }; js: { subkey: string; checksum: string } };
+}
+
+// ── Effective candidate lineage (issue #66) ─────────────────────────────────
+//
+// The 2026-09-07 production failure (Build 282f9b9d): after the informed
+// assembly repairs, the Home realization repair reassembled the candidate
+// from BASE page artifacts — silently discarding the applied
+// assembly-repair-1 fixes of the untouched pages and reintroducing
+// BROKEN_NAV_LINK / ORPHANED_CLASS findings. 8 of 9 terminal findings came
+// from that regression. The candidate therefore carries an explicit
+// effective-page artifact map (the candidate manifest): every repair updates
+// ONE pointer, unaffected pages keep their exact artifact, and assembly
+// provenance answers "which Home? which About?" deterministically.
+
+export const CANDIDATE_MANIFEST_SCHEMA_VERSION = "candidate-manifest/1";
+
+export interface EffectivePageEntry {
+  subkey: string;
+  checksum: string;
+}
+
+export interface CandidateManifest {
+  schemaVersion: string;
+  /** How this manifest came to be: initial generation, or the realized
+   *  repair that updated the pointers. */
+  lineage: string;
+  pages: Record<PageId, EffectivePageEntry>;
+  sharedCss: EffectivePageEntry;
+  sharedJs: EffectivePageEntry;
+  /** Issue #66 §15: per-page before/after checksums for pages the targeted
+   *  repair did NOT touch — recorded so preservation is auditable. */
+  unaffectedHashes?: Array<{ pageId: PageId; beforeSha256: string; afterSha256: string }>;
+}
+
+export function buildCandidateManifest(input: {
+  lineage: string;
+  pages: Record<PageId, EffectivePageEntry>;
+  sharedCss: EffectivePageEntry;
+  sharedJs: EffectivePageEntry;
+  unaffectedHashes?: Array<{ pageId: PageId; beforeSha256: string; afterSha256: string }>;
+}): CandidateManifest {
+  return {
+    schemaVersion: CANDIDATE_MANIFEST_SCHEMA_VERSION,
+    lineage: input.lineage,
+    pages: { ...input.pages },
+    sharedCss: { ...input.sharedCss },
+    sharedJs: { ...input.sharedJs },
+    ...(input.unaffectedHashes ? { unaffectedHashes: input.unaffectedHashes } : {}),
+  };
 }
 
 export async function generateCompleteSite(
@@ -1055,13 +1109,13 @@ export async function generateCompleteSite(
 
   // 3-6. one page at a time under the same fixed contracts.
   const pages: Partial<Record<PageId, string>> = {};
-  const pageRuns: Array<{ pageId: PageId; run: { value: PageHtml; artifactR2Key: string; checksum: string } }> = [];
+  const pageRuns: Array<{ pageId: PageId; subkey: string; run: { value: PageHtml; artifactR2Key: string; checksum: string } }> = [];
   const pagePromptFor = (pageId: PageId) =>
     pagePrompt({ pageId, blueprint: input.blueprint, contract: input.contract, facts, slots: imagePlan.slots, compositionTargets: input.compositionTargets, cssClassInventory }) + referenceBlock + repairBlock;
   for (const pageId of PAGE_IDS) {
     const run = await runOrReuse<PageHtml>("generated_page", pageId, PageHtmlSchema, `generated-source/page-${pageId}/1`, pagePromptFor(pageId));
     pages[pageId] = run.value.html;
-    pageRuns.push({ pageId, run: { value: run.value, artifactR2Key: run.artifactR2Key, checksum: run.checksum } });
+    pageRuns.push({ pageId, subkey: pageId, run: { value: run.value, artifactR2Key: run.artifactR2Key, checksum: run.checksum } });
   }
 
   const source: AssembledSiteSource = {
@@ -1166,6 +1220,7 @@ BUSINESS TRUTH (binding, issue #48/#53 — inherited by every repair): fixing la
             }),
         });
         pageRun.run = { value: repaired.value, artifactR2Key: repaired.artifactR2Key, checksum: repaired.checksum };
+        pageRun.subkey = subkey;
         source.pages[pageId] = repaired.value.html;
       }
     }
@@ -1183,13 +1238,31 @@ BUSINESS TRUTH (binding, issue #48/#53 — inherited by every repair): fixing la
   const artifacts: GeneratedSite["artifacts"] = [
     { kind: "generated_shared_source", subkey: "site.css", r2Key: cssRun.artifactR2Key },
     { kind: "generated_shared_source", subkey: "site.js", r2Key: jsRun.artifactR2Key },
-    ...pageRuns.map(({ pageId, run }) => ({ kind: "generated_page" as const, subkey: pageId, r2Key: run.artifactR2Key })),
+    ...pageRuns.map(({ pageId, subkey, run }) => ({ kind: "generated_page" as const, subkey, r2Key: run.artifactR2Key })),
   ];
   const imagePlanStored: StoredStageArtifact = await storeBuildStageArtifactIdempotent(env, {
     buildId: input.buildId, buildVersionId: input.buildVersionId, siteGenerationId: input.siteGenerationId,
     kind: "image_plan", schemaVersion: IMAGE_PLAN_SCHEMA_VERSION, value: imagePlan,
   });
   artifacts.push({ kind: "image_plan", subkey: "", r2Key: imagePlanStored.artifactR2Key });
+
+  // Issue #66: freeze the effective candidate lineage — the exact artifact
+  // composing each page of THIS candidate. Deterministic content (frozen
+  // artifact checksums) makes the idempotent store a re-entry success.
+  const effectivePages = Object.fromEntries(
+    pageRuns.map(({ pageId, subkey, run }) => [pageId, { subkey, checksum: run.checksum }])
+  ) as Record<PageId, EffectivePageEntry>;
+  const manifest = buildCandidateManifest({
+    lineage: "initial-generation",
+    pages: effectivePages,
+    sharedCss: { subkey: "site.css", checksum: cssRun.checksum },
+    sharedJs: { subkey: "site.js", checksum: jsRun.checksum },
+  });
+  const manifestStored = await storeBuildStageArtifactIdempotent(env, {
+    buildId: input.buildId, buildVersionId: input.buildVersionId, siteGenerationId: input.siteGenerationId,
+    kind: "candidate_manifest", schemaVersion: CANDIDATE_MANIFEST_SCHEMA_VERSION, value: manifest,
+  });
+  artifacts.push({ kind: "candidate_manifest", subkey: "", r2Key: manifestStored.artifactR2Key });
 
   // NOTE: the canonical builds/{id}/v{n}/source/* freeze happens in the
   // assembly stage with image placeholders RESOLVED; generation itself only
@@ -1206,7 +1279,17 @@ BUSINESS TRUTH (binding, issue #48/#53 — inherited by every repair): fixing la
     detail: "Deterministic cross-file assembly validation passed",
   });
 
-  return { ...source, imagePlan, validation: finalValidation, artifacts };
+  return {
+    ...source,
+    imagePlan,
+    validation: finalValidation,
+    artifacts,
+    effectivePages,
+    effectiveSharedSource: {
+      css: { subkey: "site.css", checksum: cssRun.checksum },
+      js: { subkey: "site.js", checksum: jsRun.checksum },
+    },
+  };
 }
 
 // ── Realization repair (issue #47, remediation Part 21) ────────────────────
@@ -1243,6 +1326,58 @@ export interface RealizationRegenerationResult {
   sharedCss: string;
   sharedJs: string;
   regenerated: PageId[];
+  /** Issue #66 §15: unaffected pages' before/after artifact checksums —
+   *  verified identical before this result is returned. */
+  unaffectedHashes: Array<{ pageId: PageId; beforeSha256: string; afterSha256: string }>;
+}
+
+export interface ResolvedEffectivePages {
+  lineage: string;
+  pages: Record<PageId, EffectivePageEntry>;
+  sharedCss: EffectivePageEntry;
+  sharedJs: EffectivePageEntry;
+}
+
+// Issue #66 §12-13: effective page artifacts resolve from the explicit
+// candidate manifest — NEVER by timestamp guessing or filename heuristics.
+// For Build Versions created before the manifest existed, the documented
+// artifact-namespace rule reconstructs the lineage deterministically: a
+// `{pageId}.assembly-repair-1` stage artifact exists only because this
+// version's informed assembly repair produced it to SUPERSEDE the base page,
+// so its presence IS the pointer. The lineage source is recorded either way.
+export async function resolveEffectivePages(env: Env, buildVersionId: string): Promise<ResolvedEffectivePages> {
+  const manifestRecord = await getBuildStageArtifact<CandidateManifest>(env, buildVersionId, "candidate_manifest", "");
+  if (manifestRecord) {
+    const manifest = manifestRecord.value;
+    return {
+      lineage: `manifest/${manifest.lineage}`,
+      pages: manifest.pages,
+      sharedCss: manifest.sharedCss,
+      sharedJs: manifest.sharedJs,
+    };
+  }
+  const pages = {} as Record<PageId, EffectivePageEntry>;
+  for (const pageId of PAGE_IDS) {
+    const repair = await getBuildStageArtifact<PageHtml>(env, buildVersionId, "generated_page", `${pageId}.assembly-repair-1`);
+    const base = await getBuildStageArtifact<PageHtml>(env, buildVersionId, "generated_page", pageId);
+    if (!base && !repair) {
+      throw new Error(`effective page resolution found no artifact for '${pageId}' in Build Version ${buildVersionId}`);
+    }
+    pages[pageId] = repair
+      ? { subkey: `${pageId}.assembly-repair-1`, checksum: repair.checksum }
+      : { subkey: pageId, checksum: base!.checksum };
+  }
+  const css = await getBuildStageArtifact<SharedCss>(env, buildVersionId, "generated_shared_source", "site.css");
+  const js = await getBuildStageArtifact<SharedJs>(env, buildVersionId, "generated_shared_source", "site.js");
+  if (!css || !js) {
+    throw new Error(`effective page resolution found no shared source in Build Version ${buildVersionId}`);
+  }
+  return {
+    lineage: "reconstructed/assembly-repair-namespace",
+    pages,
+    sharedCss: { subkey: "site.css", checksum: css.checksum },
+    sharedJs: { subkey: "site.js", checksum: js.checksum },
+  };
 }
 
 export async function regeneratePagesForRealization(
@@ -1254,6 +1389,9 @@ export async function regeneratePagesForRealization(
   if (!cssArtifact || !jsArtifact) {
     throw new Error("realization repair requires the frozen shared source of the same Build Version");
   }
+  // Issue #66: the repair assembles the CURRENT EFFECTIVE candidate — pages
+  // already carrying informed assembly repairs keep those exact artifacts.
+  const effective = await resolveEffectivePages(env, input.buildVersionId);
   const factsResult = await getEffectiveBusinessFacts(env, input.buildId);
   const facts = factsResult.facts;
   const visualInputs = input.visualInputs ?? [];
@@ -1271,6 +1409,8 @@ export async function regeneratePagesForRealization(
 
   const pages: Partial<Record<PageId, string>> = {};
   const regenerated: PageId[] = [];
+  const regeneratedEntries: Partial<Record<PageId, EffectivePageEntry>> = {};
+  const unaffectedHashes: Array<{ pageId: PageId; beforeSha256: string; afterSha256: string }> = [];
   for (const pageId of PAGE_IDS) {
     if (input.affected.includes(pageId)) {
       const subkey = `${pageId}.realization-repair-1`;
@@ -1280,6 +1420,7 @@ export async function regeneratePagesForRealization(
         // Workflow-retry safety: the frozen repair artifact for this Build
         // Version is reused verbatim (its schema is PageHtml, not a run).
         pageValue = existing.value;
+        regeneratedEntries[pageId] = { subkey, checksum: existing.checksum };
       } else {
         const run = await runSchemaValidatedAiStage<PageHtml>(env, {
           ...stageInput,
@@ -1297,18 +1438,23 @@ The previously generated page was assembled and RENDERED, and a deterministic re
 ${input.findingDirectives}`,
         });
         pageValue = run.value;
-        await storeBuildStageArtifact(env, {
+        const stored = await storeBuildStageArtifact(env, {
           buildId: input.buildId, buildVersionId: input.buildVersionId, siteGenerationId: input.siteGenerationId,
           kind: "generated_page", subkey, schemaVersion: `generated-source/page-${pageId}/1`, value: run.value, provenance: run.provenance,
         });
+        regeneratedEntries[pageId] = { subkey, checksum: stored.checksum };
       }
       pages[pageId] = pageValue.html;
       regenerated.push(pageId);
       continue;
     }
-    const frozen = await getBuildStageArtifact<PageHtml>(env, input.buildVersionId, "generated_page", pageId);
-    if (!frozen) throw new Error(`realization repair missing frozen page artifact for '${pageId}'`);
+    // Issue #66 §14: an unaffected page resolves through the candidate
+    // manifest — its already-applied assembly repair survives untouched.
+    const effectiveEntry = effective.pages[pageId];
+    const frozen = await getBuildStageArtifact<PageHtml>(env, input.buildVersionId, "generated_page", effectiveEntry.subkey);
+    if (!frozen) throw new Error(`realization repair missing effective page artifact '${effectiveEntry.subkey}' for '${pageId}'`);
     pages[pageId] = frozen.value.html;
+    unaffectedHashes.push({ pageId, beforeSha256: effectiveEntry.checksum, afterSha256: frozen.checksum });
   }
 
   const source: AssembledSiteSource = { pages: pages as Record<PageId, string>, sharedCss: cssArtifact.value.css, sharedJs: jsArtifact.value.js };
@@ -1316,10 +1462,38 @@ ${input.findingDirectives}`,
   if (!validation.passed) {
     throw new SiteGenerationValidationError(validation.findings);
   }
+  // Issue #66 §15: an unaffected page's artifact MUST be byte-identical
+  // before and after the targeted repair — any drift is corruption.
+  for (const hash of unaffectedHashes) {
+    if (hash.beforeSha256 !== hash.afterSha256) {
+      throw new Error(`REPAIR_PRESERVATION_VIOLATION: unaffected page '${hash.pageId}' changed artifact checksum during realization repair (${hash.beforeSha256} -> ${hash.afterSha256})`);
+    }
+  }
+  // Update the candidate manifest: the affected pages now point at their
+  // realization-repair artifacts; every other pointer stays IDENTICAL.
+  const repairedManifest = buildCandidateManifest({
+    lineage: `realization-repair/${regenerated.join(",")}`,
+    pages: {
+      ...(Object.fromEntries(
+        Object.entries(effective.pages).map(([pageId, entry]) => [
+          pageId,
+          regeneratedEntries[pageId as PageId] ?? entry,
+        ])
+      ) as Record<PageId, EffectivePageEntry>),
+    },
+    sharedCss: effective.sharedCss,
+    sharedJs: effective.sharedJs,
+    unaffectedHashes,
+  });
+  await storeBuildStageArtifactIdempotent(env, {
+    buildId: input.buildId, buildVersionId: input.buildVersionId, siteGenerationId: input.siteGenerationId,
+    kind: "candidate_manifest", schemaVersion: CANDIDATE_MANIFEST_SCHEMA_VERSION,
+    subkey: "realization-repair-1", value: repairedManifest,
+  });
   await appendBuildWorkflowEvent(env, {
     buildId: input.buildId, buildVersionId: input.buildVersionId,
     fromState: "SITE_GENERATION", toState: "SITE_VALIDATION", stage: "realization_repair",
-    detail: `Realization repair regenerated ${regenerated.join(", ")} from measured precheck findings (one bounded round, no QA repair budget consumed)`,
+    detail: `Realization repair regenerated ${regenerated.join(", ")} from measured precheck findings (one bounded round, no QA repair budget consumed; effective lineage ${effective.lineage}; ${unaffectedHashes.length} unaffected page(s) hash-preserved)`,
   });
-  return { pages: source.pages, sharedCss: source.sharedCss, sharedJs: source.sharedJs, regenerated };
+  return { pages: source.pages, sharedCss: source.sharedCss, sharedJs: source.sharedJs, regenerated, unaffectedHashes };
 }

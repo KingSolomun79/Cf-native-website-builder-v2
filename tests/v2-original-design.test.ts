@@ -367,9 +367,10 @@ describe("ORIGINAL_DESIGN blueprint", () => {
     });
     expect(site.validation.passed).toBe(true);
     expect(site.pages.home).toContain('data-region="ascent-hero"');
-    // Same artifact vocabulary as REFERENCE_BOUND.
+    // Same artifact vocabulary as REFERENCE_BOUND (issue #66 adds the
+    // effective-candidate lineage manifest to the shared vocabulary).
     const kinds = new Set(site.artifacts.map((artifact) => artifact.kind));
-    expect(kidsEqual(kinds, new Set(["generated_shared_source", "generated_page", "image_plan"]))).toBe(true);
+    expect(kidsEqual(kinds, new Set(["generated_shared_source", "generated_page", "image_plan", "candidate_manifest"]))).toBe(true);
     const storedBlueprint = await getBuildStageArtifact<VisualBlueprint>(env, created.buildVersionId, "visual_blueprint");
     expect(storedBlueprint!.value.visualThesis).toContain("Altitude-born");
 

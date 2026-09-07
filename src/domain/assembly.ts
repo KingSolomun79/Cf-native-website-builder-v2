@@ -33,6 +33,10 @@ export interface AssemblyInput {
   acceptedImages: Map<string, string>;
   formServiceEndpoint: string;
   expectedSiteFormId: string;
+  /** Issue #66 §16: pageId -> the effective stage-artifact subkey composing
+   *  this candidate. Frozen into the assembled manifest so "which Home?
+   *  which About?" is answerable from the candidate itself. */
+  sourceSubkeys?: Record<string, string>;
 }
 
 export interface AssembledCandidate {
@@ -138,7 +142,16 @@ export async function buildAssembledCandidate(env: Env, input: AssemblyInput): P
   const artifactManifestHash = await sha256Hex(JSON.stringify(manifestEntries));
   const manifestR2Key = buildVersionManifestKey(input.buildId, input.buildVersionNumber);
   const manifestJson = JSON.stringify(
-    { schemaVersion: "build-manifest/1", buildId: input.buildId, buildVersionId: input.buildVersionId, versionNumber: input.buildVersionNumber, artifactManifestHash, files: manifestEntries, routingNotes },
+    {
+      schemaVersion: "build-manifest/1",
+      buildId: input.buildId,
+      buildVersionId: input.buildVersionId,
+      versionNumber: input.buildVersionNumber,
+      artifactManifestHash,
+      files: manifestEntries,
+      routingNotes,
+      ...(input.sourceSubkeys ? { sourceArtifacts: input.sourceSubkeys } : {}),
+    },
     null,
     2
   );
