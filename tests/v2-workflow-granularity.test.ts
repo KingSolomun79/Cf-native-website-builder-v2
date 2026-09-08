@@ -164,9 +164,17 @@ describe("workflow granularity (issue #57)", () => {
     const scripted = createPipelineScripts({});
 
     // Run 1: everything through QA evidence completes and caches; the QA
-    // verdicts fault aborts the drive (domain-recorded FAILED terminal).
-    const first = await driveWorkflow(siteGenerationId, engine, scripted);
-    expect(first.terminal).toBe("FAILED");
+    // verdicts fault aborts the drive. Issue #70: the in-flight fault is
+    // TRANSIENT, so the workflow YIELDS to the engine — run() rejects with
+    // no terminal Build mutation — and the instance restart (run 2) replays
+    // the cached stages.
+    let aborted = false;
+    const first = await driveWorkflow(siteGenerationId, engine, scripted).catch((error: Error) => {
+      aborted = /simulated in-flight fault/.test(error.message);
+      return null;
+    });
+    expect(aborted).toBe(true);
+    expect(first).toBeNull();
     expect(engine.executionsOf("pipeline: QA evidence (v1)")).toBe(1);
     expect(engine.executionsOf("pipeline: QA verdicts (v1)")).toBe(0);
 
@@ -186,7 +194,7 @@ describe("workflow granularity (issue #57)", () => {
     // The Build has exactly one immutable Build Version — the restart never
     // regenerated the candidate or re-spent image budget.
     const versions = await env.DB.prepare("SELECT COUNT(*) AS n FROM build_versions WHERE build_id = ?")
-      .bind(first.buildId!)
+      .bind(second.buildId!)
       .first<{ n: number }>();
     expect(versions?.n).toBe(1);
   });

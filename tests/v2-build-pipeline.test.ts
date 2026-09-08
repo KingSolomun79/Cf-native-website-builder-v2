@@ -163,6 +163,11 @@ describe("production build pipeline (issue #30 wiring)", () => {
       ],
       "builds/x/v1/ai/reference-analyzer/vision-diagnostics.json"
     );
+    // Issue #70 §22 note: this terminal FAILED is a DELIBERATE domain
+    // outcome — the analyzer's own bounded seam gives up in-step and the
+    // stage returns the terminal marker with its attempt ledger (allowed by
+    // §22). The #70 rethrow only covers TRANSIENT errors ESCAPING a stage
+    // (platform resets), which never reach this outcome.
     const outcome = await runBuildPipeline(env, {
       siteGenerationId: started.siteGenerationId,
       deps: { ...createPipelineScripts(), visionGenerate: async () => { throw exhausted; } },

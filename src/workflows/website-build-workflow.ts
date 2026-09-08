@@ -245,6 +245,16 @@ export class WebsiteBuildWorkflow extends WorkflowEntrypoint<Env, WebsiteBuildPa
         reasons: result.reasons,
       };
     } catch (error) {
+      // Issue #70 §22/§26: transient instance-level faults yield to the
+      // engine WITHOUT terminal Build mutation — the instance dies and the
+      // #56 reconciliation sweep applies the terminal transition exactly
+      // once ONLY when the instance genuinely reached terminal (errored/
+      // terminated). Step-retry exhaustion lands here too: the step budget
+      // is spent, so the instance errors and the sweep owns the outcome
+      // ("no endless limbo", §26).
+      if (classifyStageFailure(error) === "TRANSIENT_RETRYABLE") {
+        throw error;
+      }
       try {
         const { failBuildForWorkflowTermination } = await import("../domain/workflow-reconciliation");
         await failBuildForWorkflowTermination(this.env, {

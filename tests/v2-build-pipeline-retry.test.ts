@@ -51,6 +51,19 @@ function auditedScripts(options: Parameters<typeof createPipelineScripts>[0], au
   return { ...base, generate };
 }
 
+/** Issue #70: a simulated DO reset is TRANSIENT — the pipeline yields to the
+ *  engine by REJECTING (no terminal Build mutation). Phase 1 returns the
+ *  Build id from D1; phase 2's re-drive is the engine restart. */
+async function crashPhase1(siteGenerationId: string, scripted: BuildPipelineDeps, stepName: string): Promise<string> {
+  await expect(
+    runBuildPipeline(env, { siteGenerationId, deps: crashAt(scripted, stepName) })
+  ).rejects.toThrow(/simulated Durable Object reset/);
+  const row = await env.DB.prepare("SELECT id FROM builds WHERE site_generation_id = ?")
+    .bind(siteGenerationId)
+    .first<{ id: string }>();
+  return row!.id;
+}
+
 /** Deps that abort the run when the named durable step is reached. */
 function crashAt(scripted: BuildPipelineDeps, stepName: string): BuildPipelineDeps {
   return {
@@ -100,14 +113,9 @@ describe("build pipeline Workflow-retry safety (issue #34)", () => {
     // applied (the fault fires at the first repaired-version step — the
     // batch row, the new Build Version and the artifact inheritance already
     // exist in D1, but no preview or confirmation does).
-    const crashed = await runBuildPipeline(env, {
-      siteGenerationId,
-      deps: crashAt(scripted, "pipeline: generate site (v2)"),
-    });
-    expect(crashed.terminal).toBe("FAILED");
+    const buildId = await crashPhase1(siteGenerationId, scripted, "pipeline: generate site (v2)");
 
     // D1 truth at the reset: exactly one Fix Coordinator batch and its version.
-    const buildId = crashed.buildId;
     expect(await repairBatchKinds(buildId)).toEqual(["fix_coordinator"]);
     expect(await versionNumbers(buildId)).toEqual([1, 2]);
 
@@ -182,23 +190,18 @@ describe("build pipeline Workflow-retry safety (issue #34)", () => {
     const siteGenerationId = await startGeneration("references/pipeline/retry-pre-repair.png");
 
     // Phase 1: crash inside the first evaluation (before any repair batch).
-    const crashed = await runBuildPipeline(env, {
-      siteGenerationId,
-      deps: crashAt(scripted, "pipeline: QA verdicts (v1)"),
-    });
-    expect(crashed.terminal).toBe("FAILED");
+    const buildId = await crashPhase1(siteGenerationId, scripted, "pipeline: QA verdicts (v1)");
 
     // Phase 2: re-entry reconstructs repairApplied=false (no batch exists)
     // and runs the normal bounded repair to Release Ready.
     const outcome = await runBuildPipeline(env, {
       siteGenerationId,
-      buildId: crashed.buildId,
+      buildId,
       deps: scripted,
     });
     expect(outcome.terminal).toBe("RELEASE_READY");
     expect(outcome.repairApplied).toBe(true);
 
-    const buildId = outcome.buildId;
     expect(await repairBatchKinds(buildId)).toEqual(["fix_coordinator"]);
     expect(await versionNumbers(buildId)).toEqual([1, 2]);
     expect(outcome.releaseReadyBuildVersionId).not.toBeNull();
@@ -254,12 +257,7 @@ describe("build pipeline Workflow-retry safety (issue #34)", () => {
 
     // Phase 1: v1 fails -> Fix Coordinator -> v2 -> failed confirmation ->
     // Release Blocker Fix -> v3, then crash before v3 is evaluated.
-    const crashed = await runBuildPipeline(env, {
-      siteGenerationId,
-      deps: crashAt(scripted, "pipeline: generate site (v3)"),
-    });
-    expect(crashed.terminal).toBe("FAILED");
-    const buildId = crashed.buildId;
+    const buildId = await crashPhase1(siteGenerationId, scripted, "pipeline: generate site (v3)");
     expect(await repairBatchKinds(buildId)).toEqual(["fix_coordinator", "release_blocker_fix"]);
     expect(await versionNumbers(buildId)).toEqual([1, 2, 3]);
 

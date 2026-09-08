@@ -85,8 +85,18 @@ async function createInitialBuildViaWorkflow(env: Env): Promise<{
   const event = { payload: { siteGenerationId: submission.siteGenerationId } } as unknown as WorkflowEvent<{
     siteGenerationId: string;
   }>;
-  const result = (await workflow.run(event, step)) as { buildId: string; buildVersionId: string };
-  return { siteGenerationId: submission.siteGenerationId, ...result };
+  // Issue #70: the unscripted pipeline fails at intake on the missing
+  // BROWSER binding — a transient that now YIELDS to the engine (workflow.run
+  // rejects) instead of terminal-failing in-process. The Build row created by
+  // step 1.0 is what the revision flow needs.
+  const result = (await workflow.run(event, step).catch(() => null)) as { buildId: string; buildVersionId: string } | null;
+  if (result?.buildId) {
+    return { siteGenerationId: submission.siteGenerationId, ...result };
+  }
+  const buildRow = await env.DB.prepare("SELECT id FROM builds WHERE site_generation_id = ?")
+    .bind(submission.siteGenerationId)
+    .first<{ id: string }>();
+  return { siteGenerationId: submission.siteGenerationId, buildId: buildRow!.id, buildVersionId: "" };
 }
 
 describe("Revision Request and Fact Update lifecycle", () => {

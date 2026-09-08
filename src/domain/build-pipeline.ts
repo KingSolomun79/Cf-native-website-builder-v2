@@ -34,6 +34,7 @@ import {
   type ImageGenerationProvider,
 } from "./image-pipeline";
 import { runImageGenerationDurable } from "./image-orchestration";
+import { classifyStageFailure } from "./stage-failure";
 import { buildAssembledCandidate, deployPreview, freezeAssembledCandidate, type PreviewDeployer } from "./assembly";
 import { getObject } from "../lib/assets";
 import { buildStandardEvidenceBundle, compareGeometry, geometryFromRegions, evaluateReferenceMacroFidelity, type GeometryComparison, type QaCaptureFn } from "./qa-evidence";
@@ -1596,6 +1597,18 @@ export async function runBuildPipeline(
 
     return outcome!;
   } catch (error) {
+    // Issue #70 §22: a retryable/transient failure must NEVER terminal-fail
+    // the Build while the Workflow engine still owns recovery (step retries,
+    // instance restart from the step cache, single-flight claims, immutable
+    // artifacts — §24). Terminal Build mutation happens only for deliberate
+    // domain outcomes (returned in-step) or genuine instance death applied
+    // by the #56 reconciliation sweep. The production incident behind this
+    // issue (Build FAILED + Workflow still running) was this catch
+    // terminal-failing on a "Durable Object reset because its code was
+    // updated" abort.
+    if (classifyStageFailure(error) === "TRANSIENT_RETRYABLE") {
+      throw error;
+    }
     const detail = `Pipeline stage failure: ${(error as Error).message.slice(0, 400)}`;
     await appendBuildWorkflowEvent(env, {
       buildId,

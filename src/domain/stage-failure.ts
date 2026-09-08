@@ -36,6 +36,7 @@
 // This module is deliberately a CLASSIFIER, not an error-system rewrite
 // (#62 §11): it routes existing domain classes; it does not merge them.
 
+import { NonRetryableError } from "cloudflare:workflows";
 import { StageExecutionCollisionError } from "./stage-execution";
 import { StageArtifactError } from "./stage-artifacts";
 import { ImageBudgetExceededError } from "./image-pipeline";
@@ -48,7 +49,37 @@ export type StageFailureClass =
   | "DETERMINISTIC_REVIEW_REQUIRED"
   | "TERMINAL_INVARIANT";
 
+// Issue #70 §23: transient platform reset recognition. Cloudflare documents
+// that Durable Objects may be reset/shut down by code deployments and runtime
+// updates; an in-flight invocation observing such an abort can change its
+// verdict on re-execution because everything that matters survived — D1 rows,
+// R2 immutable artifacts, the engine's step cache, single-flight claims.
+// Structured signal first (a platform `retryable` property when present);
+// the exact documented reset message is the isolated compatibility fallback,
+// deliberately narrow — never a broad keyword matcher.
+export function isTransientPlatformResetError(error: unknown): boolean {
+  if (error && typeof error === "object" && (error as { retryable?: unknown }).retryable === true) {
+    return true;
+  }
+  const message = error instanceof Error ? error.message : typeof error === "string" ? error : "";
+  return message.includes("Durable Object reset because its code was updated");
+}
+
 export function classifyStageFailure(error: unknown): StageFailureClass {
+  // Issue #70 §23: platform resets are EXPLICITLY transient — pinned here so
+  // the default fall-through below can never be narrowed by a future broad
+  // matcher without this contract failing first.
+  if (isTransientPlatformResetError(error)) {
+    return "TRANSIENT_RETRYABLE";
+  }
+  // The engine boundary's own wrapper (toWorkflowStepError) marks a failure
+  // non-retryable only after this classifier called it deterministic or
+  // terminal. When the WRAPPED class survives to another boundary (the
+  // pipeline's #70 catch), the wrapper's decision is authoritative: never
+  // re-classified as transient.
+  if (error instanceof NonRetryableError) {
+    return "TERMINAL_INVARIANT";
+  }
   // TERMINAL_INVARIANT: integrity/spend violations (#54 §11, #58 gate).
   if (
     error instanceof StageExecutionCollisionError ||
