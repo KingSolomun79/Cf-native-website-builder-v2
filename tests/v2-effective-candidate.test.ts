@@ -76,6 +76,11 @@ describe("effective candidate lineage (issue #66)", () => {
 
     let aboutCalls = 0;
     const generate: RawAiGenerate = async (system, user) => {
+      // The #69 repair prompt embeds "shared stylesheet"; neutralize it
+      // before delegating so the base css branch doesn't capture the call.
+      if (user.includes("Assembly repair directives")) {
+        user = user.replaceAll("shared stylesheet", "shared style sheet");
+      }
       const result = await base.generate!(system, user);
       if (user.includes("page id 'about'") && !user.includes("Assembly repair directives")) {
         aboutCalls += 1;

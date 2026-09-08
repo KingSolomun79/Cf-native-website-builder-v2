@@ -33,6 +33,15 @@ import {
   applyRegionPatch,
   validateCssPatchScope,
 } from "./content-fingerprint";
+import {
+  assemblyRepairDecision,
+  extractAssemblyFingerprint,
+  findingsForPage,
+  findingSignatures,
+  validateAssemblyRepairContent,
+  canonicalNavLabel,
+  type AssemblyFinding,
+} from "./assembly-repair";
 
 export const IMAGE_PLAN_SCHEMA_VERSION = "image-plan/1";
 
@@ -135,10 +144,10 @@ export function deriveImagePlan(blueprint: VisualBlueprint): ImagePlan {
 
 // ── Assembly validation (deterministic, cross-file) ─────────────────────────
 
-export interface AssemblyFinding {
-  id: string;
-  detail: string;
-}
+// AssemblyFinding (the deterministic validation finding shape) lives in
+// ./assembly-repair since issue #69 and is re-exported here for the
+// established import path.
+export type { AssemblyFinding };
 
 export interface AssembledSiteSource {
   pages: Record<PageId, string>;
@@ -652,7 +661,11 @@ export function validateAssembledSite(
       findings.push({ id: "MISSING_VIEWPORT_META", detail: `${pageId}: no responsive viewport meta` });
     }
 
-    for (const href of html.match(/href="\/[a-z]*"/gi) ?? []) {
+    // Issue #69: the href character class must cover hyphens/digits — a
+    // broken href like "/broken-about" used to escape the scan entirely
+    // (the match stopped at the hyphen), so the repair authority never
+    // learned the exact broken value to authorize.
+    for (const href of html.match(/href="\/[a-z0-9-]*"/gi) ?? []) {
       if (!pageFiles.has(href.slice(6, -1)) && href.slice(6, -1) !== "/") {
         findings.push({ id: "BROKEN_NAV_LINK", detail: `${pageId}: internal link ${href} resolves to no generated page` });
       }
@@ -1163,78 +1176,168 @@ export async function generateCompleteSite(
       const match = /^(home|about|services|contact):/.exec(finding.detail);
       if (match) affected.add(match[1] as PageId);
     }
-    if (affected.size > 0) {
+    const validationContext = { contract: input.contract, slots: imagePlan.slots, facts, blueprint: input.blueprint };
+    for (const pageId of PAGE_IDS) {
+      if (!affected.has(pageId)) continue;
+      const pageRun = pageRuns.find((entry) => entry.pageId === pageId)!;
+      const preFindings: AssemblyFinding[] = findingsForPage(validation.findings as AssemblyFinding[], pageId);
+      // Issue #69 §12: deterministic finding-type -> mutation-authority map.
+      // FABRICATED_TRUST_ENTITY (and any non-enumerated type) escalates the
+      // page instead of regenerating it; the pre-repair candidate stays.
+      const decision = assemblyRepairDecision(preFindings);
+      const scopeSummary = decision.action === "repair"
+        ? [
+            decision.scope.classRealization ? "class-realization" : null,
+            decision.scope.brokenHrefs.length ? `href-fix:${decision.scope.brokenHrefs.join("|")}` : null,
+            decision.scope.navAdditions.length ? `nav-add:${decision.scope.navAdditions.join("|")}` : null,
+          ].filter(Boolean).join("; ")
+        : "none";
+      if (decision.action === "escalate") {
+        await appendBuildWorkflowEvent(env, {
+          buildId: input.buildId, buildVersionId: input.buildVersionId,
+          fromState: "SITE_GENERATION", toState: "SITE_GENERATION", stage: "assembly_repair",
+          detail: `Assembly repair [${pageId}] ESCALATED (issue #69): ${decision.reason.slice(0, 300)}; trigger findings=[${preFindings.map((finding) => finding.id).join(", ")}]`,
+        });
+        continue;
+      }
+
+      const subkey = `${pageId}.assembly-repair-1`;
+      // Issue #69 §13: the repair prompt receives the EXACT rejected page and
+      // the explicit mutation scope — never a generic regeneration prompt.
       const repairDirectives = `\n\n## Assembly repair directives
-Your previously generated page FAILED deterministic assembly validation. Regenerate the COMPLETE page so that every finding below is fixed. The literal semantic elements <header>, <nav>, <main> and <footer> are mechanically required (a region <section> may wrap the <footer> element, but the <footer> element itself must exist):
-${validation.findings.map((finding) => `- ${finding.id}: ${finding.detail}`).join("\n")}
+Your previously generated page FAILED deterministic assembly validation. Here is the EXACT rejected page — repair THIS markup, preserving everything the authorized scope does not explicitly allow changing:
+\`\`\`html
+${pageRun.run.value.html}
+\`\`\`
+
+Findings to fix:
+${preFindings.map((finding) => `- ${finding.id}: ${finding.detail}`).join("\n")}
+
+AUTHORIZED mutation scope for this repair (deterministically enforced):
+${decision.scope.classRealization ? "- Classes: reassign or remove classes, and add/extend the missing CSS rules (the shared stylesheet class inventory in this prompt lists every available class)." : ""}
+${decision.scope.brokenHrefs.length ? `- Hrefs: replace exactly these broken href values with the correct generated page href: ${decision.scope.brokenHrefs.join(", ")}.` : ""}
+${decision.scope.navAdditions.length ? `- Navigation: add the missing link(s) to exactly: ${decision.scope.navAdditions.join(", ")} (label each with its canonical page label: ${decision.scope.navAdditions.map((href) => `${href} -> "${canonicalNavLabel(href) ?? href}"`).join(", ")}).` : ""}
+
+PRESERVATION requirements (violations are deterministically rejected and the repair discarded):
+- Visible text is FROZEN — fixing layout/classes must never add, remove or reword copy (including headings), except exactly the canonical nav link labels authorized above.
+- title, meta description, hrefs (outside the authorized fixes), data-image-id identities, form fields and the data-region order are FROZEN.
+- Do not introduce new classes that have no CSS rule; do not introduce new Business claims.
+The literal semantic elements <header>, <nav>, <main> and <footer> are mechanically required (a region <section> may wrap the <footer> element, but the <footer> element itself must exist).
 
 BUSINESS TRUTH (binding, issue #48/#53 — inherited by every repair): fixing layout must never introduce unsupported facts. No invented clients, partners, companies, awards, certifications, publications, reviewers or endorsements, and no third-party identity labels inside trust-signaling regions (client bands, credibility bands, testimonials). Populate trust-like regions only with Business-Fact-backed entities or fact-safe substitutes (service categories, audience categories, locations, process terms, abstract marks); descriptive headings and the Business's own name are always safe.`;
-      for (const pageId of PAGE_IDS) {
-        if (!affected.has(pageId)) continue;
-        const pageRun = pageRuns.find((entry) => entry.pageId === pageId)!;
-        const subkey = `${pageId}.assembly-repair-1`;
-        // Content identity only: the immutable input artifacts' checksums.
-        // (Artifact R2 keys are NOT stable across execution modes — the
-        // generate path surfaces the AI-run key, the reuse path the stage
-        // key — so keys must never enter a request fingerprint.)
-        const repairRequestFingerprint = await sha256Hex(
-          JSON.stringify({
-            binding: "assembly-repair/1",
-            buildId: input.buildId,
-            buildVersionId: input.buildVersionId,
-            pageId,
-            repairAttempt: 1,
-            directivesSha256: await sha256Hex(repairDirectives),
-            basePageChecksum: pageRun.run.checksum,
-            sharedCssChecksum: cssRun.checksum,
-            sharedJsChecksum: jsRun.checksum,
-            blueprintR2Key: input.blueprintR2Key,
-            contractR2Key: input.contractR2Key,
-          })
-        );
-        // Issue #54: the repair provider call is single-flight like every
-        // other immutable stage. Reuse stays INPUT-BOUND (#52): a stored
-        // repair is honored only when its provenance fingerprint matches the
-        // current deterministic repair request; a mismatch is terminal
-        // corruption — never a model re-call, never a rewrite.
-        const repaired = await runStageSingleFlight<PageHtml>(env, {
+      // Content identity only: the immutable input artifacts' checksums.
+      // (Artifact R2 keys are NOT stable across execution modes — the
+      // generate path surfaces the AI-run key, the reuse path the stage
+      // key — so keys must never enter a request fingerprint.)
+      const repairRequestFingerprint = await sha256Hex(
+        JSON.stringify({
+          binding: "assembly-repair/1",
           buildId: input.buildId,
           buildVersionId: input.buildVersionId,
-          kind: "generated_page",
-          subkey,
-          requestFingerprint: repairRequestFingerprint,
-          loadExisting: () => getBuildStageArtifact<PageHtml>(env, input.buildVersionId, "generated_page", subkey),
-          verifyExisting: (existing) => existing.provenance?.repairRequestFingerprint === repairRequestFingerprint,
-          existingMismatchError: () =>
-            new StageArtifactError(
-              "REPAIR_ARTIFACT_MISMATCH",
-              `REPAIR_ARTIFACT_MISMATCH: informed assembly repair artifact '${subkey}' exists for Build Version ${input.buildVersionId} but its provenance does not match the current deterministic repair request (issue #52); refusing to reuse a foreign repair or overwrite the immutable artifact`
-            ),
-          run: () =>
-            runSchemaValidatedAiStage<PageHtml>(env, {
-              ...stageInput,
-              stage: "website-generator",
-              schema: PageHtmlSchema as Parameters<typeof runSchemaValidatedAiStage>[1]["schema"],
-              schemaVersion: `generated-source/page-${pageId}/1`,
-              userPrompt: pagePromptFor(pageId) + repairDirectives,
-            }),
-          store: (produced) =>
-            storeBuildStageArtifact(env, {
-              buildId: input.buildId, buildVersionId: input.buildVersionId, siteGenerationId: input.siteGenerationId,
-              kind: "generated_page", subkey, schemaVersion: `generated-source/page-${pageId}/1`,
-              value: produced.value,
-              provenance: {
-                ...(produced.provenance as AiProvenance),
-                repairRequestFingerprint,
-              },
-            }),
-        });
-        pageRun.run = { value: repaired.value, artifactR2Key: repaired.artifactR2Key, checksum: repaired.checksum };
-        pageRun.subkey = subkey;
-        source.pages[pageId] = repaired.value.html;
+          pageId,
+          repairAttempt: 1,
+          directivesSha256: await sha256Hex(repairDirectives),
+          basePageChecksum: pageRun.run.checksum,
+          sharedCssChecksum: cssRun.checksum,
+          sharedJsChecksum: jsRun.checksum,
+          blueprintR2Key: input.blueprintR2Key,
+          contractR2Key: input.contractR2Key,
+        })
+      );
+      // Issue #54: the repair provider call is single-flight like every
+      // other immutable stage. Reuse stays INPUT-BOUND (#52): a stored
+      // repair is honored only when its provenance fingerprint matches the
+      // current deterministic repair request; a mismatch is terminal
+      // corruption — never a model re-call, never a rewrite.
+      const repaired = await runStageSingleFlight<PageHtml>(env, {
+        buildId: input.buildId,
+        buildVersionId: input.buildVersionId,
+        kind: "generated_page",
+        subkey,
+        requestFingerprint: repairRequestFingerprint,
+        loadExisting: () => getBuildStageArtifact<PageHtml>(env, input.buildVersionId, "generated_page", subkey),
+        verifyExisting: (existing) => existing.provenance?.repairRequestFingerprint === repairRequestFingerprint,
+        existingMismatchError: () =>
+          new StageArtifactError(
+            "REPAIR_ARTIFACT_MISMATCH",
+            `REPAIR_ARTIFACT_MISMATCH: informed assembly repair artifact '${subkey}' exists for Build Version ${input.buildVersionId} but its provenance does not match the current deterministic repair request (issue #52); refusing to reuse a foreign repair or overwrite the immutable artifact`
+          ),
+        run: () =>
+          runSchemaValidatedAiStage<PageHtml>(env, {
+            ...stageInput,
+            stage: "website-generator",
+            schema: PageHtmlSchema as Parameters<typeof runSchemaValidatedAiStage>[1]["schema"],
+            schemaVersion: `generated-source/page-${pageId}/1`,
+            userPrompt: pagePromptFor(pageId) + repairDirectives,
+          }),
+        store: (produced) =>
+          storeBuildStageArtifact(env, {
+            buildId: input.buildId, buildVersionId: input.buildVersionId, siteGenerationId: input.siteGenerationId,
+            kind: "generated_page", subkey, schemaVersion: `generated-source/page-${pageId}/1`,
+            value: produced.value,
+            provenance: {
+              ...(produced.provenance as AiProvenance),
+              repairRequestFingerprint,
+              repairTriggerFindingIds: preFindings.map((finding) => finding.id),
+              repairScopeSummary: scopeSummary,
+            },
+          }),
+      });
+
+      // Issue #69 §14-17: the repair becomes effective ONLY when the content
+      // guard holds AND the page's deterministic findings fully resolve with
+      // no new findings. Otherwise the ORIGINAL pre-repair page stays
+      // effective and the stored repair artifact remains as evidence.
+      const afterFingerprint = extractAssemblyFingerprint(repaired.value.html);
+      const guard = validateAssemblyRepairContent(extractAssemblyFingerprint(pageRun.run.value.html), afterFingerprint, decision.scope);
+      let postFindings: AssemblyFinding[] = [];
+      if (guard.violations.length === 0) {
+        postFindings = findingsForPage(
+          validateAssembledSite({ ...source, pages: { ...source.pages, [pageId]: repaired.value.html } }, validationContext).findings as AssemblyFinding[],
+          pageId
+        );
       }
+      const scopeViolation = guard.violations.length > 0;
+      const regression = !scopeViolation && postFindings.length > 0;
+      if (scopeViolation || regression) {
+        await appendBuildWorkflowEvent(env, {
+          buildId: input.buildId, buildVersionId: input.buildVersionId,
+          fromState: "SITE_GENERATION", toState: "SITE_GENERATION", stage: "assembly_repair",
+          detail: `Assembly repair [${pageId}] ${scopeViolation ? "REVERTED_SCOPE_VIOLATION" : "REVERTED_REGRESSION"} (issue #69): trigger findings=[${preFindings.map((finding) => finding.id).join(", ")}]; authorized scope=[${scopeSummary}]; preservation=${scopeViolation ? guard.violations.map((violation) => violation.rule).join(",") : "intact"}; post-repair findings=[${postFindings.map((finding) => finding.id).join(", ") || "n/a"}]; pre-repair candidate retained`,
+        });
+        continue;
+      }
+      pageRun.run = { value: repaired.value, artifactR2Key: repaired.artifactR2Key, checksum: repaired.checksum };
+      pageRun.subkey = subkey;
+      source.pages[pageId] = repaired.value.html;
+      await appendBuildWorkflowEvent(env, {
+        buildId: input.buildId, buildVersionId: input.buildVersionId,
+        fromState: "SITE_GENERATION", toState: "SITE_GENERATION", stage: "assembly_repair",
+        detail: `Assembly repair [${pageId}] ADOPTED (issue #69): trigger findings=[${preFindings.map((finding) => finding.id).join(", ")}]; authorized scope=[${scopeSummary}]; preservation=intact; post-repair findings=[clean]`,
+      });
     }
   }
+
+  // Issue #66/#69: freeze the effective candidate lineage BEFORE the final
+  // validation gate. The manifest is the authoritative lineage (never the
+  // artifact-namespace heuristic, which cannot know a repair was reverted),
+  // and it must exist for EVERY terminal outcome that retains artifacts —
+  // including a #69 HUMAN_REVIEW_REQUIRED whose effective pages are the
+  // original pre-repair ones. Deterministic content (frozen artifact
+  // checksums) makes the idempotent store a re-entry success.
+  const effectivePages = Object.fromEntries(
+    pageRuns.map(({ pageId, subkey, run }) => [pageId, { subkey, checksum: run.checksum }])
+  ) as Record<PageId, EffectivePageEntry>;
+  const manifest = buildCandidateManifest({
+    lineage: "initial-generation",
+    pages: effectivePages,
+    sharedCss: { subkey: "site.css", checksum: cssRun.checksum },
+    sharedJs: { subkey: "site.js", checksum: jsRun.checksum },
+  });
+  const manifestStored = await storeBuildStageArtifactIdempotent(env, {
+    buildId: input.buildId, buildVersionId: input.buildVersionId, siteGenerationId: input.siteGenerationId,
+    kind: "candidate_manifest", schemaVersion: CANDIDATE_MANIFEST_SCHEMA_VERSION, value: manifest,
+  });
 
   const finalValidation = validation.passed
     ? validation
@@ -1255,23 +1358,6 @@ BUSINESS TRUTH (binding, issue #48/#53 — inherited by every repair): fixing la
     kind: "image_plan", schemaVersion: IMAGE_PLAN_SCHEMA_VERSION, value: imagePlan,
   });
   artifacts.push({ kind: "image_plan", subkey: "", r2Key: imagePlanStored.artifactR2Key });
-
-  // Issue #66: freeze the effective candidate lineage — the exact artifact
-  // composing each page of THIS candidate. Deterministic content (frozen
-  // artifact checksums) makes the idempotent store a re-entry success.
-  const effectivePages = Object.fromEntries(
-    pageRuns.map(({ pageId, subkey, run }) => [pageId, { subkey, checksum: run.checksum }])
-  ) as Record<PageId, EffectivePageEntry>;
-  const manifest = buildCandidateManifest({
-    lineage: "initial-generation",
-    pages: effectivePages,
-    sharedCss: { subkey: "site.css", checksum: cssRun.checksum },
-    sharedJs: { subkey: "site.js", checksum: jsRun.checksum },
-  });
-  const manifestStored = await storeBuildStageArtifactIdempotent(env, {
-    buildId: input.buildId, buildVersionId: input.buildVersionId, siteGenerationId: input.siteGenerationId,
-    kind: "candidate_manifest", schemaVersion: CANDIDATE_MANIFEST_SCHEMA_VERSION, value: manifest,
-  });
   artifacts.push({ kind: "candidate_manifest", subkey: "", r2Key: manifestStored.artifactR2Key });
 
   // NOTE: the canonical builds/{id}/v{n}/source/* freeze happens in the

@@ -107,7 +107,11 @@ async function startGeneration(screenshotKey: string): Promise<string> {
 function scriptsWithAssemblyBlocker(kind: "orphan-class" | "fabricated-trust"): BuildPipelineDeps {
   const base = createPipelineScripts();
   const generate: RawAiGenerate = async (system, user) => {
-    const result = await base.generate!(system, user);
+    if (!user.includes("page id 'about'")) return base.generate!(system, user);
+    // The #69 repair prompt legitimately embeds the phrase "shared
+    // stylesheet"; neutralize it before delegating so the base helper's css
+    // branch doesn't capture the repair call.
+    const result = await base.generate!(system, user.replaceAll("shared stylesheet", "shared style sheet"));
     if (user.includes("page id 'about'")) {
       const page = JSON.parse(result.content) as { html: string };
       // narrow-narrative: the verbatim production ORPHANED_CLASS finding.

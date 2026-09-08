@@ -36,6 +36,11 @@ export interface AiProvenance {
    *  Engine retries reuse a stored repair ONLY when this fingerprint matches
    *  the current request; a mismatch is terminal corruption, never a rewrite. */
   repairRequestFingerprint?: string;
+  /** Issue #69 §19: WHY this repair exists — the deterministic finding ids
+   *  that triggered it and the mutation authority granted. Provenance only;
+   *  no raw prompt content. */
+  repairTriggerFindingIds?: string[];
+  repairScopeSummary?: string;
 }
 
 export interface RawAiGenerateResult {
