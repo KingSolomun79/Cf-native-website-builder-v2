@@ -48,6 +48,7 @@ interface DriverBody {
   fixtureImages?: DriverFixtureImage[];
   referenceUrl?: string;
   referenceScreenshotKey?: string;
+  adaptationContract?: unknown;
   siteGenerationId?: string;
   buildId?: string;
   buildVersionId?: string;
@@ -155,7 +156,7 @@ interface Scaffold {
 async function scaffold(
   env: Env,
   facts: BusinessFacts,
-  reference: { url?: string; screenshotR2Key?: string }
+  reference: { url?: string; screenshotR2Key?: string; adaptationContract?: unknown }
 ): Promise<Scaffold> {
   const started = await startSiteGeneration(env, {
     payload: {
@@ -506,7 +507,10 @@ async function assembleAndJudge(
 
 async function runCapture(env: Env, body: DriverBody) {
   if (!body.facts || !body.referenceUrl) throw new Error("facts and referenceUrl required");
-  const ctx = await scaffold(env, body.facts, { url: body.referenceUrl });
+  const ctx = await scaffold(env, body.facts, {
+    url: body.referenceUrl,
+    ...(body.adaptationContract !== undefined ? { adaptationContract: body.adaptationContract } : {}),
+  });
   // STOP after capture: production Reference Capture only (stable intake
   // infrastructure). No blueprint, no images, no build.
   await runReferenceIntake(env, {

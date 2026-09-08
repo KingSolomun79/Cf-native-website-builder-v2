@@ -46,3 +46,4 @@ tests/_generated-migrations.ts
 /test.mjs
 /wf.txt
 .dev.vars.exp
+.tmp-exp-phase1/
