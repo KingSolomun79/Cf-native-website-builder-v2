@@ -13,6 +13,7 @@ import { submitForm } from "./routes/v2.form-submit";
 import { createApproval } from "./routes/v2.approval-create";
 import { createPublication } from "./routes/v2.publication-create";
 import { rollbackSitePublication } from "./routes/v2.rollback";
+import { expBenchmarkDriver } from "./routes/v2.exp-benchmark-driver";
 
 // V2-only route table. The V1 product routes (Fluent Forms webhook, jobs,
 // contact, reference upload in its V1 shape, GitHub deploy webhook) were
@@ -36,6 +37,11 @@ app.post("/api/v2/build-versions/:buildVersionId/publication", createPublication
 app.post("/api/v2/sites/:siteId/rollback", rollbackSitePublication);
 
 app.post("/api/internal/kie-callback", handleKieCallback);
+
+// EXPERIMENT BRANCH ONLY: live benchmark driver for the experimental runtime
+// (wrangler.exp.jsonc). 404s unless EXP_BENCHMARK_DRIVER=1 — never set in the
+// production config — and is HMAC-gated like every operator intake route.
+app.post("/api/v2/exp/benchmark-driver", expBenchmarkDriver);
 
 app.onError((err, c) => {
   console.error("Unhandled error:", err);
@@ -84,3 +90,7 @@ export default {
   scheduled,
 };
 export { WebsiteBuildWorkflow } from "./workflows/website-build-workflow";
+// EXPERIMENT BRANCH ONLY: inert DO-namespace compatibility export for the
+// experimental sandbox runtime (see src/exp-compat-website-agent.ts). The
+// runtime ignores named exports beside the default handler object.
+export { WebsiteAgent } from "./exp-compat-website-agent";

@@ -60,6 +60,12 @@ export interface Env {
   // onboarding; the business-facing Build Mode remains REFERENCE_BOUND.
   DESIGN_PIPELINE_VERSION?: string;
 
+  // EXPERIMENT BRANCH ONLY: live benchmark driver switches (never set in the
+  // production config). EXP_BENCHMARK_DRIVER="1" enables the driver route;
+  // EXP_BENCHMARK_SECRET (optional) overrides the HMAC secret it accepts.
+  EXP_BENCHMARK_DRIVER?: string;
+  EXP_BENCHMARK_SECRET?: string;
+
   // OpenRouter leg (operator decision 2026-09-02): optional — ZAI is primary
   // and the Cloudflare AI Gateway is the working fallback; provider chains
   // are key-driven, so an absent key skips the OpenRouter leg without error.

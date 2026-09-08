@@ -45,3 +45,4 @@ tests/_generated-migrations.ts
 /inspiration.html
 /test.mjs
 /wf.txt
+.dev.vars.exp
