@@ -99,6 +99,94 @@ export interface SimpleWebsiteBuilderResult {
   strategy: "ONE_CALL" | "TWO_CALL_SINGLE_STAGE";
 }
 
+// ── EXPERIMENT DIAGNOSTIC ONLY (never called by the pipeline) ───────────────
+//
+// Live-benchmark instrumentation (2026-09-08 transport finding): the zhipu
+// coding endpoint's edge window 524s any completion past ~100s; measured
+// throughput ≈ 80-85 output tokens/s ⇒ practical ceiling ≈ 8K output tokens
+// per call. Neither ONE_CALL (32K budget) nor the TWO_CALL pages call fits,
+// so the stage's sanctioned strategies cannot return a bundle on this
+// transport. This diagnostic measures DESIGN-TRANSFER QUALITY under a
+// forced small-call decomposition (shared shell, then ONE page per call with
+// the same frozen context and stylesheet) so the operator can separate
+// "transport infeasible" from "model can't realize the blueprint". It is not
+// a pipeline strategy: the spec forbids per-page agents, and the pipeline
+// code above is unchanged.
+
+function pageCallUserPrompt(input: RunSimpleWebsiteBuilderInput, page: string, css: string, js: string): string {
+  return `${buildSharedContext(input)}
+${css ? `\nFROZEN site.css (already produced in this stage — the page MUST use its vocabulary, selectors and custom properties; do not restyle):\n${css}\n` : ""}
+${js ? `\nFROZEN site.js (already produced — reuse its hooks/classes, do not re-implement behavior):\n${js}\n` : ""}
+DIAGNOSTIC TASK (single-page realization): Produce ONLY the "${page}" page as one complete HTML document, realizing the blueprint's "${page}" spec section-by-section on top of that shared stylesheet and script. Production-grade, no placeholders. All other pages are produced by sibling calls with the same frozen context — keep class names, header/nav/footer markup and section idioms EXACTLY consistent with the shared stylesheet vocabulary.`;
+}
+
+export interface BuilderTransportDiagnostic {
+  bundle: SiteBundle;
+  calls: Array<{ call: string; durationMs: number }>;
+}
+
+export async function runSimpleBuilderTransportDiagnostic(
+  env: Env,
+  input: RunSimpleWebsiteBuilderInput
+): Promise<BuilderTransportDiagnostic> {
+  const calls: BuilderTransportDiagnostic["calls"] = [];
+  const timed = async <T>(call: string, fn: () => Promise<{ value: T }>): Promise<T> => {
+    const started = Date.now();
+    const run = await fn();
+    calls.push({ call, durationMs: Date.now() - started });
+    return run.value;
+  };
+
+  const base = {
+    stage: "simple-website-builder" as const,
+    buildId: input.buildId,
+    siteGenerationId: input.siteGenerationId,
+    buildVersionId: input.buildVersionId,
+    buildVersionNumber: input.buildVersionNumber,
+    inputArtifactIds: [input.blueprint.businessFactsRef],
+    generate: input.visionGenerate ?? input.generate,
+  };
+
+  const shell = await timed("shell", () =>
+    runSchemaValidatedAiStage<unknown>(env, {
+      ...base,
+      schema: BuilderShellSchema,
+      schemaVersion: "site-bundle-shell/1",
+      userPrompt: shellCallUserPrompt(input),
+      maxTokens: 12000,
+    })
+  ) as { sharedCss: string; sharedJs: string };
+
+  const pages: Record<string, string> = {};
+  for (const page of ["home", "about", "services", "contact"] as const) {
+    const PageSchema = Type.Object(
+      { pages: Type.Object({ [page]: Type.String({ minLength: 200 }) }, { additionalProperties: false }) },
+      { additionalProperties: false }
+    );
+    const produced = await timed(`page:${page}`, () =>
+      runSchemaValidatedAiStage<unknown>(env, {
+        ...base,
+        schema: PageSchema,
+        schemaVersion: "site-bundle-page/1",
+        userPrompt: pageCallUserPrompt(input, page, shell.sharedCss, shell.sharedJs),
+        maxTokens: 12000,
+      })
+    ) as { pages: Record<string, string> };
+    pages[page] = produced.pages[page];
+  }
+
+  return {
+    bundle: {
+      version: "1",
+      pages: pages as SiteBundle["pages"],
+      sharedCss: shell.sharedCss,
+      sharedJs: shell.sharedJs,
+      notes: "EXPERIMENT TRANSPORT DIAGNOSTIC bundle (shell + one page per call) — not a pipeline strategy.",
+    },
+    calls,
+  };
+}
+
 function buildSharedContext(input: RunSimpleWebsiteBuilderInput): string {
   const accepted = input.acceptedImages
     .map((image) => `- ${image.slotId} [${image.page}${image.section ? `/${image.section}` : ""}] ${image.aspectRatio} — alt: ${image.altText}`)

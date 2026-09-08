@@ -17,19 +17,21 @@
 import { Context } from "hono";
 import type { Env } from "../env.d";
 import { verifyWebhookSignature } from "../lib/crypto";
+import { callGatewayChat } from "../lib/ai-gateway";
 import { startSiteGeneration, createInitialBuild } from "../domain/lifecycle";
 import { getEffectiveBusinessFacts } from "../domain/revision";
 import { runReferenceIntake, getFrozenReferenceEvidence } from "../domain/reference-intake";
 import { putObject } from "../lib/assets";
 import { getAcceptedImageMap } from "../domain/image-pipeline";
-import { buildAssembledCandidate, deployPreview, freezeAssembledCandidate } from "../domain/assembly";
+import { buildAssembledCandidate, deployPreview, freezeAssembledCandidate, AssemblyPreflightError } from "../domain/assembly";
+import { storeBuildStageArtifactIdempotent, getBuildStageArtifact } from "../domain/stage-artifacts";
 import { buildStandardEvidenceBundle } from "../domain/qa-evidence";
 import { createProductionQaCapture } from "../domain/qa-capture";
-import { runSimpleWebsiteBuilderStage } from "../simple-design/website-builder";
+import { runSimpleWebsiteBuilderStage, runSimpleBuilderTransportDiagnostic } from "../simple-design/website-builder";
 import { runSimpleDesignBlueprintStage } from "../simple-design/design-blueprint";
 import { renderDesignBlueprintMarkdown } from "../simple-design/render-blueprint";
 import { runDeterministicBundleQa } from "../simple-design/bundle-qa";
-import { blueprintSlotsToImageSlots, type DesignBlueprint } from "../simple-design/contracts";
+import { blueprintSlotsToImageSlots, type DesignBlueprint, type SiteBundle } from "../simple-design/contracts";
 import type { BusinessFacts } from "../domain/lifecycle-schema";
 
 interface DriverFixtureImage {
@@ -38,7 +40,7 @@ interface DriverFixtureImage {
 }
 
 interface DriverBody {
-  op: "health" | "put-fixture" | "finch-builder" | "capture" | "blueprint" | "artifact";
+  op: "health" | "put-fixture" | "finch-builder" | "builder-diagnostic" | "assemble-stored" | "capture" | "blueprint" | "artifact" | "probe";
   key?: string;
   base64?: string;
   facts?: BusinessFacts;
@@ -48,6 +50,8 @@ interface DriverBody {
   referenceScreenshotKey?: string;
   siteGenerationId?: string;
   buildId?: string;
+  buildVersionId?: string;
+  probeMaxTokens?: number;
 }
 
 function base64ToBytes(base64: string): Uint8Array {
@@ -117,11 +121,20 @@ export async function expBenchmarkDriver(c: Context<{ Bindings: Env }>): Promise
       case "finch-builder":
         return c.json(await runFinchBuilder(c.env, body));
 
+      case "builder-diagnostic":
+        return c.json(await runBuilderDiagnostic(c.env, body));
+
+      case "assemble-stored":
+        return c.json(await runAssembleStored(c.env, body));
+
       case "capture":
         return c.json(await runCapture(c.env, body));
 
       case "blueprint":
         return c.json(await runBlueprint(c.env, body));
+
+      case "probe":
+        return c.json(await runTransportProbe(c.env, body));
 
       default:
         return c.json({ error: "Unknown op" }, 400);
@@ -196,14 +209,13 @@ async function storeFixtureImages(
 
 async function runFinchBuilder(env: Env, body: DriverBody) {
   if (!body.facts || !body.blueprint) throw new Error("facts and blueprint required");
-  const fixtureImages = body.fixtureImages ?? [];
   const referenceScreenshotKey = body.referenceScreenshotKey ?? "references/simple/exp-finch-ref.png";
   const ctx = await scaffold(env, body.facts, { screenshotR2Key: referenceScreenshotKey });
-  const acceptedKeys = await storeFixtureImages(env, ctx, fixtureImages);
+  const acceptedKeys = await storeFixtureImages(env, ctx, body.fixtureImages ?? []);
 
   const formServiceEndpoint = `${env.PUBLIC_APP_URL}/api/v2/forms/submit`;
   const siteFormId = `site:${ctx.siteId}`;
-  const built = await runSimpleWebsiteBuilderStage(env, {
+  const stageInput = {
     siteGenerationId: ctx.siteGenerationId,
     buildId: ctx.buildId,
     buildVersionId: ctx.buildVersionId,
@@ -220,10 +232,185 @@ async function runFinchBuilder(env: Env, body: DriverBody) {
     formServiceEndpoint,
     siteFormId,
     visualInputs: [
-      { kind: "full-page", artifact: referenceScreenshotKey, sha256: "exp-fixture", width: 1440, height: 3200 },
+      { kind: "full-page", artifact: referenceScreenshotKey, sha256: "exp-fixture", width: 1440, height: 3200 } as const,
+    ],
+  };
+  const built = await runSimpleWebsiteBuilderStage(env, stageInput);
+  const result = await assembleAndJudge(env, ctx, built.bundle, body, acceptedKeys);
+  return { ...result, builderStrategy: built.strategy };
+}
+
+// EXPERIMENT DIAGNOSTIC normalization: the live model used production image
+// idioms (srcset variants, data-src lazy loading, CSS url(IMG:…)) that the
+// KEEP-list assembly (src="IMG:…" only) does not resolve and Technical
+// Preflight (any IMG: occurrence) rejects. Recorded as a benchmark finding;
+// the sanitizer lets the diagnostic proceed so QUALITY can be measured. The
+// pipeline itself is unchanged and would need the operator's decision.
+function sanitizeDiagnosticBundle(bundle: SiteBundle): { bundle: SiteBundle; normalizations: string[] } {
+  const normalizations: string[] = [];
+  const assetPath = (slotId: string) => `assets/images/${slotId}.webp`;
+  const cleanPage = (page: string, html: string): string =>
+    html
+      .replace(/\s(srcset|data-srcset)="([^"]*IMG:[^"]*)"/g, (_m, attr: string) => {
+        normalizations.push(`${page}: dropped ${attr} with IMG: reference`);
+        return "";
+      })
+      .replace(/\sdata-src="IMG:([a-zA-Z0-9_-]+)"/g, (_m, slotId: string) => {
+        normalizations.push(`${page}: data-src IMG:${slotId} → src`);
+        return ` src="IMG:${slotId}"`;
+      })
+      // Any OTHER attribute carrying an IMG: reference (live finding: the
+      // model wires the blueprint's chapter hover-preview as
+      // data-preview="IMG:slotId") is pointed straight at the asset path —
+      // assembly only resolves src="IMG:…" and Technical Preflight rejects
+      // any remaining IMG: occurrence.
+      .replace(/([a-zA-Z-]+)="IMG:([a-zA-Z0-9_-]+)"/g, (full, attr: string, slotId: string) => {
+        if (attr === "src" || attr === "data-src") return full;
+        normalizations.push(`${page}: ${attr}="IMG:${slotId}" → ${assetPath(slotId)}`);
+        return `${attr}="${assetPath(slotId)}"`;
+      })
+      .replace(/url\((['"]?)IMG:([a-zA-Z0-9_-]+)(['"]?)\)/g, (_m, q1: string, slotId: string, q2: string) => {
+        normalizations.push(`${page}: css url IMG:${slotId} → asset path`);
+        return `url(${q1}${assetPath(slotId)}${q2})`;
+      });
+  const pages = Object.fromEntries(
+    Object.entries(bundle.pages).map(([page, html]) => [page, cleanPage(page, html)])
+  ) as SiteBundle["pages"];
+  const sharedCss = bundle.sharedCss.replace(/url\((['"]?)IMG:([a-zA-Z0-9_-]+)(['"]?)\)/g, (_m, q1: string, slotId: string, q2: string) => {
+    normalizations.push(`site.css: url IMG:${slotId} → asset path`);
+    return `url(${q1}${assetPath(slotId)}${q2})`;
+  });
+  // Live finding (run 3): the model's sharedJs contained ONE genuine syntax
+  // error — 'return …(sel););' — which Technical Preflight correctly caught.
+  // The diagnostic repairs exactly this defect (counted as an intervention)
+  // so interaction quality can render; the pipeline's ONE repair exists for
+  // precisely this class of defect.
+  const sharedJs = bundle.sharedJs.replace(/\.querySelector\(sel\);\);/g, () => {
+    normalizations.push("site.js: repaired q() syntax error ');)' → '); }' (diagnostic intervention)");
+    return ".querySelector(sel); }";
+  });
+  return { bundle: { ...bundle, pages, sharedCss, sharedJs }, normalizations };
+}
+
+// EXPERIMENT DIAGNOSTIC ONLY: measures design-transfer quality under a forced
+// small-call decomposition (see website-builder.ts). Not a pipeline strategy.
+async function runBuilderDiagnostic(env: Env, body: DriverBody) {
+  if (!body.facts || !body.blueprint) throw new Error("facts and blueprint required");
+  const referenceScreenshotKey = body.referenceScreenshotKey ?? "references/simple/exp-finch-ref.png";
+  const ctx = await scaffold(env, body.facts, { screenshotR2Key: referenceScreenshotKey });
+  const acceptedKeys = await storeFixtureImages(env, ctx, body.fixtureImages ?? []);
+
+  const formServiceEndpoint = `${env.PUBLIC_APP_URL}/api/v2/forms/submit`;
+  const siteFormId = `site:${ctx.siteId}`;
+  const diagnostic = await runSimpleBuilderTransportDiagnostic(env, {
+    siteGenerationId: ctx.siteGenerationId,
+    buildId: ctx.buildId,
+    buildVersionId: ctx.buildVersionId,
+    buildVersionNumber: ctx.buildVersionNumber,
+    blueprint: body.blueprint,
+    facts: body.facts,
+    acceptedImages: body.blueprint.imagery.imageSlots.map((slot) => ({
+      slotId: slot.id,
+      altText: slot.altText,
+      aspectRatio: slot.aspectRatio,
+      page: slot.page,
+      ...(slot.section ? { section: slot.section } : {}),
+    })),
+    formServiceEndpoint,
+    siteFormId,
+    visualInputs: [
+      { kind: "full-page", artifact: referenceScreenshotKey, sha256: "exp-fixture", width: 1440, height: 3200 } as const,
     ],
   });
-  const bundle = built.bundle;
+  // Persist BEFORE assembly so the (expensive) generated bundle survives a
+  // preflight rejection for inspection.
+  const { bundle: cleanBundle, normalizations } = sanitizeDiagnosticBundle(diagnostic.bundle);
+  await storeBuildStageArtifactIdempotent(env, {
+    buildId: ctx.buildId,
+    siteGenerationId: ctx.siteGenerationId,
+    buildVersionId: ctx.buildVersionId,
+    kind: "site_bundle",
+    schemaVersion: "site-bundle/1",
+    value: cleanBundle,
+  });
+  try {
+    const result = await assembleAndJudge(env, ctx, cleanBundle, body, acceptedKeys);
+    return { ...result, builderStrategy: "TRANSPORT_DIAGNOSTIC", calls: diagnostic.calls, normalizations };
+  } catch (error) {
+    if (error instanceof AssemblyPreflightError) {
+      return {
+        ...ctx,
+        builderStrategy: "TRANSPORT_DIAGNOSTIC",
+        calls: diagnostic.calls,
+        normalizations,
+        bundle: cleanBundle,
+        preflightBlockers: error.blockers.map((blocker) => ({ id: blocker.id, detail: blocker.detail ?? blocker.id })),
+        previewUrl: null,
+      };
+    }
+    throw error;
+  }
+}
+
+// EXPERIMENT DIAGNOSTIC ONLY: re-assembles an ALREADY-STORED site_bundle
+// (from a prior builder-diagnostic run) with the current sanitizer — zero
+// model spend. Requires the fixture images of that run to still be accepted
+// on the Build Version (accepted_images rows persist).
+async function runAssembleStored(env: Env, body: DriverBody) {
+  if (!body.siteGenerationId || !body.buildId || !body.facts || !body.blueprint) {
+    throw new Error("siteGenerationId, buildId, facts and blueprint required");
+  }
+  const version = body.buildVersionId ?? (await latestVersion(env, body.buildId)).id;
+  const versionNumber = (await latestVersion(env, body.buildId)).versionNumber;
+  const stored = await getBuildStageArtifact<SiteBundle>(env, version, "site_bundle");
+  if (!stored) throw new Error("no stored site_bundle for that Build Version");
+  const generationRow = await env.DB.prepare("SELECT site_id FROM site_generations WHERE id = ?")
+    .bind(body.siteGenerationId)
+    .first<{ site_id: string }>();
+  if (!generationRow) throw new Error("Site Generation not found");
+  const ctx: Scaffold = {
+    siteGenerationId: body.siteGenerationId,
+    siteId: generationRow.site_id,
+    buildId: body.buildId,
+    buildVersionId: version,
+    buildVersionNumber: versionNumber,
+  };
+  const acceptedEntries = await getAcceptedImageMap(env, version);
+  const acceptedKeys = new Map([...acceptedEntries].map(([slotId, entry]) => [slotId, entry.r2Key] as const));
+  const { bundle: cleanBundle, normalizations } = sanitizeDiagnosticBundle(stored.value);
+  try {
+    const result = await assembleAndJudge(env, ctx, cleanBundle, body, acceptedKeys);
+    return { ...result, builderStrategy: "TRANSPORT_DIAGNOSTIC_REASSEMBLE", normalizations };
+  } catch (error) {
+    if (error instanceof AssemblyPreflightError) {
+      return {
+        ...ctx,
+        builderStrategy: "TRANSPORT_DIAGNOSTIC_REASSEMBLE",
+        normalizations,
+        bundle: cleanBundle,
+        preflightBlockers: error.blockers.map((blocker) => ({ id: blocker.id, detail: blocker.detail ?? blocker.id })),
+        previewUrl: null,
+      };
+    }
+    throw error;
+  }
+}
+
+// KEEP-list deterministic assembly + Technical Preflight + preview + render
+// evidence + deterministic truth/technical contract — exactly the pipeline's
+// assembleAndPreview/evaluateVersion shape, minus the visual QA call (the
+// isolated stage tests judge blueprint adherence by hand).
+async function assembleAndJudge(
+  env: Env,
+  ctx: Scaffold,
+  bundle: SiteBundle,
+  body: DriverBody,
+  acceptedKeys: Map<string, string>
+) {
+  const blueprint = body.blueprint!;
+  const facts = body.facts!;
+  const formServiceEndpoint = `${env.PUBLIC_APP_URL}/api/v2/forms/submit`;
+  const siteFormId = `site:${ctx.siteId}`;
 
   // Deterministic assembly + Technical Preflight + preview, exactly as the
   // pipeline does it (KEEP-list path).
@@ -237,7 +424,7 @@ async function runFinchBuilder(env: Env, body: DriverBody) {
     pages: bundle.pages,
     sharedCss: bundle.sharedCss,
     sharedJs: bundle.sharedJs,
-    imagePlanSlots: blueprintSlotsToImageSlots(body.blueprint),
+    imagePlanSlots: blueprintSlotsToImageSlots(blueprint),
     acceptedImages,
     formServiceEndpoint,
     expectedSiteFormId: siteFormId,
@@ -251,7 +438,7 @@ async function runFinchBuilder(env: Env, body: DriverBody) {
     sharedCss: bundle.sharedCss,
     sharedJs: bundle.sharedJs,
     candidate,
-    imagePlanSlots: blueprintSlotsToImageSlots(body.blueprint),
+    imagePlanSlots: blueprintSlotsToImageSlots(blueprint),
     acceptedImages,
     formServiceEndpoint,
     expectedSiteFormId: siteFormId,
@@ -264,8 +451,7 @@ async function runFinchBuilder(env: Env, body: DriverBody) {
   });
 
   // Standard render evidence (real browser captures of the preview) + the
-  // deterministic truth/technical contract. No visual QA call in this
-  // isolated stage test — the benchmark judges blueprint adherence by hand.
+  // deterministic truth/technical contract.
   const evidence = preview.previewUrl
     ? await buildStandardEvidenceBundle(env, {
         buildId: ctx.buildId,
@@ -277,11 +463,11 @@ async function runFinchBuilder(env: Env, body: DriverBody) {
     : null;
   const qa = runDeterministicBundleQa({
     bundle,
-    blueprint: body.blueprint,
-    facts: body.facts,
+    blueprint,
+    facts,
     formServiceEndpoint,
     siteFormId,
-    slotIds: new Set(body.blueprint.imagery.imageSlots.map((slot) => slot.id)),
+    slotIds: new Set(blueprint.imagery.imageSlots.map((slot) => slot.id)),
     resolvedSlotIds: new Set(acceptedKeys.keys()),
     renderEvidence: evidence
       ? {
@@ -298,7 +484,6 @@ async function runFinchBuilder(env: Env, body: DriverBody) {
     buildId: ctx.buildId,
     buildVersionId: ctx.buildVersionId,
     buildVersionNumber: ctx.buildVersionNumber,
-    builderStrategy: built.strategy,
     previewUrl: preview.previewUrl,
     artifactManifestHash: candidate.artifactManifestHash,
     bundle,
@@ -350,8 +535,7 @@ async function runCapture(env: Env, body: DriverBody) {
   };
 }
 
-async function runBlueprint(env: Env, body: DriverBody) {
-  if (!body.siteGenerationId || !body.buildId) throw new Error("siteGenerationId and buildId required");
+async function runBlueprint(env: Env, body: DriverBody) {  if (!body.siteGenerationId || !body.buildId) throw new Error("siteGenerationId and buildId required");
   const frozen = await getFrozenReferenceEvidence(env, body.siteGenerationId);
   if (!frozen) throw new Error("no frozen evidence for Site Generation — run the capture op first");
   if (frozen.suitability === "UNSUPPORTED") throw new Error(`Reference UNSUPPORTED: ${frozen.suitabilityReasons.join("; ")}`);
@@ -393,4 +577,69 @@ async function runBlueprint(env: Env, body: DriverBody) {
     factsRef: businessFactsRef,
     siteId: generationRow.site_id,
   };
+}
+
+// Transport probe: times a single RAW zhipu-leg completion (no chain, no
+// retries) at a requested max_tokens budget, so the operator gets hard
+// numbers on the largest completion the provider edge actually lets through.
+// Benchmark instrumentation only — the pipeline never calls this.
+async function runTransportProbe(env: Env, body: DriverBody): Promise<unknown> {
+  const maxTokens = Math.max(256, Math.min(body.probeMaxTokens ?? 4096, 65536));
+  const items = Math.ceil(maxTokens / 12);
+  const bodyJson = {
+    model: env.LLM_MODEL ?? "glm-5.3-flash",
+    messages: [
+      {
+        role: "system",
+        content: "You are a JSON generator. Output ONLY valid JSON, no prose, no markdown.",
+      },
+      {
+        role: "user",
+        content: `Output a JSON object {"items":[...]} with exactly ${items} items. Each item: {"i":<index>,"name":"fixture item <index>","tags":["a","b","c"],"description":"A descriptive sentence about fixture item <index> for transport calibration."}. Fill every item; do not truncate.`,
+      },
+    ],
+    temperature: 0.7,
+    max_tokens: maxTokens,
+    response_format: { type: "json_object" },
+    thinking: { type: "disabled" },
+  };
+  const started = Date.now();
+  try {
+    const response = await callGatewayChat(
+      env,
+      bodyJson as never,
+      { client_slug: "exp-benchmark-probe" } as never,
+      "zhipu"
+    );
+    const text = await response.text();
+    const durationMs = Date.now() - started;
+    let finishReason: string | null = null;
+    let usage: unknown = null;
+    let contentChars = 0;
+    if (response.ok) {
+      try {
+        const parsed = JSON.parse(text) as {
+          choices?: Array<{ finish_reason?: string; message?: { content?: string } }>;
+          usage?: unknown;
+        };
+        finishReason = parsed.choices?.[0]?.finish_reason ?? null;
+        contentChars = parsed.choices?.[0]?.message?.content?.length ?? 0;
+        usage = parsed.usage ?? null;
+      } catch {
+        finishReason = "unparseable";
+      }
+    }
+    return {
+      ok: response.ok,
+      status: response.status,
+      durationMs,
+      maxTokensRequested: maxTokens,
+      finishReason,
+      contentChars,
+      usage,
+      errorHead: response.ok ? null : text.slice(0, 300),
+    };
+  } catch (error) {
+    return { ok: false, thrown: (error as Error).message.slice(0, 300), durationMs: Date.now() - started, maxTokensRequested: maxTokens };
+  }
 }
