@@ -50,7 +50,10 @@
     "adaptation_contract_required_for_limitations": true,
     "measurement_allowed": true,
     "wholesale_source_copying_allowed": false,
-    "target": "STRUCTURAL_VISUAL_REPRODUCTION"
+    "target": "STRUCTURAL_VISUAL_REPRODUCTION",
+    "fresh_capture_coordinate_space": "PAGE_SPACE",
+    "capture_scroll_y_role": "OBSERVATIONAL_PROVENANCE",
+    "legacy_coordinate_inference_fail_closed": true
   },
   "unsupported_primary_experiences": [
     "WEBGL_THREEJS_PRIMARY",
@@ -105,7 +108,11 @@
     "realization_repair_full_page_regeneration_allowed": false,
     "realization_repair_content_mutation_allowed": false,
     "realization_repair_escalation_code": "REALIZATION_REPAIR_INSUFFICIENT",
-    "repair_scope_violation_is_deterministic_review": true
+    "repair_scope_violation_is_deterministic_review": true,
+    "assembly_repair_content_freeze": true,
+    "assembly_repair_adopt_only_if_clean": true,
+    "transient_platform_error_terminal_build_mutation": false,
+    "workflow_reconciliation_terminal_authority": true
   },
   "benchmark": {
     "fixed_site_count": 5,

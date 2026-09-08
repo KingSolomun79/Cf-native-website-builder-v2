@@ -1684,3 +1684,103 @@ not part of this contract.
    classifies as descriptive heading prose. This is a presentation-based
    classification — a third-party entity name wearing an eyebrow class is
    still `FABRICATED_TRUST_ENTITY`.
+
+# 53. Explicit Reference Coordinate Space
+
+Issue #68 (2026-09-07 remediation of Build 436c357a, which double-applied
+`captureScrollY`). Every Reference Evidence document MAY carry an explicit
+frozen declaration `coordinateSpace: PAGE_SPACE | VIEWPORT_SPACE`; it
+describes the data, it is not an action.
+
+1. Fresh captures are PAGE_SPACE, always. The browser adapter freezes every
+   coordinate channel (sections, headline, images) in ONE page space measured
+   in a single `evaluate()` call, and the capture output declares
+   `coordinateSpace: "PAGE_SPACE"`. Screenshot-only extraction bands declare
+   PAGE_SPACE as well. Mixed-space captures (viewport-relative sections
+   beside scroll-corrected images) are legacy-only.
+2. `captureScrollY` is observational provenance for PAGE_SPACE evidence.
+   Applying it there is structurally impossible: the geometry authority's
+   PAGE_SPACE branch is the IDENTITY transform and never reapplies the
+   offset. Only the VIEWPORT_SPACE contract consumes `captureScrollY`, as
+   its normalization offset.
+3. Legacy evidence without the declaration normalizes through deterministic
+   inference: identity and scroll-offset candidates (recorded
+   `captureScrollY`; historical `-min(startY)` recovery for negative
+   evidence) are evaluated against the screenshot bounds (span inside the
+   image, bottom slack within tolerance). Only a UNIQUELY valid transform is
+   accepted; both-or-neither fails closed as
+   `REFERENCE_REGION_MAPPING_AMBIGUOUS` (per #50.3). No-height legacy
+   evidence keeps the documented historical precedence (recorded > recovered
+   > identity, unverified).
+4. Screenshot authority. Every mapped evidence band is verified against the
+   canonical screenshot (`0 <= startY < height`, `0 < endY <= height`,
+   small capture tolerance); VIEWPORT_SPACE evidence without a recorded
+   `captureScrollY` fails closed. Band-level refusals carry precise reasons.
+
+# 54. Assembly Repair Preservation Contract
+
+Issue #69 (2026-09-07; the same Build 436c357a run proved the informed
+assembly repair could fix nothing while degrading the candidate — new
+orphan classes, a new `pill-row`, and a silently dropped H1 tail). The ONE
+bounded assembly repair (budget unchanged) is governed by a deterministic
+preservation contract (`assembly-repair.ts`):
+
+1. Mutation authority. Only explicitly enumerated finding types authorize a
+   repair: `ORPHANED_CLASS`/`REGION_STYLE_MISSING` (class + CSS
+   realization), `BROKEN_NAV_LINK` (exactly the named broken targets),
+   and pure-structural findings (missing footer/H1/shared-css/js/viewport
+   meta/region) with content frozen. `FABRICATED_TRUST_ENTITY` — and every
+   non-enumerated type (`MULTIPLE_H1`, `IMG_*`,
+   `FORM_CONTRACT_VIOLATION`, `MISSING_PAGE`, unsupported-fact patterns) —
+   deterministically ESCALATES the page; repair is never generic
+   page-regeneration permission.
+2. Content freeze. The #67 fingerprint machinery runs with NO authorized
+   regions: visible text, title/meta, hrefs, image identities, form
+   semantics and region order are frozen. The only excusable diffs are the
+   exact navigation allowances (authorized broken-href replacement; nav
+   addition carrying its canonical label only). Any other difference is
+   `REPAIR_SCOPE_VIOLATION` — the pre-repair page stays effective.
+3. Adopt only if clean. A repair becomes the effective page only when the
+   content guard holds AND the page's findings are fully resolved with no
+   new findings. Outcomes are exactly `ADOPTED`,
+   `REVERTED_SCOPE_VIOLATION`, `REVERTED_REGRESSION` (repair output still
+   fails validation — e.g. it introduced new orphan classes), or
+   `ESCALATED`. A reverted repair's stored artifact remains as evidence
+   only and never becomes effective.
+4. Trigger provenance. Every repair attempt appends an `assembly_repair`
+   workflow event (pageId, trigger finding ids, authorized scope, result,
+   post-repair findings, preservation result); repair artifacts carry
+   `repairTriggerFindingIds` + `repairScopeSummary` in provenance.
+5. Lineage authority first. The `candidate_manifest` is frozen BEFORE the
+   final validation gate, so a review-terminal candidate carries its true
+   lineage and the #51 namespace reconstruction can never resurrect a
+   reverted repair.
+6. Validator precision feeds the authority. Deterministic findings must
+   carry exact values (e.g. the internal-link scan reports the precise
+   broken href, including hyphenated/digit paths) — the mutation authority
+   can only allow what findings precisely name.
+
+# 55. Workflow Terminal-State Resilience
+
+Issue #70 (2026-09-07; a Durable Object code-update reset escaped the
+pipeline and terminal-failed a Build while its Workflow instance kept
+running). Transient platform failures yield to the Workflow engine; only
+reconciliation owns the terminal.
+
+1. Classification. `TRANSIENT_RETRYABLE` covers structured platform
+   `retryable` errors and the isolated
+   "Durable Object reset because its code was updated" compatibility
+   fallback. `NonRetryableError` (the workflow step wrapper's own
+   deterministic-failure envelope) is non-transient by construction.
+2. Yield-to-engine. The pipeline outer catch and the workflow `run()` catch
+   RETHROW `TRANSIENT_RETRYABLE` errors with ZERO terminal Build mutation.
+   The engine resumes from persisted D1 state, R2 artifacts, the step cache
+   and single-flight claims. A transient reset can no longer produce
+   Build=FAILED + Workflow=RUNNING.
+3. Deliberate in-step domain outcomes (e.g. vision-seam exhaustion) remain
+   terminal domain results, not transient escapes; the bounded in-step
+   retry schedules are unchanged.
+4. Reconciliation authority. Genuine instance death/exhaustion is applied
+   by the #56 sweep (`failBuildForWorkflowTermination`) exactly once. A
+   transient escape relies on the `*/10` cron sweep for the terminal
+   transition (bounded latency, no endless limbo).
