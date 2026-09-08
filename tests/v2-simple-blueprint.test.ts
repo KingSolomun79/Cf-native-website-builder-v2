@@ -147,12 +147,15 @@ describe("SIMPLE prompt contract registration", () => {
       "simple-site-repair",
     ] as const) {
       const composed = composeStagePrompt(stage);
-      expect(composed.promptVersion).toBe("v1");
+      // simple-design-blueprint is v2 (transport iteration, brief §20: output
+      // size discipline); the other three remain at their original v1.
+      expect(composed.promptVersion).toBe(stage === "simple-design-blueprint" ? "v2" : "v1");
       expect(composed.systemPrompt).toContain("Retained detailed stage prompt body");
       expect(composed.systemPrompt.length).toBeGreaterThan(2000); // contract + body
     }
     const blueprint = composeStagePrompt("simple-design-blueprint");
     expect(blueprint.systemPrompt).toContain("DESIGN AUTHORITY");
+    expect(blueprint.systemPrompt).toContain("6,000–12,000 output tokens");
   });
 
   it("leaves every legacy manifest entry untouched", () => {

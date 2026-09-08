@@ -18,6 +18,21 @@ import { Context } from "hono";
 import type { Env } from "../env.d";
 import { verifyWebhookSignature } from "../lib/crypto";
 import { callGatewayChat } from "../lib/ai-gateway";
+import {
+  generalApiCredentialCanary,
+  generateStreamingCompletion,
+  generateWorkersAiStreaming,
+  StreamingTransportExhaustedError,
+  type StreamingCompletionOptions,
+} from "../lib/ai-streaming";
+
+type CanaryTransport = "zai_general" | "workers_ai";
+
+function canaryStream(env: Env, transport: CanaryTransport | undefined, options: StreamingCompletionOptions) {
+  return transport === "workers_ai"
+    ? generateWorkersAiStreaming(env, options)
+    : generateStreamingCompletion(env, options);
+}
 import { startSiteGeneration, createInitialBuild } from "../domain/lifecycle";
 import { getEffectiveBusinessFacts } from "../domain/revision";
 import { runReferenceIntake, getFrozenReferenceEvidence } from "../domain/reference-intake";
@@ -40,7 +55,7 @@ interface DriverFixtureImage {
 }
 
 interface DriverBody {
-  op: "health" | "put-fixture" | "finch-builder" | "builder-diagnostic" | "assemble-stored" | "capture" | "blueprint" | "artifact" | "probe";
+  op: "health" | "put-fixture" | "finch-builder" | "builder-diagnostic" | "assemble-stored" | "capture" | "blueprint" | "artifact" | "probe" | "general-api-canary" | "stream-canary-text" | "stream-canary-vision";
   key?: string;
   base64?: string;
   facts?: BusinessFacts;
@@ -53,6 +68,9 @@ interface DriverBody {
   buildId?: string;
   buildVersionId?: string;
   probeMaxTokens?: number;
+  canaryItems?: number;
+  canaryThinking?: "low" | "high" | "max";
+  canaryTransport?: CanaryTransport;
 }
 
 function base64ToBytes(base64: string): Uint8Array {
@@ -136,6 +154,21 @@ export async function expBenchmarkDriver(c: Context<{ Bindings: Env }>): Promise
 
       case "probe":
         return c.json(await runTransportProbe(c.env, body));
+
+      // §5 credential check: can the EXISTING ZHIPU_API_KEY call the General
+      // API (api.z.ai/api/paas/v4) with model glm-5.3-flash? Returns only
+      // auth/model-availability — never the key. Optional thinking level:
+      // the General API rejects "disabled" for this model (error 1210).
+      case "general-api-canary":
+        return c.json(await generalApiCredentialCanary(c.env, body.canaryThinking));
+
+      // §14 Canary A — zero-business long-text streaming diagnostic.
+      case "stream-canary-text":
+        return c.json(await runStreamCanaryText(c.env, body));
+
+      // §15 Canary B — multimodal streaming with the frozen Morabeza capture.
+      case "stream-canary-vision":
+        return c.json(await runStreamCanaryVision(c.env, body));
 
       default:
         return c.json({ error: "Unknown op" }, 400);
@@ -645,5 +678,107 @@ async function runTransportProbe(env: Env, body: DriverBody): Promise<unknown> {
     };
   } catch (error) {
     return { ok: false, thrown: (error as Error).message.slice(0, 300), durationMs: Date.now() - started, maxTokensRequested: maxTokens };
+  }
+}
+
+// §14 Canary A — zero-business long-text streaming diagnostic (no images, no
+// business data, no KIE). Requests a structured output whose natural size
+// exceeds the old ~8K non-streaming ceiling; verifies the assembled JSON and
+// returns the transport metrics the report requires.
+async function runStreamCanaryText(env: Env, body: DriverBody) {
+  const targetItems = Math.max(120, Math.min(body.canaryItems ?? 360, 1200));
+  const startedAt = Date.now();
+  try {
+    const result = await canaryStream(env, body.canaryTransport, {
+      system: "You are a JSON generator. Output ONLY valid JSON, no prose, no markdown.",
+      user: `Output a JSON object {"items":[...]} with exactly ${targetItems} items. Each item: {"i":<index>,"name":"calibration item <index>","tags":["alpha","beta","gamma"],"description":"A full descriptive sentence about calibration item <index> for transport throughput measurement, at least twenty words long, mentioning its place in the sequence and its purpose."}. Fill every item completely; do not truncate the array; close all brackets.`,
+      maxTokens: 65_536,
+      jsonMode: true,
+      label: "canary-a-long-text",
+    });
+    let items = -1;
+    let jsonValid = false;
+    try {
+      const parsed = JSON.parse(result.content) as { items?: unknown[] };
+      items = Array.isArray(parsed.items) ? parsed.items.length : -1;
+      jsonValid = items === targetItems;
+    } catch {
+      jsonValid = false;
+    }
+    return {
+      ok: true,
+      durationMs: Date.now() - startedAt,
+      ttfbMs: result.ttfbMs,
+      streamDurationMs: result.durationMs,
+      chunks: result.chunks,
+      finishReason: result.finishReason,
+      usage: result.usage,
+      contentChars: result.content.length,
+      targetItems,
+      itemsAssembled: items,
+      jsonValid,
+      crossedOld120sBoundary: result.durationMs > 120_000,
+      requestId: result.requestId,
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      durationMs: Date.now() - startedAt,
+      error: error instanceof StreamingTransportExhaustedError ? error.message : (error as Error).message.slice(0, 300),
+    };
+  }
+}
+
+// §15 Canary B — the actual Blueprint transport shape: frozen Morabeza
+// Reference screenshot + a small diagnostic instruction, expecting a large
+// structured JSON completion via the streaming boundary. NOT the real
+// blueprint yet.
+async function runStreamCanaryVision(env: Env, body: DriverBody) {
+  if (!body.key) return { ok: false, error: "key (R2 image key) required" };
+  const obj = await env.SITE_BUCKET.get(body.key);
+  if (!obj) return { ok: false, error: "image object not found" };
+  const imageBytes = await obj.arrayBuffer();
+  const base64 = bytesToBase64(imageBytes);
+  const startedAt = Date.now();
+  try {
+    const result = await canaryStream(env, body.canaryTransport, {
+      system: "You are a JSON generator. Output ONLY valid JSON, no prose, no markdown.",
+      user: `The attached image is a full-page desktop screenshot of a website (a marketing site). Produce a structural diagnostic as JSON: {"page":{"estimatedWidthPx":<number>,"estimatedHeightPx":<number>},"sections":[{"index":<n>,"title":"<best-guess section title>","surface":"dark|pale|photographic","dominantColor":"<hex estimate>","contentDensity":"low|medium|high","roughViewportHeights":<number>,"notes":"<one sentence>"}]} — include AT LEAST 16 section entries covering the whole page from top to bottom, with detailed notes. Do not truncate.`,
+      images: [{ base64, mimeType: "image/png" }],
+      maxTokens: 65_536,
+      jsonMode: true,
+      label: "canary-b-multimodal",
+    });
+    let sections = -1;
+    let jsonValid = false;
+    try {
+      const parsed = JSON.parse(result.content) as { sections?: unknown[] };
+      sections = Array.isArray(parsed.sections) ? parsed.sections.length : -1;
+      jsonValid = sections >= 16;
+    } catch {
+      jsonValid = false;
+    }
+    return {
+      ok: true,
+      imageBytes: imageBytes.byteLength,
+      durationMs: Date.now() - startedAt,
+      ttfbMs: result.ttfbMs,
+      streamDurationMs: result.durationMs,
+      chunks: result.chunks,
+      finishReason: result.finishReason,
+      usage: result.usage,
+      contentChars: result.content.length,
+      sectionsAssembled: sections,
+      jsonValid,
+      crossedOld120sBoundary: result.durationMs > 120_000,
+      requestId: result.requestId,
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      imageBytes: imageBytes.byteLength,
+      durationMs: Date.now() - startedAt,
+      error: error instanceof StreamingTransportExhaustedError ? error.message : (error as Error).message.slice(0, 300),
+    };
   }
 }

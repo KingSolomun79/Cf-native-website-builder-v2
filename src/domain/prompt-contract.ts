@@ -111,7 +111,7 @@ export const PROMPT_MANIFEST: Record<PromptStageKey, PromptManifestEntry> = {
   // ── SIMPLE design pipeline (experiment branch only) ─────────────────────
   "simple-design-blueprint": {
     promptId: "simple-design-blueprint",
-    promptVersion: "v1",
+    promptVersion: "v2",
     bodyFile: "simple/01-design-blueprint.md",
   },
   "simple-website-builder": {

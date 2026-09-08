@@ -61,6 +61,11 @@
   "images": {
     "binding": "IMAGES"
   },
+  // TRANSPORT ITERATION (§16): Workers AI binding for the experiment-only
+  // alternate transport @cf/zai-org/glm-5.3-flash. NEVER production config.
+  "ai": {
+    "binding": "AI"
+  },
   "observability": {
     "logs": {
       "enabled": true,
@@ -92,6 +97,12 @@
     "VISION_INPUT_MAX_BYTES": "4194304",
     "VISION_INPUT_MAX_WIDTH": "1920",
     "VISION_INPUT_MAX_HEIGHT": "12000",
-    "EXP_BENCHMARK_DRIVER": "1"
+    "EXP_BENCHMARK_DRIVER": "1",
+    // TRANSPORT ITERATION (operator brief §16): the Z.AI General API failed
+    // the §5 entitlement check (error 1113 — Coding-Plan key, no General API
+    // resource package), so the experiment pins the §16 alternate transport:
+    // Workers AI hosting the SAME model release (@cf/zai-org/glm-5.3-flash),
+    // streamed. Explicit experiment-only provenance exception. Never production.
+    "SIMPLE_STREAMING_TRANSPORT": "workers_ai_stream"
   }
 }

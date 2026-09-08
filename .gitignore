@@ -47,3 +47,4 @@ tests/_generated-migrations.ts
 /wf.txt
 .dev.vars.exp
 .tmp-exp-phase1/
+.tmp-exp-transport/

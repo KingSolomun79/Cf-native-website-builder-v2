@@ -22,6 +22,8 @@ import {
 } from "../domain/ai-boundary";
 import { getBuildStageArtifact, storeBuildStageArtifactIdempotent } from "../domain/stage-artifacts";
 import type { BusinessFacts } from "../domain/lifecycle-schema";
+import { generateSimpleStreamingCompletion, StreamingTransportExhaustedError } from "../lib/ai-streaming";
+import { simpleStreamingTransportEnabled } from "./vision";
 import {
   SITE_BUNDLE_SCHEMA_VERSION,
   SiteBundleSchema,
@@ -227,6 +229,29 @@ ${css ? `\nFROZEN site.css (already produced in this stage — the pages MUST us
 TASK (2 of 2 — this call): Produce the four COMPLETE HTML pages (home, about, services, contact) realizing the blueprint section-by-section on top of that shared stylesheet and script. Full documents, production-grade, no placeholders.`;
 }
 
+// EXPERIMENT TRANSPORT ITERATION: with SIMPLE_STREAMING_TRANSPORT enabled,
+// the builder's DEFAULT seam (no injected test seam) is the shared streaming
+// boundary — text-only, JSON mode, General API. Transport only; injected
+// seams (tests, driver) always take precedence.
+function builderDefaultGenerate(env: Env, input: RunSimpleWebsiteBuilderInput): RawAiGenerate | undefined {
+  if (input.visionGenerate) return input.visionGenerate;
+  if (input.generate) return input.generate;
+  if (simpleStreamingTransportEnabled(env)) {
+    return async (systemPrompt, userPrompt) => {
+      const result = await generateSimpleStreamingCompletion(env, {
+        system: systemPrompt,
+        user: userPrompt,
+        // Streaming token floor (see vision.ts): no edge window applies.
+        maxTokens: Math.max(32_000, 32_768),
+        jsonMode: true,
+        label: "simple-website-builder",
+      });
+      return { content: result.content, provider: result.provider, model: result.model };
+    };
+  }
+  return undefined;
+}
+
 export async function runSimpleWebsiteBuilderStage(
   env: Env,
   input: RunSimpleWebsiteBuilderInput
@@ -265,7 +290,7 @@ export async function runSimpleWebsiteBuilderStage(
       buildVersionNumber: input.buildVersionNumber,
       inputArtifactIds: [input.blueprint.businessFactsRef],
       maxTokens: 32000,
-      generate: input.visionGenerate ?? input.generate,
+      generate: builderDefaultGenerate(env, input),
     });
     const bundle = run.value as SiteBundle;
     const stored = await storeBuildStageArtifactIdempotent(env, {
@@ -277,12 +302,18 @@ export async function runSimpleWebsiteBuilderStage(
     });
     return { bundle, artifactR2Key: stored.artifactR2Key, provenance: run.provenance, strategy: "ONE_CALL" };
   } catch (error) {
-    if (!(error instanceof AiStageSchemaInvalidError)) throw error;
+    // Section 26: fallback eligibility is explicit — the TWO-CALL fallback is
+    // allowed for schema failure AND for a TERMINAL output-size/provider
+    // transport failure (StreamingTransportExhaustedError). Any other error
+    // (transient failures the engine should retry, domain errors) propagates.
+    const transportExhausted = error instanceof StreamingTransportExhaustedError;
+    if (!(error instanceof AiStageSchemaInvalidError) && !transportExhausted) throw error;
     // fall through to the allowed two-call fallback (same stage, same frozen
     // context) — one-call generation was unreliable for this transport.
   }
 
   // TWO-CALL SINGLE-STAGE fallback: shared shell first, then all four pages.
+  const shellGenerate = builderDefaultGenerate(env, input);
   const shellRun = await runSchemaValidatedAiStage<unknown>(env, {
     stage: "simple-website-builder",
     schema: BuilderShellSchema,
@@ -294,7 +325,7 @@ export async function runSimpleWebsiteBuilderStage(
     buildVersionNumber: input.buildVersionNumber,
     inputArtifactIds: [input.blueprint.businessFactsRef],
     maxTokens: 20000,
-    generate: input.visionGenerate ?? input.generate,
+    generate: shellGenerate,
   });
   const shell = shellRun.value as { sharedCss: string; sharedJs: string };
 
@@ -309,7 +340,7 @@ export async function runSimpleWebsiteBuilderStage(
     buildVersionNumber: input.buildVersionNumber,
     inputArtifactIds: [input.blueprint.businessFactsRef, shellRun.artifactR2Key],
     maxTokens: 32000,
-    generate: input.visionGenerate ?? input.generate,
+    generate: shellGenerate,
   });
   const pages = pagesRun.value as { pages: Record<"home" | "about" | "services" | "contact", string> };
 

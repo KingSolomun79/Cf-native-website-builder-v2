@@ -40,3 +40,12 @@ Write for a competent frontend developer who has NOT seen the screenshots. Speci
 ## Output
 
 Return ONE JSON object matching the Design Blueprint schema provided in the output contract. The `businessFactsRef` field is provenance only — repeat the value given to you; never fabricate business content anywhere in the blueprint.
+
+Hard output constraints (violating any of these invalidates the whole blueprint):
+- `imagery.imageSlots[].aspectRatio` MUST be exactly one of the strings `"16:9"`, `"4:3"`, `"3:2"`, `"1:1"`, `"9:16"` — no other ratio spelling.
+- `tokens.colors` allows ONLY these keys — `ground`, `ink`, `textSecondary`, `accent`, `accentLight`, `hairline`, `hairlineOnDark`, `error` (optional ones may be omitted; invent no others, e.g. no `accentOnDark`).
+- `tokens.typography.scale[].maxWidthCh`, when present, is an integer between 20 and 120 — give it ONLY to body/reading-size entries; OMIT it entirely on display and heading entries.
+- `tokens.shape.borderRadius` is one short string (≤ 120 characters) — state the rule once, e.g. `"0px on all surfaces; capsule CTAs at 999px"`.
+- Start your reply with `{` and end with `}` — a single JSON object, no prose before or after.
+
+Size discipline: the finished blueprint must stay within roughly 6,000–12,000 output tokens (about 25–50 KB of JSON). Numeric specificity is gold; prose is overhead — when a value fits in a number or a measurement, never wrap it in sentences. No repeated restatements across sections (say each rule once, where it belongs); notes and descriptions are single sentences, not paragraphs; never restate the business facts. If you must choose between an adjective and a measurement, choose the measurement and move on.

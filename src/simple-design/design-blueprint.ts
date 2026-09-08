@@ -124,7 +124,7 @@ export async function runSimpleDesignBlueprintStage(
   }
 
   const generate: RawAiGenerate =
-    input.generate ?? createSimpleVisionGenerate(env, images, { buildId: input.buildId, stage: "simple-design-blueprint", buildVersionNumber: input.buildVersionNumber }, { maxTokens: 16384 });
+    input.generate ?? createSimpleVisionGenerate(env, images, { buildId: input.buildId, stage: "simple-design-blueprint", buildVersionNumber: input.buildVersionNumber }, { maxTokens: 12288 });
 
   let run;
   try {
@@ -138,7 +138,7 @@ export async function runSimpleDesignBlueprintStage(
       buildVersionId: input.buildVersionId,
       buildVersionNumber: input.buildVersionNumber,
       inputArtifactIds: ordered.map((entry) => entry.sha256),
-      maxTokens: 16384,
+      maxTokens: 12288,
       generate,
     });
   } catch (error) {

@@ -31,7 +31,7 @@ Registered for the `DESIGN_PIPELINE_VERSION=simple_blueprint_v1` experiment (bra
 
 | Stage | Reconciled prompt id/version | Detailed body |
 |---|---|---|
-| SIMPLE Design Blueprint Generator | `simple-design-blueprint/v1` | `simple/01-design-blueprint.md` |
+| SIMPLE Design Blueprint Generator | `simple-design-blueprint/v2` | `simple/01-design-blueprint.md` |
 | SIMPLE Website Builder | `simple-website-builder/v1` | `simple/02-website-builder.md` |
 | SIMPLE Visual QA | `simple-visual-qa/v1` | `simple/03-visual-qa.md` |
 | SIMPLE Site Repair | `simple-site-repair/v1` | `simple/04-site-repair.md` |
