@@ -72,6 +72,7 @@ import { evaluateQaARelease, evaluateQaBRelease } from "./qa-stages";
 import type { RawAiGenerate } from "./ai-boundary";
 import { VisionGatewayError } from "../lib/ai-gateway";
 import { KieV2ImageProvider } from "../lib/kie-v2";
+import { runSimpleBuildPipeline, resolveDesignPipelineVersion, type SimplePipelineDeps } from "../simple-design/pipeline";
 
 // Deterministic, unhealable vision-seam failures: every configured vision
 // provider was exhausted (VisionGatewayError carries the per-attempt record)
@@ -361,6 +362,29 @@ export async function runBuildPipeline(
       qaB: null,
       repairApplied: false,
     };
+  }
+
+  // ── Experiment selector (experiment/simplified-design-pipeline) ──────────
+  // simple_blueprint_v1 routes the Build through the SIMPLE design pipeline
+  // (Design Blueprint → Website Builder → QA → ONE Repair) in
+  // src/simple-design/pipeline.ts. It shares ONLY the keep-list
+  // infrastructure (capture, KIE, artifacts, release, publication) and never
+  // invokes the legacy design stages below. Flip the
+  // DESIGN_PIPELINE_VERSION var to "legacy_v2" for A/B comparison runs.
+  if (resolveDesignPipelineVersion(env) === "simple_blueprint_v1") {
+    const simpleDeps: SimplePipelineDeps = {
+      ...(deps.generate ? { generate: deps.generate } : {}),
+      ...(deps.visionGenerate ? { visionGenerate: deps.visionGenerate } : {}),
+      ...(deps.imageProvider ? { imageProvider: deps.imageProvider } : {}),
+      ...(deps.previewDeployer ? { previewDeployer: deps.previewDeployer } : {}),
+      ...(deps.qaCapture ? { qaCapture: deps.qaCapture } : {}),
+      ...(deps.capture ? { capture: deps.capture } : {}),
+      ...(deps.step ? { step: deps.step } : {}),
+      ...(deps.sleep ? { sleep: deps.sleep } : {}),
+    };
+    return runSimpleBuildPipeline(env, { siteGenerationId: input.siteGenerationId, buildId, deps: simpleDeps }).then(
+      (outcome): BuildPipelineOutcome => ({ ...outcome, qaA: null, qaB: null })
+    );
   }
 
   let version = await currentVersionNumber(env, buildId);

@@ -1,0 +1,371 @@
+{
+  "version": "1",
+  "businessFactsRef": "onboarding-submission:fixture#fact-snapshot",
+  "projectFrame": {
+    "siteType": "Luxury tented safari camp",
+    "industry": "Hospitality — luxury travel",
+    "pageJob": "Convey untouched wilderness, old-world safari romance and restorative stillness; funnel everything toward a personal enquiry rather than a self-serve booking engine.",
+    "emotionalReference": "Cinematic golden-age safari photography — muted earth tones, slow dawns, wide silences. Think Isak Dinesen's prose pace, not a resort brochure.",
+    "designCharacter": "Editorial, media-led luxury: full-viewport photography carries the page, chrome disappears, generous slow whitespace, one warm brass accent used sparingly.",
+    "referenceDesignThesis": "The interface retreats so the landscape performs: oversized serene imagery, hairline structure, and measured pacing turn browsing the page into something close to being there.",
+    "antiPattern": "Anything that reads 'resort website': uniform card grids of activities, orange BOOK NOW badges, price stickers, stock-cheerful copy, over-saturated imagery."
+  },
+  "designDna": [
+    "Media leads, chrome disappears: the first viewport is a full-bleed photograph with no boxes around content and a transparent header.",
+    "Whitespace is the layout: sections breathe with at least 15vh vertical padding and isolated statements max out at 65ch.",
+    "Slow is luxurious: transitions live in the 300-1200ms bands; nothing snaps instantly.",
+    "Editorial asymmetry, never grids of cards: content composes in focal-point layouts; the one repeating-row section uses hairline rules, not cards.",
+    "Monochrome plus photography does the color work: charcoal ground, warm off-white ink, one brass accent reserved for kickers, indices and hover states.",
+    "A serif speaks, a sans whispers: display serif carries emotion at weight 500-600 (never bold); the sans handles UI and body at 300-500.",
+    "Every primary CTA opens the same enquiry surface — one conversion path, no competing funnels."
+  ],
+  "tokens": {
+    "colors": {
+      "ground": "#1A1A18",
+      "ink": "#F5F2ED",
+      "textSecondary": "#A8A9A7",
+      "accent": "#D9B380",
+      "accentLight": "#F0DFC0",
+      "hairline": "rgba(217, 179, 128, 0.3)",
+      "hairlineOnDark": "rgba(245, 242, 237, 0.2)",
+      "error": "#E63946"
+    },
+    "typography": {
+      "display": {
+        "family": "Cormorant Garamond",
+        "fallback": "Georgia, 'Times New Roman', serif",
+        "weightGuidance": "500-600 only; never bold; generous letter-spacing on kickers"
+      },
+      "body": {
+        "family": "Inter",
+        "fallback": "system-ui, sans-serif",
+        "weightGuidance": "300-500; 400 for buttons and labels"
+      },
+      "scale": [
+        { "element": "Hero H1", "family": "display", "weight": 600, "sizeClamp": "clamp(2.5rem, 6vw, 5.5rem)", "lineHeight": "1.05" },
+        { "element": "Section H2", "family": "display", "weight": 500, "sizeClamp": "clamp(1.8rem, 4vw, 3.5rem)", "lineHeight": "1.15" },
+        { "element": "Statement", "family": "display", "weight": 500, "sizeClamp": "clamp(1.4rem, 3vw, 2.2rem)", "lineHeight": "1.3", "maxWidthCh": 65 },
+        { "element": "Sub-headings", "family": "body", "weight": 400, "sizeClamp": "clamp(1.1rem, 2vw, 1.4rem)", "lineHeight": "1.4", "maxWidthCh": 55 },
+        { "element": "Body", "family": "body", "weight": 300, "sizeClamp": "clamp(1rem, 1.5vw, 1.15rem)", "lineHeight": "1.6", "maxWidthCh": 65 },
+        { "element": "Kickers/labels", "family": "body", "weight": 500, "sizeClamp": "0.875rem", "lineHeight": "1.2" },
+        { "element": "Legal/footer", "family": "body", "weight": 300, "sizeClamp": "0.875rem", "lineHeight": "1.4" }
+      ]
+    },
+    "shape": {
+      "borderRadius": "0 everywhere — sharp architectural edges are part of the identity",
+      "shadowPolicy": "No drop shadows; depth comes exclusively from scrim gradients over media (transparent to rgba(26,26,24,0.7))",
+      "texture": "Subtle global film grain (SVG turbulence, ~4% opacity, fixed overlay, pointer-events none)"
+    },
+    "layout": {
+      "containerWidth": "max-width 1200px with 24px gutters; full-bleed for photographic sections",
+      "sectionSpacing": "min 15vh vertical padding between sections; 40vh+ isolation around major statements",
+      "imageTreatment": "Full-bleed or large editorial crops; scrim gradients for text-over-image; slight slow scale (1.03) on hover; 0 radius"
+    }
+  },
+  "globalChrome": {
+    "header": {
+      "layout": "Fixed minimal bar: wordmark left, menu trigger right, enquiry CTA far right",
+      "states": [
+        "[OBSERVED] Transparent over hero with ink-colored text",
+        "Solid ground-color background with hairline bottom border after ~100vh of scroll",
+        "Hides on scroll down past 300px, returns on scroll up (400ms ease-out)",
+        "Solid while any overlay is open"
+      ]
+    },
+    "navigation": {
+      "desktop": "Sparse inline links (Home, About, Services, Contact) with animated underline-grow on hover; right-aligned",
+      "mobile": "Full-screen ground-color takeover, centered column of large serif links, staggered 60ms fade-up; closes via X, Escape or scrim click"
+    },
+    "primaryCta": "Capsule-outline 'Enquire' button in accent color; opens the enquiry form; identical behavior from header, hero and closing band",
+    "footer": "Four columns on ground color: brand mark + address, primary nav echo, contact block, social links; hairline top border; legal line with dynamically sourced year",
+    "formBehavior": "Enquiry form validates on blur, shows accent-colored error text under fields, success state replaces the form with a quiet confirmation line; Escape, scrim click and an explicit close button all dismiss",
+    "overlays": "Full-screen menu and enquiry drawer share a 60% scrim; panel slides in 1000ms ease-out-expo; body scroll locks while open"
+  },
+  "motion": {
+    "interactions": [
+      { "element": "Images", "trigger": "hover", "effect": "scale 1.03 with slight brightness lift", "duration": "400ms", "easing": "ease-out" },
+      { "element": "Text links", "trigger": "hover", "effect": "accent color + underline grows from left", "duration": "200ms", "easing": "ease-out" },
+      { "element": "Buttons", "trigger": "hover", "effect": "background fills accent, text flips to ground color", "duration": "300ms", "easing": "ease-out" },
+      { "element": "Section content", "trigger": "20% viewport visibility", "effect": "40px translateY fade-up reveal, fires once", "duration": "700ms", "easing": "easeOutQuad" },
+      { "element": "Menu trigger", "trigger": "click", "effect": "hamburger lines morph to X, full-screen menu fades in with slight scale", "duration": "600ms", "easing": "ease-out" },
+      { "element": "Hero image", "trigger": "scroll", "effect": "subtle parallax translateY ±10%", "duration": "continuous", "easing": "linear" }
+    ],
+    "scrollBehavior": "[INFERRED] Native scroll with gentle lerp smoothing (~0.1); disabled on touch devices and under prefers-reduced-motion",
+    "reducedMotion": "All animation and parallax disabled globally; reveals render in final state; scroll smoothing off; page fully readable with motion removed"
+  },
+  "pages": {
+    "home": {
+      "sections": [
+        {
+          "name": "Hero",
+          "purpose": "Immediate transport — establish scale, solitude and wilderness in one image",
+          "layout": "100svh full-bleed photograph, centered wordmark + subtitle over a bottom scrim, scroll indicator at the base",
+          "visualMass": "one full viewport; the largest single media element on the site",
+          "surface": "photographic with scrim",
+          "typography": "Hero H1 serif + one-line sans subtitle, generous letter-spacing",
+          "media": "single dominant landscape photograph, subject weighted right, dark lower third for text",
+          "cta": "Capsule-outline 'Enquire' bottom center",
+          "responsive": "80svh on tablet, 70svh on phone; subtitle wraps; CTA stays visible above the fold"
+        },
+        {
+          "name": "Introduction Statement",
+          "purpose": "Emotional positioning — quiet luxury and stillness, not amenities",
+          "layout": "100vh centered single statement, max 65ch, kicker above",
+          "visualMass": "one viewport, almost entirely empty space",
+          "surface": "ground color, no media",
+          "typography": "Statement serif; kicker in sans caps with accent color",
+          "cta": "Accent text link to the experiences section",
+          "responsive": "Auto height with generous padding on mobile; type scales down via clamp"
+        },
+        {
+          "name": "Chapters Collection",
+          "purpose": "The signature section — the offered experience told as five named chapters, not a card grid",
+          "layout": "Five full-width hairline rows; row number left, chapter title center in large serif, short descriptor right",
+          "visualMass": "roughly 1.5 viewport heights — the largest informational mass on the page",
+          "surface": "ground color with hairline rules; on hover a photographic preview fades in beside the cursor",
+          "typography": "Chapter titles in display serif at H2 scale; indices in accent sans",
+          "media": "one photograph per chapter, revealed on hover/focus, never tiled as cards",
+          "cta": "Each row expands to a detail overlay with a single 'Explore this chapter' link",
+          "responsive": "Rows stack vertically on touch; tap expands the detail overlay full-screen (no hover dependency)"
+        },
+        {
+          "name": "Location Split",
+          "purpose": "Ground the camp geographically — landscape context and journey",
+          "layout": "60/40 asymmetric split: photograph left, editorial text right, on one viewport",
+          "visualMass": "one viewport",
+          "surface": "pale panel against ground",
+          "typography": "Section H2 + short body block, max 55ch",
+          "media": "single wide landscape photograph, full-height crop",
+          "cta": "Text link to the contact page",
+          "responsive": "Stacks image-over-text below 768px; image keeps 4:3 crop"
+        },
+        {
+          "name": "Closing Enquiry Band",
+          "purpose": "Final conversion push",
+          "layout": "100vh centered statement over a dimmed full-bleed photograph",
+          "visualMass": "one viewport, photographic",
+          "surface": "photographic with heavy scrim",
+          "typography": "Section H2 serif + one-line sans support",
+          "cta": "Primary capsule 'Enquire' + quiet text alternative",
+          "responsive": "70svh on mobile; buttons stack full-width"
+        }
+      ]
+    },
+    "about": {
+      "sections": [
+        {
+          "name": "Inner-page Hero",
+          "purpose": "Continuity: a quieter photographic header that keeps the home language",
+          "layout": "50svh full-bleed photograph with bottom-aligned page title over scrim",
+          "surface": "photographic with scrim",
+          "typography": "Hero H1 at reduced scale",
+          "responsive": "40svh on mobile"
+        },
+        {
+          "name": "Story Editorial",
+          "purpose": "Narrate the place and its philosophy in alternating image/text compositions",
+          "layout": "Three asymmetric image/text rows alternating sides, generous 15vh separation",
+          "visualMass": "roughly two viewports",
+          "media": "one photograph per row, editorial crop",
+          "cta": "Closing accent link to services",
+          "responsive": "Rows stack image-first on mobile"
+        }
+      ]
+    },
+    "services": {
+      "sections": [
+        {
+          "name": "Services Hero",
+          "purpose": "Frame the offering in one calm statement",
+          "layout": "50svh photographic header, title over scrim",
+          "surface": "photographic with scrim",
+          "responsive": "40svh mobile"
+        },
+        {
+          "name": "Offering Rows",
+          "purpose": "Present each experience in the chapter-row language — hierarchy without cards",
+          "layout": "Hairline-separated rows: index, offering title (serif), two-line description, discreet link",
+          "visualMass": "roughly 1.5 viewports; the page's informational mass",
+          "typography": "Row titles at H3 serif; body in sans 300",
+          "cta": "Row-level link to contact",
+          "responsive": "Rows collapse to title+description stack on mobile"
+        }
+      ]
+    },
+    "contact": {
+      "sections": [
+        {
+          "name": "Contact Hero",
+          "purpose": "A direct, personal invitation to enquire",
+          "layout": "40svh quiet photographic header with page title",
+          "surface": "photographic with scrim",
+          "responsive": "32svh mobile"
+        },
+        {
+          "name": "Enquiry Form + Details",
+          "purpose": "The conversion surface plus human-readable contact facts",
+          "layout": "60/40 split: form left (name, email, message), contact details right on pale panel",
+          "typography": "Labels in sans 500 caps; inputs on ground with hairline borders; focus in accent",
+          "cta": "Capsule submit button; success replaces form with a confirmation line",
+          "responsive": "Stacks form-first on mobile"
+        }
+      ]
+    }
+  },
+  "signatureElements": [
+    "Full-bleed photographic hero with transparent header and scrim-set serif wordmark",
+    "Hairline chapter/row language with accent indices instead of cards",
+    "One warm brass accent reserved for kickers, indices and hover states on a near-monochrome field",
+    "Alternating dark photographic interruptions between calm ground-color sections",
+    "Serif display voice against quiet sans UI at deliberately different scales"
+  ],
+  "antiPatterns": [
+    "No uniform card grids for activities or offerings",
+    "No bright orange booking badges, price stickers or urgency banners",
+    "No invented client logos, award badges or testimonial identities",
+    "No glassmorphism, gradient decoration or drop shadows",
+    "No stock-cheerful marketing voice ('thrill', 'unforgettable', 'nestled')",
+    "No bold display weights — the serif never exceeds 600"
+  ],
+  "imagery": {
+    "grade": "Golden-hour and blue-dawn light only; muted earth palette (volcanic black, sun-bleached earth, muted gold); cinematic documentary style, never midday saturation",
+    "imageSlots": [
+      {
+        "id": "home-hero",
+        "page": "home",
+        "section": "Hero",
+        "priority": "CRITICAL",
+        "aspectRatio": "16:9",
+        "visualMass": "full viewport",
+        "subjectDirection": "Wide savannah landscape at dawn with distant hills, a single iconic tree silhouette; subject weighted right",
+        "compositionDirection": "Full-bleed, dark lower third to carry scrim text, no horizon clutter",
+        "lighting": "Blue-dawn with golden rim light on the horizon",
+        "palette": "Muted earth tones — deep browns, olive, muted gold sky",
+        "cropBehavior": "Cover crop safe on 16:9 to 9:16; keep silhouette in right two-thirds",
+        "kiePrompt": "Cinematic wide savannah landscape at blue dawn, muted earth tones, a single acacia tree silhouette right of frame, distant hills under a soft golden horizon glow, atmospheric haze, no people, no text",
+        "negativePrompt": "no text, letters, logos, watermarks, no people, no buildings, no oversaturated colors, no midday sun",
+        "altText": "Wide dawn savannah with a lone tree silhouette under golden skies"
+      },
+      {
+        "id": "home-chapters-tents",
+        "page": "home",
+        "section": "Chapters Collection",
+        "priority": "HIGH",
+        "aspectRatio": "4:3",
+        "subjectDirection": "Luxury tented suite interior with canvas walls opening onto a private deck facing open plains",
+        "compositionDirection": "Editorial interior crop; warm lamp light; space for hover preview usage",
+        "lighting": "Early morning interior glow",
+        "kiePrompt": "Luxury safari tent interior at dawn, canvas walls, linen furnishings, brass lamp glow, open flap revealing a private deck over golden grassland, editorial photography, no text",
+        "negativePrompt": "no text, logos, no people, no clutter, no harsh flash",
+        "altText": "Tented suite interior opening onto a private deck at dawn"
+      },
+      {
+        "id": "home-chapters-wildlife",
+        "page": "home",
+        "section": "Chapters Collection",
+        "priority": "HIGH",
+        "aspectRatio": "4:3",
+        "subjectDirection": "Elephant family crossing golden grassland at distance, atmospheric dust",
+        "compositionDirection": "Documentary distance; animals small in a big landscape",
+        "lighting": "Golden hour backlight",
+        "kiePrompt": "Elephant family crossing golden savannah at golden hour, backlit dust haze, vast open landscape, documentary wildlife photography, muted earth tones, no text",
+        "negativePrompt": "no text, no close-up faces, no people, no vehicles",
+        "altText": "Elephants crossing golden grassland in evening light"
+      },
+      {
+        "id": "home-location",
+        "page": "home",
+        "section": "Location Split",
+        "priority": "HIGH",
+        "aspectRatio": "3:2",
+        "subjectDirection": "Rolling hill landscape with dramatic cloud cover, conveying remoteness",
+        "compositionDirection": "Full-height left-panel crop; strong sky mass",
+        "lighting": "Blue hour with breaking light",
+        "kiePrompt": "Remote rolling green hills under dramatic blue-hour clouds, a shaft of breaking light, pristine wilderness landscape photography, muted cinematic grade, no text",
+        "negativePrompt": "no text, no roads, no buildings, no people",
+        "altText": "Rolling remote hills under dramatic evening clouds"
+      },
+      {
+        "id": "home-closing",
+        "page": "home",
+        "section": "Closing Enquiry Band",
+        "priority": "HIGH",
+        "aspectRatio": "16:9",
+        "subjectDirection": "Camp fire glow at dusk under a deep indigo sky, warm embers in the lower third",
+        "compositionDirection": "Full-bleed, heavy dark areas for scrim text overlay",
+        "lighting": "Firelight against dusk",
+        "kiePrompt": "Campfire glow at deep dusk under an indigo sky, warm ember light in the lower third, wide dark sky above, quiet luxury safari atmosphere, cinematic photography, no text",
+        "negativePrompt": "no text, no people, no logos, no bright daylight",
+        "altText": "Campfire glowing under a deep indigo dusk sky"
+      },
+      {
+        "id": "about-story",
+        "page": "about",
+        "section": "Story Editorial",
+        "priority": "NORMAL",
+        "aspectRatio": "4:3",
+        "subjectDirection": "Handcrafted detail — canvas, brass and wood textures of the camp",
+        "compositionDirection": "Close editorial crop with shallow depth",
+        "lighting": "Soft window light",
+        "kiePrompt": "Close-up of handcrafted safari camp details, canvas texture, brass fittings and dark wood in soft window light, shallow depth of field, editorial craftsmanship photography, no text",
+        "negativePrompt": "no text, no logos, no faces",
+        "altText": "Handcrafted canvas and brass details in soft light"
+      },
+      {
+        "id": "services-hero",
+        "page": "services",
+        "section": "Services Hero",
+        "priority": "NORMAL",
+        "aspectRatio": "16:9",
+        "subjectDirection": "Quiet guiding moment — footprints leading through pale grass toward hills",
+        "compositionDirection": "Full-bleed banner crop with dark upper area for title",
+        "lighting": "Overcast soft light",
+        "kiePrompt": "Trail of footprints leading through pale golden grass toward distant hills, overcast soft light, quiet contemplative wilderness photography, muted tones, no text",
+        "negativePrompt": "no text, no people, no animals in distress",
+        "altText": "Footprints through pale grass leading toward distant hills"
+      },
+      {
+        "id": "contact-atmosphere",
+        "page": "contact",
+        "section": "Contact Hero",
+        "priority": "NORMAL",
+        "aspectRatio": "16:9",
+        "subjectDirection": "Misty morning landscape, muted and calm",
+        "compositionDirection": "Banner crop, dimmed for title overlay",
+        "lighting": "Soft misty dawn",
+        "kiePrompt": "Misty morning over quiet savannah grassland, soft muted dawn light, calm minimal wilderness scene, cinematic photography, no text",
+        "negativePrompt": "no text, no people, no buildings",
+        "altText": "Misty morning over quiet grassland"
+      }
+    ]
+  },
+  "responsive": {
+    "desktop": "Full asymmetric layouts; 100svh photographic sections; inline navigation; hover interactions active",
+    "tablet": "768-1023px: splits stack, chapters rows remain but hover previews become tap overlays; header keeps CTA",
+    "mobile": "Single column; 70svh heroes; type scales via clamp; full-screen menu takeover; hover-dependent behaviors replaced by tap; no horizontal overflow at 390px"
+  },
+  "accessibility": {
+    "reducedMotion": "prefers-reduced-motion disables reveals, parallax, smoothing and hover scale globally; content renders static and complete",
+    "focusVisible": "2px accent outline with 3px offset on every interactive element",
+    "keyboardNavigation": "Header links, menu trigger, chapter rows, form fields and CTA reachable in DOM order; Escape closes any overlay",
+    "forms": "Every input has a visible label; errors announced under fields; success state is a text node",
+    "performance": "Hero photograph is the LCP candidate; below-the-fold images lazy-load; fonts use font-display swap with system fallbacks"
+  },
+  "acceptanceChecklist": [
+    "Hero occupies approximately one viewport on desktop with a transparent header over it",
+    "Hero headline is never clipped at any breakpoint",
+    "Sections alternate dark, pale and photographic surfaces in a recognizable rhythm",
+    "The chapters/offering rows use hairline rules — no uniform card grids anywhere",
+    "Display serif never exceeds weight 600 and scales via clamp()",
+    "Brass accent appears only on kickers, indices, links and hover states",
+    "Every primary CTA leads to the enquiry form",
+    "No client names, awards or trust badges appear beyond the supplied Business Facts",
+    "Mobile header and menu feel continuous with the desktop language",
+    "Images carry scrim-set text without contrast failure (WCAG AA on overlaid copy)",
+    "No horizontal overflow at 1440, 768 and 390px widths",
+    "prefers-reduced-motion renders the page fully without any animation",
+    "Every image slot renders a real bundled image (no provider URLs, no broken slots)",
+    "Contact form posts to the platform Form Service with the hidden siteFormId",
+    "Footer legal line sources its year dynamically"
+  ]
+}

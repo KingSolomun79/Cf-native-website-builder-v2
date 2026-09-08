@@ -25,6 +25,34 @@ The domain contract is prepended at runtime and is authoritative over contradict
 | Release Blocker Fix | `release-blocker-fix/v2` | `11-release-blocker-fix-v1.md` |
 | Realization Repair | `realization-repair/v1` | `12-realization-repair-v1.md` |
 
+## Experiment branch only — SIMPLE design pipeline (`experiment/simplified-design-pipeline`)
+
+Registered for the `DESIGN_PIPELINE_VERSION=simple_blueprint_v1` experiment (branch-only; never invoked by the `legacy_v2` chain). Same composition rule — domain contract first. The Design Blueprint Generator is multimodal (Reference screenshots attached).
+
+| Stage | Reconciled prompt id/version | Detailed body |
+|---|---|---|
+| SIMPLE Design Blueprint Generator | `simple-design-blueprint/v1` | `simple/01-design-blueprint.md` |
+| SIMPLE Website Builder | `simple-website-builder/v1` | `simple/02-website-builder.md` |
+| SIMPLE Visual QA | `simple-visual-qa/v1` | `simple/03-visual-qa.md` |
+| SIMPLE Site Repair | `simple-site-repair/v1` | `simple/04-site-repair.md` |
+
+### simple-design-blueprint v1
+
+One multimodal call translating the Reference screenshots into an implementation-ready Design Blueprint (`design-blueprint/1`) for a DIFFERENT business. Screenshots are design authority; business content authority is never carried (businessFactsRef provenance only). Emits image slots with ready KIE prompts — no separate KIE prompt LLM stage. Deterministic quality gate (DNA count, page specs, signature elements, checklist) follows; one schema correction, then HUMAN_REVIEW_REQUIRED.
+
+### simple-website-builder v1
+
+The ONE visual owner producing `site-bundle/1` (four pages + shared site.css/site.js) from the frozen Blueprint + immutable Business Facts + Accepted Images + form contract. Reference screenshots remain visible as visual ground truth. IMG:{slotId} placeholder convention identical to legacy assembly.
+
+### simple-visual-qa v1
+
+One multimodal comparative judgement (Reference vs Candidate, desktop + mobile): nine 0–100 scores plus AT MOST 5 impact-ranked findings that constitute the entire repair brief. Content replacement is explicitly not penalizable.
+
+### simple-site-repair v1
+
+The ONE semantic repair (max one call per Build): holistic edit of HTML/CSS/JS against the combined qa-package, with the preservation set (Business Facts, contact details, form contract, Accepted Image identities, Blueprint direction) frozen.
+
+
 ## Mandatory stage-specific reconciliation
 
 ### Reference Analyzer v3

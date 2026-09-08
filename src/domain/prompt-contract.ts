@@ -36,7 +36,13 @@ export type PromptStageKey =
   | "qa-a-confirmation"
   | "qa-b-confirmation"
   | "release-blocker-fix"
-  | "realization-repair";
+  | "realization-repair"
+  // Experiment branch only (experiment/simplified-design-pipeline): the
+  // SIMPLE design pipeline's four stages. Never invoked by the legacy chain.
+  | "simple-design-blueprint"
+  | "simple-website-builder"
+  | "simple-visual-qa"
+  | "simple-site-repair";
 
 export const PROMPT_MANIFEST: Record<PromptStageKey, PromptManifestEntry> = {
   "reference-analyzer": {
@@ -101,6 +107,27 @@ export const PROMPT_MANIFEST: Record<PromptStageKey, PromptManifestEntry> = {
     promptId: "realization-repair",
     promptVersion: "v1",
     bodyFile: "12-realization-repair-v1.md",
+  },
+  // ── SIMPLE design pipeline (experiment branch only) ─────────────────────
+  "simple-design-blueprint": {
+    promptId: "simple-design-blueprint",
+    promptVersion: "v1",
+    bodyFile: "simple/01-design-blueprint.md",
+  },
+  "simple-website-builder": {
+    promptId: "simple-website-builder",
+    promptVersion: "v1",
+    bodyFile: "simple/02-website-builder.md",
+  },
+  "simple-visual-qa": {
+    promptId: "simple-visual-qa",
+    promptVersion: "v1",
+    bodyFile: "simple/03-visual-qa.md",
+  },
+  "simple-site-repair": {
+    promptId: "simple-site-repair",
+    promptVersion: "v1",
+    bodyFile: "simple/04-site-repair.md",
   },
 };
 

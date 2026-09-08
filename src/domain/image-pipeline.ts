@@ -455,6 +455,12 @@ export interface RunImageGenerationInput {
   provider: ImageGenerationProvider;
   generate?: RawAiGenerate;
   expandToTarget?: boolean;
+  /** SIMPLE pipeline only (experiment branch): pre-derived prompt records —
+   *  the Design Blueprint itself is the prompt authority, so the
+   *  kie-image-prompt-generator LLM stage is skipped. Legacy callers omit
+   *  this and get the unchanged prompt-stage behavior. Records must cover
+   *  every slot id. */
+  promptRecords?: ImagePromptRecord[];
 }
 
 export interface ImageGenerationResult {

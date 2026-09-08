@@ -53,6 +53,13 @@ export interface Env {
   // provider failover must keep serving this exact model.
   LLM_MODEL?: string;
 
+  // EXPERIMENT BRANCH ONLY (experiment/simplified-design-pipeline): internal
+  // A/B selector for the design pipeline. "simple_blueprint_v1" routes Builds
+  // through src/simple-design/ (Design Blueprint → Website Builder → QA →
+  // ONE Repair); "legacy_v2" keeps the canonical chain. Never exposed in
+  // onboarding; the business-facing Build Mode remains REFERENCE_BOUND.
+  DESIGN_PIPELINE_VERSION?: string;
+
   // OpenRouter leg (operator decision 2026-09-02): optional — ZAI is primary
   // and the Cloudflare AI Gateway is the working fallback; provider chains
   // are key-driven, so an absent key skips the OpenRouter leg without error.

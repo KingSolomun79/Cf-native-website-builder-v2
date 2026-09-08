@@ -305,7 +305,8 @@ interface TrustLabel {
 // Words the Business Facts vouch for (lowercased). Any fact string contributes
 // its words: a supplied partner/customer name in the facts is therefore
 // permitted explicitly (issue #48 acceptance #3).
-function factVocabulary(facts: BusinessFacts | undefined): Set<string> {
+// Exported for the SIMPLE design pipeline's deterministic truth lint.
+export function factVocabulary(facts: BusinessFacts | undefined): Set<string> {
   const words = new Set<string>(["wazibiz"]);
   if (!facts) return words;
   const strings = [
@@ -605,7 +606,9 @@ function stripHtml(html: string): string {
   return html.replace(/<[^>]+>/g, " ").replace(/&[a-z]+;/gi, " ").replace(/\s+/g, " ").trim();
 }
 
-const UNSUPPORTED_FACT_PATTERNS: Array<{ id: string; pattern: RegExp }> = [
+// Exported for the SIMPLE design pipeline's deterministic truth lint
+// (src/simple-design/bundle-qa.ts) — same zero-tolerance patterns, one copy.
+export const UNSUPPORTED_FACT_PATTERNS: Array<{ id: string; pattern: RegExp }> = [
   { id: "FABRICATED_AWARD", pattern: /\b(award|winner|winning|prize|certified|certification|accredited)\b/i },
   { id: "FABRICATED_SOCIAL_PROOF", pattern: /\b\d+\s?\+?\s?(clients|customers|projects|reviews|testimonials|jobs)\b/i },
   { id: "FABRICATED_EXPERIENCE", pattern: /\b\d+\s?years?\s(of\s)?(experience|in business|serving)\b/i },

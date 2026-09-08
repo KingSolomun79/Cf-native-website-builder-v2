@@ -123,6 +123,11 @@
     // OpenRouter leg stays coded but dormant without OPENROUTER_API_KEY.
     "LLM_MODEL": "glm-5.3-flash",
     "PRIMARY_PROVIDER": "zhipu",
+    // EXPERIMENT BRANCH ONLY (experiment/simplified-design-pipeline): default
+    // the A/B selector to the SIMPLE design pipeline on this branch. Flip to
+    // "legacy_v2" for comparison runs. NEVER deploy this branch to production
+    // (experiment spec sections 74-75).
+    "DESIGN_PIPELINE_VERSION": "simple_blueprint_v1",
     "VISION_PRIMARY_PROVIDER": "zhipu",
     "VISION_FALLBACK_PROVIDER": "ai-gateway",
     "VISION_REQUEST_TIMEOUT_MS": "120000",

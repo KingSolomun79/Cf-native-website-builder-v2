@@ -128,7 +128,20 @@ export async function runImageGenerationDurable(
 
   // The LLM prompt-records stage is its own short durable step. Serializable
   // array result — step outputs must survive engine serialization.
-  const records = await seams.stepDo(`pipeline: image prompts (v${input.buildVersionNumber})`, async () => {
+  // SIMPLE pipeline exception (experiment branch): when pre-derived prompt
+  // records are supplied (the Design Blueprint is the prompt authority, spec
+  // section 21), the kie-image-prompt-generator LLM stage is skipped. Every
+  // slot must be covered; otherwise the legacy stage runs unchanged.
+  const records = input.promptRecords
+    ? await seams.stepDo(`pipeline: image prompts (v${input.buildVersionNumber})`, async () => {
+        const provided = new Map(input.promptRecords!.map((record) => [record.slotId, record]));
+        const missing = slots.filter((slot) => !provided.has(slot.id));
+        if (missing.length > 0) {
+          throw new Error(`pre-derived image prompt records missing for slots: ${missing.map((slot) => slot.id).join(", ")}`);
+        }
+        return slots.map((slot) => provided.get(slot.id)!);
+      })
+    : await seams.stepDo(`pipeline: image prompts (v${input.buildVersionNumber})`, async () => {
     const promptRun = await runSchemaValidatedAiStage<ImagePromptRecordsShape>(env, {
       stage: "kie-image-prompt-generator",
       schema: ImagePromptRecordsSchema,
