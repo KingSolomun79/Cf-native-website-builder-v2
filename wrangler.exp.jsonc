@@ -81,7 +81,7 @@
     "PUBLIC_APP_URL": "https://cf-website-factory-sandbox.wazibizwebsites.workers.dev",
     "WAZIBIZ_SENDER_EMAIL": "notifications@wazibiz.ke",
     "KIE_API_URL": "https://api.kie.ai",
-    "KIE_MODEL": "z-image",
+    "KIE_MODEL": "nano-banana-2-lite",
     "KIE_POLL_INTERVAL_MS": "30000",
     "KIE_ATTEMPT_TIMEOUT_MS": "900000",
     "ZHIPU_API_URL": "https://api.z.ai/api/coding/paas/v4",

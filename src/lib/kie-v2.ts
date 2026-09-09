@@ -29,6 +29,129 @@ export const KIE_MAX_PROMPT_CHARS = 1000;
 const MAX_PROMPT_CHARS = KIE_MAX_PROMPT_CHARS;
 const CREATE_MAX_ATTEMPTS = 3;
 
+// ── Nano Banana 2 Lite (operator GO, 2026-09-09) ────────────────────────────
+// SIMPLE photographic image model substitution: z-image → nano-banana-2-lite.
+// Implemented against the CURRENT KIE Nano Banana 2 Lite API reference —
+// never guessed from the z-image adapter:
+//   API reference: https://docs.kie.ai/cn/market/google/nano-banana-2-lite
+//   Product/model: https://kie.ai/nano-banana-2-lite
+//   POST /api/v1/jobs/createTask, model = "nano-banana-2-lite",
+//   input.prompt (string, max 20000 chars), input.aspect_ratio (required,
+//   enum below, default "auto"), input.image_urls (optional, max 10 — for
+//   text-to-image this workflow omits it). Authentication/jobs envelope and
+//   the /api/v1/jobs/recordInfo status lifecycle are shared KIE jobs-API
+//   surfaces, reused unchanged.
+export const NANO_BANANA_MODEL_ID = "nano-banana-2-lite";
+export const NANO_BANANA_MAX_PROMPT_CHARS = 20_000;
+export const NANO_BANANA_SUPPORTED_ASPECT_RATIOS: ReadonlySet<string> = new Set([
+  "1:1", "1:4", "1:8", "2:3", "3:2", "3:4", "4:1", "4:3", "4:5", "5:4", "8:1", "9:16", "16:9", "21:9", "auto",
+]);
+
+export interface ProviderAspectRatioResolution {
+  providerAspectRatio: string;
+  mappingReason: string;
+}
+
+// Deterministic composition→provider ratio bridge (GO §5). The Blueprint is
+// never mutated: where its compositionAspectRatio is natively supported it is
+// used DIRECTLY (no 21:9 → 16:9 downgrade); an unsupported composition ratio
+// (e.g. 5:3) falls to the frozen generationAspectRatio; a numeric-nearest
+// supported ratio is the deterministic last resort; no composition context at
+// all keeps the legacy orientation bridge value.
+export function resolveProviderAspectRatio(
+  compositionAspectRatio: string | undefined,
+  generationAspectRatio: string | undefined,
+  legacyRatio: string,
+): ProviderAspectRatioResolution {
+  const supported = NANO_BANANA_SUPPORTED_ASPECT_RATIOS;
+  if (compositionAspectRatio && supported.has(compositionAspectRatio)) {
+    return { providerAspectRatio: compositionAspectRatio, mappingReason: `composition ratio ${compositionAspectRatio} natively supported by ${NANO_BANANA_MODEL_ID}` };
+  }
+  if (compositionAspectRatio && generationAspectRatio && supported.has(generationAspectRatio)) {
+    return { providerAspectRatio: generationAspectRatio, mappingReason: `composition ratio ${compositionAspectRatio} unsupported; frozen generation ratio ${generationAspectRatio} used` };
+  }
+  if (compositionAspectRatio) {
+    const target = parseAspectRatioValue(compositionAspectRatio);
+    if (target !== null) {
+      let best: string | null = null;
+      let bestDistance = Number.POSITIVE_INFINITY;
+      for (const candidate of supported) {
+        const value = parseAspectRatioValue(candidate);
+        if (value === null) continue;
+        const distance = Math.abs(value - target);
+        if (distance < bestDistance) {
+          bestDistance = distance;
+          best = candidate;
+        }
+      }
+      if (best) {
+        return { providerAspectRatio: best, mappingReason: `composition ratio ${compositionAspectRatio} and generation ratio ${generationAspectRatio ?? "none"} unsupported; nearest supported ratio used` };
+      }
+    }
+  }
+  return { providerAspectRatio: legacyRatio, mappingReason: "no composition ratio available; legacy orientation bridge used" };
+}
+
+function parseAspectRatioValue(ratio: string): number | null {
+  const match = /^([0-9]{1,4}(?:\.[0-9]{1,2})?):([0-9]{1,4}(?:\.[0-9]{1,2})?)$/.exec(ratio);
+  if (!match) return null;
+  const width = Number.parseFloat(match[1]);
+  const height = Number.parseFloat(match[2]);
+  if (!Number.isFinite(width) || !Number.isFinite(height) || height === 0) return null;
+  return width / height;
+}
+
+// The full model-specific request decision for one image task, as a PURE
+// function: the adapter's createTask and the benchmark driver's provenance
+// output both render from this single source of truth, so recorded provenance
+// is byte-identical to what the provider received.
+export type KieImageRequestProfile = "nano-banana-2-lite" | "legacy-z-image";
+
+export interface KieImageRequestPlan {
+  model: string;
+  profile: KieImageRequestProfile;
+  prompt: string;
+  blueprintPrompt: string;
+  screenSafeAdaptationApplied: boolean;
+  matchedScreenTerms: string[];
+  compositionAspectRatio: string | null;
+  generationAspectRatio: string | null;
+  providerAspectRatio: string;
+  mappingReason: string;
+}
+
+export function planKieImageRequest(task: ResolvedSlotTask, model: string): KieImageRequestPlan {
+  if (model === NANO_BANANA_MODEL_ID) {
+    const ratio = resolveProviderAspectRatio(task.compositionAspectRatio, task.generationAspectRatio, task.aspectRatio);
+    const adapted = buildScreenSafePhotoPrompt(task.promptText, ratio.providerAspectRatio, NANO_BANANA_MAX_PROMPT_CHARS);
+    return {
+      model,
+      profile: "nano-banana-2-lite",
+      prompt: adapted.prompt,
+      blueprintPrompt: adapted.blueprintPrompt,
+      screenSafeAdaptationApplied: adapted.screenSafeAdaptationApplied,
+      matchedScreenTerms: adapted.matchedScreenTerms,
+      compositionAspectRatio: task.compositionAspectRatio ?? null,
+      generationAspectRatio: task.generationAspectRatio ?? null,
+      providerAspectRatio: ratio.providerAspectRatio,
+      mappingReason: ratio.mappingReason,
+    };
+  }
+  const adapted = buildScreenSafePhotoPrompt(task.promptText, task.aspectRatio);
+  return {
+    model,
+    profile: "legacy-z-image",
+    prompt: adapted.prompt,
+    blueprintPrompt: adapted.blueprintPrompt,
+    screenSafeAdaptationApplied: adapted.screenSafeAdaptationApplied,
+    matchedScreenTerms: adapted.matchedScreenTerms,
+    compositionAspectRatio: task.compositionAspectRatio ?? null,
+    generationAspectRatio: task.generationAspectRatio ?? null,
+    providerAspectRatio: task.aspectRatio,
+    mappingReason: "legacy orientation bridge",
+  };
+}
+
 // Text-safe photography policy (benchmark hardening, Phase 3 finding: KIE
 // photographs baked in fake dashboards/analytics UI/pseudo-text). Applied
 // deterministically at the KIE image-request boundary to EVERY photographic
@@ -131,12 +254,13 @@ export interface ScreenSafePhotoPrompt {
 
 // Pure prompt assembly so tests can prove the screen-free adaptation and the
 // binding clause survive any brief (including briefs that demand screens)
-// within the 1000-char cap.
-export function buildScreenSafePhotoPrompt(brief: string, aspectRatio: string): ScreenSafePhotoPrompt {
+// within the model's documented prompt cap (z-image: 1000; nano-banana-2-lite:
+// 20000).
+export function buildScreenSafePhotoPrompt(brief: string, aspectRatio: string, maxPromptChars: number = MAX_PROMPT_CHARS): ScreenSafePhotoPrompt {
   const adaptation = adaptImageSceneToScreenFree(brief);
   const head = `Create one natural editorial photograph for a website. ${SCREEN_FREE_PHOTO_REQUIREMENT} Aspect ratio: ${aspectRatio}.`;
   const tail = ` ${TEXT_SAFE_PHOTO_NEGATIVE}.`;
-  const budget = MAX_PROMPT_CHARS - head.length - tail.length - 1;
+  const budget = maxPromptChars - head.length - tail.length - 1;
   const fitted =
     adaptation.effectiveBrief.length > budget
       ? `${adaptation.effectiveBrief.slice(0, Math.max(0, budget - 3))}...`
@@ -166,7 +290,25 @@ interface KieTaskRecord {
     resultJson?: string;
     failMsg?: string;
     charge?: number;
+    creditsConsumed?: number;
   };
+}
+
+// Model-specific createTask body, decided by documented contract — never
+// guessed from the previous adapter:
+//   nano-banana-2-lite: { model, callBackUrl, input: { prompt, aspect_ratio } }
+//   — image_urls is optional and omitted for pure text-to-image; the z-image
+//   nsfw_checker flag is NOT part of the Nano Banana 2 Lite contract.
+//   z-image (legacy): unchanged historical shape.
+export function buildKieCreateTaskRequestBody(
+  plan: KieImageRequestPlan,
+  callBackUrl: string
+): { model: string; callBackUrl: string; input: Record<string, unknown> } {
+  const input: Record<string, unknown> =
+    plan.profile === "nano-banana-2-lite"
+      ? { prompt: plan.prompt, aspect_ratio: plan.providerAspectRatio }
+      : { prompt: plan.prompt, aspect_ratio: plan.providerAspectRatio, nsfw_checker: true };
+  return { model: plan.model, callBackUrl, input };
 }
 
 export class KieV2ImageProvider implements ImageGenerationProvider {
@@ -190,21 +332,31 @@ export class KieV2ImageProvider implements ImageGenerationProvider {
   }
 
   async createTask(task: ResolvedSlotTask): Promise<{ taskId: string; costUsd: number }> {
-    // The SCREEN-FREE clause leads the prompt and can never be truncated away
-    // by a long slot brief (the brief fills whatever budget remains). Prompt
-    // provenance (blueprint vs effective) is logged per attempt for the
-    // benchmark evidence trail — hashes only, never secrets.
-    const adapted = buildScreenSafePhotoPrompt(task.promptText, task.aspectRatio);
-    const blueprintPromptHash = await sha256Hex(adapted.blueprintPrompt);
-    const effectivePromptHash = await sha256Hex(adapted.prompt);
+    // The request (screen-free prompt, provider aspect ratio, payload shape)
+    // is decided by the pure planner shared with the benchmark provenance
+    // output. Provenance (blueprint vs effective prompt hashes, ratio
+    // mapping) is logged per attempt for the benchmark evidence trail —
+    // hashes only, never secrets.
+    const plan = planKieImageRequest(task, this.env.KIE_MODEL);
+    const blueprintPromptHash = await sha256Hex(plan.blueprintPrompt);
+    const effectivePromptHash = await sha256Hex(plan.prompt);
     console.info("kie_screen_safe_provenance", {
       slotId: task.slotId,
-      screenSafeAdaptationApplied: adapted.screenSafeAdaptationApplied,
-      matchedScreenTerms: adapted.matchedScreenTerms,
+      model: plan.model,
+      profile: plan.profile,
+      screenSafeAdaptationApplied: plan.screenSafeAdaptationApplied,
+      matchedScreenTerms: plan.matchedScreenTerms,
+      compositionAspectRatio: plan.compositionAspectRatio,
+      generationAspectRatio: plan.generationAspectRatio,
+      providerAspectRatio: plan.providerAspectRatio,
+      mappingReason: plan.mappingReason,
       blueprintPromptHash,
       effectivePromptHash,
     });
-    const assembledPrompt = adapted.prompt;
+
+    // Payload shapes are model-specific and documented — see
+    // buildKieCreateTaskRequestBody (the pure builder shared with tests).
+    const requestBody = buildKieCreateTaskRequestBody(plan, `${this.env.PUBLIC_APP_URL}/api/internal/kie-callback`);
 
     // KIE rate-limits bursts (live evidence, issue #30: 429 "call frequency
     // too high"); back off and retry the same creation.
@@ -218,15 +370,7 @@ export class KieV2ImageProvider implements ImageGenerationProvider {
             "Content-Type": "application/json",
             Authorization: `Bearer ${this.env.KIE_API_KEY}`,
           },
-          body: JSON.stringify({
-            model: this.env.KIE_MODEL,
-            callBackUrl: `${this.env.PUBLIC_APP_URL}/api/internal/kie-callback`,
-            input: {
-              prompt: assembledPrompt,
-              aspect_ratio: task.aspectRatio,
-              nsfw_checker: true,
-            },
-          }),
+          body: JSON.stringify(requestBody),
         });
         result = (await response.json()) as { code: number; msg?: string; data?: { taskId?: string } };
       } catch (error) {
@@ -258,6 +402,16 @@ export class KieV2ImageProvider implements ImageGenerationProvider {
   // them; a provider job still running is the normal 'pending' state, never
   // an error (Workflow retries are for failures — provider waiting is
   // Workflow control flow).
+  // Cost reconciliation: KIE documents `creditsConsumed` on the unified
+  // task record (z-image surfaced `charge`); either field is logged when
+  // present. The attempt ledger keeps the configured estimate.
+  private logTaskCostIfPresent(taskId: string, record: KieTaskRecord): void {
+    const credits = record.data?.creditsConsumed ?? record.data?.charge;
+    if (typeof credits === "number" && credits > 0) {
+      console.info("kie_task_charge", { taskId, charge: credits });
+    }
+  }
+
   async checkResult(taskId: string): Promise<ImageProviderFetchResult> {
     let record: KieTaskRecord;
     try {
@@ -272,9 +426,7 @@ export class KieV2ImageProvider implements ImageGenerationProvider {
         const parsed = JSON.parse(record.data?.resultJson ?? "{}") as { resultUrls?: string[] };
         const temporaryUrl = parsed.resultUrls?.[0];
         if (!temporaryUrl) return { status: "failed" };
-        if (typeof record.data?.charge === "number" && record.data.charge > 0) {
-          console.info("kie_task_charge", { taskId, charge: record.data.charge });
-        }
+        this.logTaskCostIfPresent(taskId, record);
         const bytes = await this.download(temporaryUrl);
         return bytes ? { status: "complete", bytes, temporaryUrl } : { status: "failed" };
       } catch {
@@ -310,9 +462,7 @@ export class KieV2ImageProvider implements ImageGenerationProvider {
           const parsed = JSON.parse(record.data?.resultJson ?? "{}") as { resultUrls?: string[] };
           const temporaryUrl = parsed.resultUrls?.[0];
           if (!temporaryUrl) return { status: "failed" };
-          if (typeof record.data?.charge === "number" && record.data.charge > 0) {
-            console.info("kie_task_charge", { taskId, charge: record.data.charge });
-          }
+          this.logTaskCostIfPresent(taskId, record);
           const bytes = await this.download(temporaryUrl);
           return bytes ? { status: "complete", bytes, temporaryUrl } : { status: "failed" };
         } catch {

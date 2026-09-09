@@ -513,6 +513,10 @@ export function blueprintSlotsToImageSlots(blueprint: DesignBlueprint): ImageSlo
     blueprintRole: `simple-${slot.section || slot.page}`,
     priority: slot.priority,
     orientation: ORIENTATION_BY_GENERATION_ASPECT[slot.generationAspectRatio],
+    // Both blueprint ratios travel with the slot as provenance; the provider
+    // adapter maps them onto the selected model's supported request ratios.
+    compositionAspectRatio: slot.compositionAspectRatio,
+    generationAspectRatio: slot.generationAspectRatio,
     negativeSpaceForText:
       /text overlay|negative space|dark enough for|space for (a )?(headline|text)/i.test(
         `${slot.compositionDirection ?? ""} ${slot.kiePrompt}`

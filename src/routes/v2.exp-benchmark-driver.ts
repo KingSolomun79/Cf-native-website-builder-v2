@@ -39,7 +39,8 @@ import { runReferenceIntake, getFrozenReferenceEvidence } from "../domain/refere
 import { putObject } from "../lib/assets";
 import { getAcceptedImageMap, type ImageSpendReport, type SlotGenerationOutcome } from "../domain/image-pipeline";
 import { runImageGenerationDurable } from "../domain/image-orchestration";
-import { KieV2ImageProvider } from "../lib/kie-v2";
+import { KieV2ImageProvider, planKieImageRequest } from "../lib/kie-v2";
+import { sha256Hex } from "../lib/crypto";
 import { runSimpleBuildPipeline } from "../simple-design/pipeline";
 import { buildAssembledCandidate, deployPreview, freezeAssembledCandidate, AssemblyPreflightError } from "../domain/assembly";
 import { storeBuildStageArtifactIdempotent, getBuildStageArtifact } from "../domain/stage-artifacts";
@@ -70,7 +71,7 @@ interface DriverFixtureImage {
 }
 
 interface DriverBody {
-  op: "health" | "put-fixture" | "finch-builder" | "builder-diagnostic" | "assemble-stored" | "capture" | "blueprint" | "artifact" | "probe" | "fetch-probe" | "sql-probe" | "general-api-canary" | "stream-canary-text" | "stream-canary-vision" | "schema-canary" | "stage-runs" | "simple-kie" | "simple-full-run" | "simple-rerender-qa" | "simple-hardening-run" | "simple-final-run";
+  op: "health" | "put-fixture" | "finch-builder" | "builder-diagnostic" | "assemble-stored" | "capture" | "blueprint" | "artifact" | "probe" | "fetch-probe" | "sql-probe" | "general-api-canary" | "stream-canary-text" | "stream-canary-vision" | "schema-canary" | "stage-runs" | "simple-kie" | "simple-kie-validation" | "simple-full-run" | "simple-rerender-qa" | "simple-hardening-run" | "simple-final-run";
   key?: string;
   base64?: string;
   facts?: BusinessFacts;
@@ -92,6 +93,8 @@ interface DriverBody {
   candidateMobileR2Key?: string;
   cause?: string;
   detail?: string;
+  inheritAcceptedImagesFromBuildVersionId?: string;
+  resumeBenchmarkVersionId?: string;
 }
 
 function base64ToBytes(base64: string): Uint8Array {
@@ -245,6 +248,15 @@ export async function expBenchmarkDriver(c: Context<{ Bindings: Env }>): Promise
       // unresolved slots generate.
       case "simple-kie":
         return c.json(await runSimpleKie(c.env, body));
+
+      // NANO BANANA SUBSTITUTION benchmark (operator GO, 2026-09-09): the
+      // six-slot image validation — a FRESH Build Version on the frozen
+      // Build (frozen blueprint artifact reused byte-exact, never
+      // regenerated, no Builder), then the pipeline's EXACT image step so
+      // every slot gets a fresh provider attempt under the substituted
+      // image model.
+      case "simple-kie-validation":
+        return c.json(await runSimpleKieValidation(c.env, body));
 
       // Phase 3 (§7-23): the FULL sanctioned SIMPLE pipeline via
       // runSimpleBuildPipeline — capture/blueprint/KIE reuse makes this
@@ -1047,14 +1059,80 @@ async function runSimpleKie(env: Env, body: DriverBody) {
     buildId: body.buildId,
     buildVersionId: version.id,
     buildVersionNumber: version.versionNumber,
+    model: env.KIE_MODEL,
     plannedSlots: slots.map((slot) => slot.id),
     unresolvedSlots: unresolved.map((slot) => slot.id),
+    // Per-slot request provenance, recomputed from the SAME pure planner the
+    // adapter renders its provider request from — hashes are byte-identical
+    // to what the provider received (GO §13 evidence trail).
+    slotProvenance: await Promise.all(
+      blueprint.imagery.imageSlots.map(async (blueprintSlot) => {
+        const slot = slots.find((candidate) => candidate.id === blueprintSlot.id)!;
+        const record = blueprintSlotsToPromptRecords(blueprint).find((candidate) => candidate.slotId === blueprintSlot.id)!;
+        const plan = planKieImageRequest(
+          {
+            slotId: slot.id,
+            promptText: record.promptText,
+            aspectRatio: slot.orientation === "portrait" ? "9:16" : slot.orientation === "square" ? "1:1" : "16:9",
+            compositionAspectRatio: slot.compositionAspectRatio,
+            generationAspectRatio: slot.generationAspectRatio,
+          },
+          env.KIE_MODEL
+        );
+        return {
+          slotId: blueprintSlot.id,
+          model: plan.model,
+          profile: plan.profile,
+          compositionAspectRatio: plan.compositionAspectRatio,
+          generationAspectRatio: plan.generationAspectRatio,
+          providerAspectRatio: plan.providerAspectRatio,
+          mappingReason: plan.mappingReason,
+          screenSafeAdaptationApplied: plan.screenSafeAdaptationApplied,
+          matchedScreenTerms: plan.matchedScreenTerms,
+          blueprintPromptHash: await sha256Hex(plan.blueprintPrompt),
+          effectivePromptHash: await sha256Hex(plan.prompt),
+        };
+      })
+    ),
     outcomes,
     spendReport,
     attempts: attempts.results,
     acceptedImages: [...acceptedAfter].map(([slotId, entry]) => ({ slotId, r2Key: entry.r2Key })),
     acceptedCount: acceptedAfter.size,
     durationMs,
+  };
+}
+
+// NANO BANANA SUBSTITUTION image validation: a fresh Build Version on the
+// SAME frozen Build — the frozen blueprint artifact (source buildVersionId)
+// reused byte-exact, never regenerated — then the pipeline's exact image
+// step. No Builder, no QA, no repair: pure six-slot provider validation
+// under the substituted image model.
+async function runSimpleKieValidation(env: Env, body: DriverBody) {
+  if (!body.siteGenerationId || !body.buildId || !body.buildVersionId) {
+    throw new Error("siteGenerationId, buildId and buildVersionId (frozen blueprint source version) required");
+  }
+  const frozen = await getBuildStageArtifact<DesignBlueprint>(env, body.buildVersionId, "design_blueprint");
+  if (!frozen) throw new Error(`no frozen design_blueprint on source version ${body.buildVersionId}`);
+  const created = await createNextBuildVersion(env, {
+    buildId: body.buildId,
+    cause: body.cause ?? "nano_banana_image_validation",
+    detail: body.detail ?? "Nano Banana 2 Lite substitution: fresh six-slot KIE validation on the frozen blueprint",
+  });
+  await storeBuildStageArtifactIdempotent(env, {
+    buildId: body.buildId,
+    buildVersionId: created.buildVersionId,
+    siteGenerationId: body.siteGenerationId,
+    kind: "design_blueprint",
+    schemaVersion: "design-blueprint/1",
+    value: frozen.value,
+  });
+  const kie = await runSimpleKie(env, { ...body, buildVersionId: created.buildVersionId });
+  return {
+    sourceFrozenBlueprintVersionId: body.buildVersionId,
+    validationVersionId: created.buildVersionId,
+    validationVersionNumber: created.buildVersionNumber,
+    ...kie,
   };
 }
 
@@ -1250,12 +1328,34 @@ async function runSimpleHardeningRun(env: Env, body: DriverBody) {
   const startedAt = Date.now();
   const frozen = await getBuildStageArtifact<DesignBlueprint>(env, body.buildVersionId, "design_blueprint");
   if (!frozen) throw new Error(`no frozen design_blueprint on source version ${body.buildVersionId}`);
-  const created = await createNextBuildVersion(env, {
-    buildId: body.buildId,
-    cause: body.cause ?? "simple_hardening_benchmark",
-    detail: body.detail ??
-      "Final hardening benchmark: fresh KIE (text-safe policy) + fresh build on the frozen blueprint/reference/facts",
-  });
+  // Stream-drop resume: reuse THIS benchmark version instead of stacking a
+  // fresh one. REFUSED loudly unless it is still the build's latest version —
+  // a newer version means a repair already chained past it, and resuming
+  // would re-run the builder on the repair version (the disclosed
+  // resume-chaining hazard). That state requires an operator decision.
+  let created: { buildVersionId: string; buildVersionNumber: number };
+  if (body.resumeBenchmarkVersionId) {
+    const row = await env.DB.prepare(
+      "SELECT id, version_number FROM build_versions WHERE id = ?1 AND build_id = ?2"
+    )
+      .bind(body.resumeBenchmarkVersionId, body.buildId)
+      .first<{ id: string; version_number: number }>();
+    if (!row) throw new Error(`resumeBenchmarkVersionId ${body.resumeBenchmarkVersionId} not found on build ${body.buildId}`);
+    const latest = await latestVersion(env, body.buildId);
+    if (latest.id !== row.id) {
+      throw new Error(
+        `resume refused: benchmark version ${row.id} (v${row.version_number}) is no longer latest (latest ${latest.id} v${latest.versionNumber}) — a newer version exists; operator decision required`
+      );
+    }
+    created = { buildVersionId: row.id, buildVersionNumber: row.version_number };
+  } else {
+    created = await createNextBuildVersion(env, {
+      buildId: body.buildId,
+      cause: body.cause ?? "simple_hardening_benchmark",
+      detail: body.detail ??
+        "Final hardening benchmark: fresh KIE (text-safe policy) + fresh build on the frozen blueprint/reference/facts",
+    });
+  }
   await storeBuildStageArtifactIdempotent(env, {
     buildId: body.buildId,
     buildVersionId: created.buildVersionId,
@@ -1264,6 +1364,24 @@ async function runSimpleHardeningRun(env: Env, body: DriverBody) {
     schemaVersion: "design-blueprint/1",
     value: frozen.value,
   });
+  // NANO BANANA SUBSTITUTION (operator GO, 2026-09-09 §18): the final website
+  // benchmark runs on EXACTLY the Accepted Images the six-slot validation
+  // approved — the validated attempts are inherited onto the benchmark
+  // version (idempotent copy of the immutable accepted_images rows), so the
+  // pipeline's image step finds no unresolved slots and issues NO fresh KIE
+  // calls. No validated image is regenerated or replaced.
+  let inheritedAcceptedImages = 0;
+  if (body.inheritAcceptedImagesFromBuildVersionId) {
+    const inserted = await env.DB.prepare(
+      `INSERT INTO accepted_images (build_version_id, slot_id, attempt_id, r2_key, accepted_at)
+       SELECT ?1, slot_id, attempt_id, r2_key, datetime('now')
+       FROM accepted_images WHERE build_version_id = ?2
+       ON CONFLICT (build_version_id, slot_id) DO NOTHING`
+    )
+      .bind(created.buildVersionId, body.inheritAcceptedImagesFromBuildVersionId)
+      .run();
+    inheritedAcceptedImages = inserted.meta.changes ?? 0;
+  }
   const outcome = await runSimpleBuildPipeline(env, {
     siteGenerationId: body.siteGenerationId,
     buildId: body.buildId,
@@ -1295,6 +1413,7 @@ async function runSimpleHardeningRun(env: Env, body: DriverBody) {
     sourceFrozenBlueprintVersionId: body.buildVersionId,
     benchmarkVersionId: created.buildVersionId,
     benchmarkVersionNumber: created.buildVersionNumber,
+    inheritedAcceptedImages,
     outcome,
     versions: versions.results,
     artifacts: artifacts.results,

@@ -507,6 +507,10 @@ async function submitImageAttemptSingleFlight(env: Env, ctx: AttemptContext): Pr
         slotId: ctx.slot.id,
         promptText: ctx.record.promptText,
         aspectRatio: aspectRatioFor(ctx.slot),
+        // Blueprint provenance ratios pass through when present; the provider
+        // adapter owns the composition→provider mapping decision.
+        ...(ctx.slot.compositionAspectRatio ? { compositionAspectRatio: ctx.slot.compositionAspectRatio } : {}),
+        ...(ctx.slot.generationAspectRatio ? { generationAspectRatio: ctx.slot.generationAspectRatio } : {}),
       });
     } catch (error) {
       // Bounded failed attempt (submit-time failure never polls): normal

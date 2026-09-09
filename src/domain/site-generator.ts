@@ -71,6 +71,12 @@ export const ImageSlotSchema = Type.Object(
     priority: Type.Union([Type.Literal("CRITICAL"), Type.Literal("HIGH"), Type.Literal("NORMAL")]),
     orientation: Type.Union([Type.Literal("landscape"), Type.Literal("portrait"), Type.Literal("square")]),
     negativeSpaceForText: Type.Boolean(),
+    // Blueprint provenance ratios (SIMPLE blueprint bridge): the design
+    // observation and the frozen provider-generation ratio travel with the
+    // slot so the provider adapter can map them deterministically. Optional —
+    // non-blueprint image plans never set them.
+    compositionAspectRatio: Type.Optional(Type.String({ minLength: 2, maxLength: 16 })),
+    generationAspectRatio: Type.Optional(Type.String({ minLength: 2, maxLength: 16 })),
   },
   { additionalProperties: false }
 );

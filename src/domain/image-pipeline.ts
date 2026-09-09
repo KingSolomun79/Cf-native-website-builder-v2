@@ -123,6 +123,12 @@ export interface ResolvedSlotTask {
   slotId: string;
   promptText: string;
   aspectRatio: string;
+  /** Blueprint provenance ratios (SIMPLE blueprint bridge). The provider
+   *  adapter decides the actual request ratio from them (native support vs
+   *  frozen generation ratio vs legacy orientation bridge); optional so
+   *  non-blueprint pipelines are unaffected. */
+  compositionAspectRatio?: string;
+  generationAspectRatio?: string;
 }
 
 export type ImageProviderFetchResult =
