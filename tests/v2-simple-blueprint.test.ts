@@ -6,7 +6,9 @@ import { describe, expect, it } from "vitest";
 import { env as providedEnv } from "cloudflare:test";
 import type { Env } from "../src/env.d";
 import {
+  DESIGN_BLUEPRINT_NATIVE_JSON_SCHEMA,
   DESIGN_BLUEPRINT_SCHEMA_VERSION,
+  DesignBlueprintSchema,
   evaluateBlueprintQualityGate,
   blueprintSlotsToImageSlots,
   blueprintSlotsToPromptRecords,
@@ -15,6 +17,8 @@ import {
 import { renderDesignBlueprintMarkdown } from "../src/simple-design/render-blueprint";
 import { resolveDesignPipelineVersion, DEFAULT_DESIGN_PIPELINE_VERSION } from "../src/simple-design/pipeline";
 import { composeStagePrompt, PROMPT_MANIFEST } from "../src/domain/prompt-contract";
+import { runSchemaValidatedAiStage } from "../src/domain/ai-boundary";
+import { createInitialBuild, startSiteGeneration } from "../src/domain/lifecycle";
 import { BUILD_LIFECYCLE_STATES } from "../src/domain/lifecycle-schema";
 import { FINCH_KNOWN_GOOD_BLUEPRINT } from "./_generated-simple-finch";
 
@@ -66,6 +70,93 @@ describe("SIMPLE design blueprint contract", () => {
     const gate = evaluateBlueprintQualityGate(validated.value);
     expect(gate.passed).toBe(false);
     expect(gate.failures.join("; ")).toContain("duplicate image slot id");
+  });
+});
+
+describe("design-blueprint/1 schema-convergence amendments (brief sections 3-12)", () => {
+  const clone = () => JSON.parse(JSON.stringify(FINCH_KNOWN_GOOD_BLUEPRINT));
+
+  it("display maxWidthCh narrow measures are valid — role-aware floors replace the global min 20 (§8)", () => {
+    const blueprint = clone();
+    blueprint.tokens.typography.scale[0].maxWidthCh = 12; // "Hero H1" — display-class narrow measure
+    const validated = validateDesignBlueprint(blueprint);
+    expect(validated.valid).toBe(true);
+  });
+
+  it("body keeps a modest floor; display below 8ch and body below 20ch fail the role check", () => {
+    const narrowDisplay = clone();
+    narrowDisplay.tokens.typography.scale[0].maxWidthCh = 6; // display/hero floor is 8
+    expect(validateDesignBlueprint(narrowDisplay).valid).toBe(false);
+
+    const narrowBody = clone();
+    const bodyRow = narrowBody.tokens.typography.scale.find((row: { element: string }) => /body/i.test(row.element));
+    bodyRow.maxWidthCh = 12; // body/reading floor is 20
+    const bodyResult = validateDesignBlueprint(narrowBody);
+    expect(bodyResult.valid).toBe(false);
+    if (!bodyResult.valid) expect(bodyResult.errors).toContain("body/reading floor");
+  });
+
+  it("body width stays reasonable and UI measures may be small (§8)", () => {
+    const blueprint = clone();
+    const bodyRow = blueprint.tokens.typography.scale.find((row: { element: string }) => /body/i.test(row.element));
+    bodyRow.maxWidthCh = 65; // sensible reading measure
+    expect(validateDesignBlueprint(blueprint).valid).toBe(true);
+    const uiRow = clone();
+    uiRow.tokens.typography.scale[5].maxWidthCh = 6; // kickers/labels — small UI measure
+    expect(validateDesignBlueprint(uiRow).valid).toBe(true);
+  });
+
+  it("composition ratio is separate from the KIE generation ratio (§9)", () => {
+    const blueprint = clone();
+    blueprint.imagery.imageSlots[0].compositionAspectRatio = "21:9"; // design truth
+    blueprint.imagery.imageSlots[0].generationAspectRatio = "16:9"; // provider request
+    blueprint.imagery.imageSlots[0].cropStrategy = "subject-left";
+    const validated = validateDesignBlueprint(blueprint);
+    expect(validated.valid).toBe(true);
+    if (!validated.valid) return;
+    // Bridge orientation follows the GENERATION ratio.
+    const slots = blueprintSlotsToImageSlots(validated.value);
+    expect(slots[0].orientation).toBe("landscape");
+    // Non-integer composition ratios are legal design observations.
+    const decimal = clone();
+    decimal.imagery.imageSlots[0].compositionAspectRatio = "2.2:1";
+    expect(validateDesignBlueprint(decimal).valid).toBe(true);
+  });
+
+  it("custom typed color roles are valid — roles, not fixed property names (§10)", () => {
+    const blueprint = clone();
+    blueprint.tokens.colors = [
+      { role: "paper-ground", value: "#F4EFE6", usage: "warm paper page ground" },
+      { role: "forest-ink", value: "#17321F", usage: "primary ink mass" },
+      { role: "violet-accent", value: "#7C3AED", usage: "links and active states" },
+    ];
+    const validated = validateDesignBlueprint(blueprint);
+    expect(validated.valid).toBe(true);
+  });
+
+  it("color list below three roles is rejected — a system, not a dump (§10)", () => {
+    const blueprint = clone();
+    blueprint.tokens.colors = blueprint.tokens.colors.slice(0, 2);
+    expect(validateDesignBlueprint(blueprint).valid).toBe(false);
+  });
+
+  it("unknown fixed schema fields are still rejected (additionalProperties:false, §12)", () => {
+    const extraTopLevel = clone();
+    extraTopLevel.modelNotes = "invented field";
+    expect(validateDesignBlueprint(extraTopLevel).valid).toBe(false);
+
+    const extraSlotField = clone();
+    extraSlotField.imagery.imageSlots[0].seoBoost = true;
+    expect(validateDesignBlueprint(extraSlotField).valid).toBe(false);
+  });
+
+  it("Business Facts cannot enter the blueprint — the schema has no place for them (§6)", () => {
+    const withFacts = clone();
+    withFacts.businessFactSheet = { businessName: "RankForge" };
+    const result = validateDesignBlueprint(withFacts);
+    expect(result.valid).toBe(false);
+    if (!result.valid) expect(result.errors).toContain("businessFactSheet");
+    expect(DESIGN_BLUEPRINT_NATIVE_JSON_SCHEMA.name).toBe("design-blueprint");
   });
 });
 
@@ -147,9 +238,10 @@ describe("SIMPLE prompt contract registration", () => {
       "simple-site-repair",
     ] as const) {
       const composed = composeStagePrompt(stage);
-      // simple-design-blueprint is v2 (transport iteration, brief §20: output
-      // size discipline); the other three remain at their original v1.
-      expect(composed.promptVersion).toBe(stage === "simple-design-blueprint" ? "v2" : "v1");
+      // simple-design-blueprint is v3 (schema-convergence brief §13: native
+      // json_schema owns structure, the prompt keeps design intent); the
+      // other three remain at their original v1.
+      expect(composed.promptVersion).toBe(stage === "simple-design-blueprint" ? "v3" : "v1");
       expect(composed.systemPrompt).toContain("Retained detailed stage prompt body");
       expect(composed.systemPrompt.length).toBeGreaterThan(2000); // contract + body
     }
@@ -170,5 +262,62 @@ describe("SIMPLE prompt contract registration", () => {
 
   it("declares the artifact schema versions the pipeline stores", () => {
     expect(DESIGN_BLUEPRINT_SCHEMA_VERSION).toBe("design-blueprint/1");
+  });
+});
+
+describe("native json_schema boundary (schema-convergence brief sections 3/16/18)", () => {
+  it("native schema output requires no correction: one attempt, no prose output contract (§18)", async () => {
+    // Real scaffold: ai_stage_runs carries FKs to builds/build_versions.
+    const started = await startSiteGeneration(env, {
+      payload: {
+        buildMode: "REFERENCE_BOUND",
+        facts: {
+          businessName: "Schema Convergence Fixture",
+          contactEmail: "ops@schema-convergence.example",
+        },
+        reference: { screenshotR2Key: "references/simple/schema-convergence.png" },
+      },
+    });
+    const build = await createInitialBuild(env, { siteGenerationId: started.siteGenerationId });
+    const versionRow = await env.DB.prepare("SELECT id, version_number FROM build_versions WHERE build_id = ? ORDER BY version_number DESC LIMIT 1")
+      .bind(build.buildId)
+      .first<{ id: string; version_number: number }>();
+    expect(versionRow).not.toBeNull();
+    if (!versionRow) return;
+
+    const captured: Array<{ system: string; user: string }> = [];
+    const run = await runSchemaValidatedAiStage(env, {
+      stage: "simple-design-blueprint",
+      schema: DesignBlueprintSchema,
+      schemaVersion: DESIGN_BLUEPRINT_SCHEMA_VERSION,
+      userPrompt: "Produce the Design Blueprint (schema arrives via response_format).",
+      buildId: build.buildId,
+      siteGenerationId: started.siteGenerationId,
+      buildVersionId: versionRow.id,
+      buildVersionNumber: versionRow.version_number,
+      maxTokens: 100,
+      generate: async (system, user) => {
+        captured.push({ system, user });
+        return { content: JSON.stringify(FINCH_KNOWN_GOOD_BLUEPRINT), provider: "test", model: "test-model" };
+      },
+      nativeJsonSchema: true,
+    });
+    expect(run.attempts).toHaveLength(1);
+    expect(run.attempts[0].outcome).toBe("valid");
+    expect(captured).toHaveLength(1);
+    expect(captured[0].user).not.toContain("Output contract");
+    expect(captured[0].user).not.toContain("JSON Schema");
+  });
+
+  it("exposes a plain-JSON native schema payload for the Workers AI wrapper (§3)", () => {
+    const schema = DESIGN_BLUEPRINT_NATIVE_JSON_SCHEMA.schema as Record<string, unknown>;
+    expect(schema.type).toBe("object");
+    expect(schema.additionalProperties).toBe(false);
+    const properties = schema.properties as Record<string, unknown>;
+    expect(properties.businessFactsRef).toBeDefined();
+    expect(properties.imagery).toBeDefined();
+    // JSON-serializable with no TypeBox symbol leakage.
+    const round = JSON.parse(JSON.stringify(DESIGN_BLUEPRINT_NATIVE_JSON_SCHEMA));
+    expect(round).toEqual(DESIGN_BLUEPRINT_NATIVE_JSON_SCHEMA);
   });
 });

@@ -34,24 +34,15 @@ export function renderDesignBlueprintMarkdown(bp: DesignBlueprint): string {
     )
     .join("\n");
 
-  const colorRows = [
-    ["Ground", bp.tokens.colors.ground],
-    ["Ink / text", bp.tokens.colors.ink],
-    ...(bp.tokens.colors.textSecondary ? [["Secondary text", bp.tokens.colors.textSecondary]] : []),
-    ["Accent", bp.tokens.colors.accent],
-    ...(bp.tokens.colors.accentLight ? [["Accent (light)", bp.tokens.colors.accentLight]] : []),
-    ["Hairlines", bp.tokens.colors.hairline],
-    ...(bp.tokens.colors.hairlineOnDark ? [["Hairlines on dark", bp.tokens.colors.hairlineOnDark]] : []),
-    ...(bp.tokens.colors.error ? [["Error", bp.tokens.colors.error]] : []),
-  ]
-    .map(([role, value]) => `| ${role} | \`${value}\` |`)
+  const colorRows = bp.tokens.colors
+    .map((color) => `| ${color.role} | \`${color.value}\` | ${color.usage} |`)
     .join("\n");
 
   const slots = bp.imagery.imageSlots
     .map(
-      (slot) => `### \`${slot.id}\` — ${slot.page}${slot.section ? ` · ${slot.section}` : ""} · ${slot.priority} · ${slot.aspectRatio}
+      (slot) => `### \`${slot.id}\` — ${slot.page}${slot.section ? ` · ${slot.section}` : ""} · ${slot.priority} · composition ${slot.compositionAspectRatio} → generate ${slot.generationAspectRatio}
 - Subject: ${slot.subjectDirection}
-${slot.compositionDirection ? `- Composition: ${slot.compositionDirection}\n` : ""}${slot.lighting ? `- Lighting: ${slot.lighting}\n` : ""}${slot.palette ? `- Palette: ${slot.palette}\n` : ""}${slot.cropBehavior ? `- Crop: ${slot.cropBehavior}\n` : ""}- Alt: ${slot.altText}
+${slot.compositionDirection ? `- Composition: ${slot.compositionDirection}\n` : ""}${slot.cropStrategy ? `- Crop strategy: ${slot.cropStrategy}\n` : ""}${slot.lighting ? `- Lighting: ${slot.lighting}\n` : ""}${slot.palette ? `- Palette: ${slot.palette}\n` : ""}${slot.cropBehavior ? `- Crop: ${slot.cropBehavior}\n` : ""}- Alt: ${slot.altText}
 - KIE prompt: "${slot.kiePrompt}"
 - Avoid: ${slot.negativePrompt}`
     )
@@ -86,8 +77,8 @@ ${list(bp.designDna)}
 
 ### Color
 
-| Role | Value |
-|---|---|
+| Role | Value | Usage |
+|---|---|---|
 ${colorRows}
 
 ### Typography

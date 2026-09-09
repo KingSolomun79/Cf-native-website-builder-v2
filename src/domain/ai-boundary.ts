@@ -175,6 +175,13 @@ export interface RunSchemaValidatedAiStageOptions {
   maxTokens?: number;
   estimatedCostUsd?: number;
   generate?: RawAiGenerate;
+  /** Native transport-level structured output (schema-convergence brief §3):
+   *  the supplied `generate` seam already carries the JSON Schema in the
+   *  request's response_format, so the boundary must NOT duplicate it as
+   *  prompt prose ("Output contract") — the prompt explains intent, the
+   *  transport enforces structure. The ONE targeted structural repair stays
+   *  available for genuine residual errors. */
+  nativeJsonSchema?: boolean;
 }
 
 export async function runSchemaValidatedAiStage<T>(
@@ -220,12 +227,14 @@ export async function runSchemaValidatedAiStage<T>(
   const attempts: AiStageAttemptRecord[] = [];
   let accepted: { value: T; attempt: number; raw: RawAiGenerateResult } | null = null;
 
-  // The output shape is governed by the stage's versioned runtime schema; the
-  // boundary states it explicitly so the model's first answer already targets
-  // the right object shape (live evidence, issue #30: without it the model
-  // followed the legacy shape in the retained prompt body and needed the
-  // repair attempt on every stage).
-  const outputContract = `\n\n## Output contract\nReturn ONE JSON object that satisfies this JSON Schema exactly (no extra properties, every required property present, correct types). Do not wrap it in markdown or prose:\n${JSON.stringify(options.schema)}`;
+  // The output shape is governed by the stage's versioned runtime schema.
+  // Default mode: state it explicitly in prose so the model's first answer
+  // already targets the right object shape (live evidence, issue #30). With
+  // nativeJsonSchema the transport carries the schema instead (§3) — the
+  // prose contract would only duplicate it and dilute design attention.
+  const outputContract = options.nativeJsonSchema
+    ? ""
+    : `\n\n## Output contract\nReturn ONE JSON object that satisfies this JSON Schema exactly (no extra properties, every required property present, correct types). Do not wrap it in markdown or prose:\n${JSON.stringify(options.schema)}`;
 
   for (let attempt = 1; attempt <= 2 && !accepted; attempt++) {
     const userPrompt =

@@ -67,7 +67,7 @@ describe("known-good Blueprint builder test (spec section 61)", () => {
       acceptedImages: blueprint.imagery.imageSlots.map((slot) => ({
         slotId: slot.id,
         altText: slot.altText,
-        aspectRatio: slot.aspectRatio,
+        aspectRatio: slot.generationAspectRatio,
         page: slot.page,
         ...(slot.section ? { section: slot.section } : {}),
       })),
@@ -134,7 +134,7 @@ describe("known-good Blueprint builder test (spec section 61)", () => {
       acceptedImages: blueprint.imagery.imageSlots.map((slot) => ({
         slotId: slot.id,
         altText: slot.altText,
-        aspectRatio: slot.aspectRatio,
+        aspectRatio: slot.generationAspectRatio,
         page: slot.page,
         ...(slot.section ? { section: slot.section } : {}),
       })),

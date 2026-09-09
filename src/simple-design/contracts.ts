@@ -31,8 +31,23 @@ export const QA_PACKAGE_SCHEMA_VERSION = "qa-package/1";
 
 // ── design-blueprint/1 ──────────────────────────────────────────────────────
 
-const hexColor = Type.String({ minLength: 3, maxLength: 40 });
+// A CSS color value — hex preferred, rgba()/hsl() legal where the design
+// needs translucency.
+const colorValue = Type.String({ minLength: 3, maxLength: 40 });
 const trimmed = (maxLength: number) => Type.String({ minLength: 1, maxLength });
+
+// Schema-convergence brief §10: color tokens describe ROLES, not a fixed set
+// of property names. A typed array lets the blueprint express the observed
+// design language ("page-ground", "violet-accent") without inventing
+// arbitrary JSON keys; the count limits keep it a system, not a dump.
+export const BlueprintColorRoleSchema = Type.Object(
+  {
+    role: trimmed(80),
+    value: colorValue,
+    usage: trimmed(400),
+  },
+  { additionalProperties: false }
+);
 
 export const BlueprintImageSlotSchema = Type.Object(
   {
@@ -45,13 +60,24 @@ export const BlueprintImageSlotSchema = Type.Object(
     ]),
     section: Type.Optional(Type.String({ minLength: 1, maxLength: 120 })),
     priority: Type.Union([Type.Literal("CRITICAL"), Type.Literal("HIGH"), Type.Literal("NORMAL")]),
-    aspectRatio: Type.Union([
+    // Schema-convergence brief §9: the DESIGN ratio and the PROVIDER
+    // GENERATION ratio are separate concepts. An observed composition may
+    // legitimately be 21:9 or 2.2:1 even though the image provider cannot
+    // generate that exact frame; cropStrategy bridges the difference. Never
+    // make one masquerade as the other.
+    compositionAspectRatio: Type.String({
+      minLength: 2,
+      maxLength: 16,
+      pattern: "^[0-9]{1,4}(?:\\.[0-9]{1,2})?:[0-9]{1,4}(?:\\.[0-9]{1,2})?$",
+    }),
+    generationAspectRatio: Type.Union([
       Type.Literal("16:9"),
       Type.Literal("4:3"),
       Type.Literal("3:2"),
       Type.Literal("1:1"),
       Type.Literal("9:16"),
     ]),
+    cropStrategy: Type.Optional(Type.String({ minLength: 2, maxLength: 200 })),
     visualMass: Type.Optional(Type.String({ minLength: 1, maxLength: 400 })),
     subjectDirection: Type.String({ minLength: 5, maxLength: 800 }),
     compositionDirection: Type.Optional(Type.String({ minLength: 1, maxLength: 800 })),
@@ -106,19 +132,7 @@ export const DesignBlueprintSchema = Type.Object(
     designDna: Type.Array(Type.String({ minLength: 10, maxLength: 600 }), { minItems: 5, maxItems: 8 }),
     tokens: Type.Object(
       {
-        colors: Type.Object(
-          {
-            ground: hexColor,
-            ink: hexColor,
-            textSecondary: Type.Optional(hexColor),
-            accent: hexColor,
-            accentLight: Type.Optional(hexColor),
-            hairline: hexColor,
-            hairlineOnDark: Type.Optional(hexColor),
-            error: Type.Optional(hexColor),
-          },
-          { additionalProperties: false }
-        ),
+        colors: Type.Array(BlueprintColorRoleSchema, { minItems: 3, maxItems: 12 }),
         typography: Type.Object(
           {
             display: Type.Object(
@@ -145,7 +159,12 @@ export const DesignBlueprintSchema = Type.Object(
                   weight: Type.Optional(Type.Integer({ minimum: 100, maximum: 900 })),
                   sizeClamp: Type.String({ minLength: 3, maxLength: 120 }),
                   lineHeight: Type.Optional(Type.String({ minLength: 1, maxLength: 20 })),
-                  maxWidthCh: Type.Optional(Type.Integer({ minimum: 20, maximum: 120 })),
+                  // Structural bounds only (schema-convergence brief §8): the
+                  // role-aware design floors live in validateDesignBlueprint —
+                  // display type legitimately uses narrow measures, so one
+                  // global minimum of 20ch was an over-strict design
+                  // preference, not structure.
+                  maxWidthCh: Type.Optional(Type.Integer({ minimum: 4, maximum: 120 })),
                 },
                 { additionalProperties: false }
               ),
@@ -258,6 +277,25 @@ export const DesignBlueprintSchema = Type.Object(
 );
 export type DesignBlueprint = Static<typeof DesignBlueprintSchema>;
 
+// Schema-convergence brief §8: measure floors are role-aware. Display /
+// hero / statement typography frequently uses intentionally narrow measures
+// (a 12ch hero headline is not schema-invalid); body reading measure keeps a
+// modest floor; UI labels may be small. These are FLOORS only — the brief's
+// §7 principle forbids replacing one arbitrary preferred range with another,
+// so no new upper bounds beyond the structural 120ch ceiling.
+const TYPE_MEASURE_FLOORS: Array<{ pattern: RegExp; minCh: number; label: string }> = [
+  { pattern: /display|hero|headline|statement|masthead/i, minCh: 8, label: "display/hero/statement" },
+  { pattern: /body|paragraph|prose|reading/i, minCh: 20, label: "body/reading" },
+];
+const UI_MEASURE_FLOOR = 4;
+
+function measureFloor(element: string): { minCh: number; label: string } {
+  for (const entry of TYPE_MEASURE_FLOORS) {
+    if (entry.pattern.test(element)) return { minCh: entry.minCh, label: entry.label };
+  }
+  return { minCh: UI_MEASURE_FLOOR, label: "ui" };
+}
+
 export function validateDesignBlueprint(value: unknown): { valid: true; value: DesignBlueprint } | { valid: false; errors: string } {
   const candidate = value as unknown;
   if (!Value.Check(DesignBlueprintSchema, candidate)) {
@@ -268,8 +306,32 @@ export function validateDesignBlueprint(value: unknown): { valid: true; value: D
     }
     return { valid: false, errors: issues.join("; ") };
   }
-  return { valid: true, value: candidate as DesignBlueprint };
+  const blueprint = candidate as DesignBlueprint;
+  const measureIssues: string[] = [];
+  for (const row of blueprint.tokens.typography.scale) {
+    if (row.maxWidthCh === undefined) continue;
+    const floor = measureFloor(row.element);
+    if (row.maxWidthCh < floor.minCh) {
+      measureIssues.push(`tokens.typography.scale '${row.element}': maxWidthCh ${row.maxWidthCh} is below the ${floor.label} floor of ${floor.minCh}ch`);
+    }
+  }
+  if (measureIssues.length > 0) {
+    return { valid: false, errors: measureIssues.slice(0, 12).join("; ") };
+  }
+  return { valid: true, value: blueprint };
 }
+
+// Workers AI native structured output (schema-convergence brief §3): the
+// blueprint's JSON Schema in the provider's OpenAI-style wrapper. Wrapper
+// shape verified against `wrangler ai models schema @cf/zai-org/glm-5.3-flash`
+// (response_format.json_schema: { name (required), schema, description?,
+// strict? }). The JSON round-trip strips TypeBox symbol metadata so the
+// payload is plain JSON Schema.
+export const DESIGN_BLUEPRINT_NATIVE_JSON_SCHEMA = {
+  name: "design-blueprint",
+  description: "A complete design-blueprint/1 website design document.",
+  schema: JSON.parse(JSON.stringify(DesignBlueprintSchema)) as Record<string, unknown>,
+} as const;
 
 // Deterministic blueprint quality gate (spec section 30): SMALL, structural
 // checks only. No identity cardinality, no trait obligations, no region
@@ -425,7 +487,12 @@ export interface QaPackage {
 
 // ── Blueprint image slots → existing KIE machinery (spec section 21) ───────
 
-const ORIENTATION_BY_ASPECT: Record<BlueprintImageSlot["aspectRatio"], ImageSlot["orientation"]> = {
+// Orientation follows the GENERATION ratio (the provider request), never the
+// composition ratio (the design observation).
+const ORIENTATION_BY_GENERATION_ASPECT: Record<
+  BlueprintImageSlot["generationAspectRatio"],
+  ImageSlot["orientation"]
+> = {
   "16:9": "landscape",
   "4:3": "landscape",
   "3:2": "landscape",
@@ -445,7 +512,7 @@ export function blueprintSlotsToImageSlots(blueprint: DesignBlueprint): ImageSlo
     semanticRole: `${slot.subjectDirection}${slot.compositionDirection ? ` — ${slot.compositionDirection}` : ""}`,
     blueprintRole: `simple-${slot.section || slot.page}`,
     priority: slot.priority,
-    orientation: ORIENTATION_BY_ASPECT[slot.aspectRatio],
+    orientation: ORIENTATION_BY_GENERATION_ASPECT[slot.generationAspectRatio],
     negativeSpaceForText:
       /text overlay|negative space|dark enough for|space for (a )?(headline|text)/i.test(
         `${slot.compositionDirection ?? ""} ${slot.kiePrompt}`

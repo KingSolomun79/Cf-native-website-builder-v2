@@ -30,12 +30,27 @@ export interface StreamingImage {
   mimeType: string;
 }
 
+/** Native structured output request (schema-convergence brief §3): the JSON
+ *  Schema travels in the provider's response_format, not in prompt prose.
+ *  Workers AI wrapper shape verified via
+ *  `wrangler ai models schema @cf/zai-org/glm-5.3-flash`. */
+export interface StreamingJsonSchema {
+  name: string;
+  description?: string;
+  schema: Record<string, unknown>;
+  strict?: boolean;
+}
+
 export interface StreamingCompletionOptions {
   system: string;
   user: string;
   images?: StreamingImage[];
   maxTokens: number;
   jsonMode?: boolean;
+  /** Native json_schema structured output; takes precedence over jsonMode.
+   *  The prompt should explain design intent — the transport enforces
+   *  structure (schema-convergence brief §3). */
+  jsonSchema?: StreamingJsonSchema;
   /** Stable per-call label for logs/metrics, e.g. "simple-design-blueprint". */
   label: string;
   /** Override the default General API base (tests / canaries). */
@@ -181,6 +196,14 @@ type AttemptOutcome = {
   durationMs: number;
 };
 
+// jsonSchema (native structured output) takes precedence over plain
+// json_object mode — structure is enforced by the transport, not the prompt.
+function responseFormatFor(options: StreamingCompletionOptions): Record<string, unknown> | null {
+  if (options.jsonSchema) return { type: "json_schema", json_schema: options.jsonSchema };
+  if (options.jsonMode) return { type: "json_object" };
+  return null;
+}
+
 async function runStreamAttempt(
   env: Env,
   options: StreamingCompletionOptions,
@@ -227,7 +250,8 @@ async function runStreamAttempt(
       thinking: { type: options.thinking ?? "low" },
       stream_options: { include_usage: true },
     };
-    if (options.jsonMode) body.response_format = { type: "json_object" };
+    const responseFormat = responseFormatFor(options);
+    if (responseFormat) body.response_format = responseFormat;
 
     armStallTimer();
     const response = await fetch(endpoint, {
@@ -421,11 +445,11 @@ async function runWorkersAiStreamAttempt(
       stream: true,
       max_tokens: options.maxTokens,
       chat_template_kwargs: { enable_thinking: false },
-      // Schema-supported (verified via `wrangler ai models schema`): with
-      // reasoning disabled, structured stages need the same json_object
-      // enforcement as the coding endpoint (issue #30) — without it the
-      // model prepends prose ("Let me study…") and the JSON parse fails.
-      ...(options.jsonMode ? { response_format: { type: "json_object" } } : {}),
+      // Schema-convergence brief §3: native structured output when the caller
+      // supplies a schema; plain json_object otherwise (without either, the
+      // model prepends prose and the JSON parse fails). stream + json_schema
+      // coexist in one request.
+      ...(responseFormatFor(options) ? { response_format: responseFormatFor(options) } : {}),
     })) as unknown as ReadableStream<Uint8Array>;
 
     const reader = stream.getReader();
@@ -484,6 +508,12 @@ async function runWorkersAiStreamAttempt(
       const idleMs = Date.now() - lastActivityAt;
       return { kind: idleMs >= stall ? "stall" : "max_duration", durationMs, snippet: `stream aborted; idleMs≈${idleMs}` };
     }
+    // A binding-side request defect (e.g. an unsupported json_schema dialect
+    // feature) is deterministic — retrying it 3× is not a transport retry,
+    // it's waste. Classify as a 4xx so the dispatcher fails fast.
+    if (/response_format|json_schema|unsupported|not supported/i.test(message)) {
+      return { kind: "http_status", httpStatus: 400, durationMs, snippet: message.slice(0, 300) };
+    }
     return { kind: "network", durationMs, snippet: message.slice(0, 300) };
   }
 }
@@ -511,6 +541,10 @@ export async function generateWorkersAiStreaming(
       durationMs: outcome.durationMs,
       snippet: outcome.snippet,
     });
+    // Non-retryable request defect (schema dialect rejection etc.).
+    if (outcome.kind === "http_status" && outcome.httpStatus !== undefined && outcome.httpStatus < 500 && outcome.httpStatus !== 429) {
+      break;
+    }
     if (attempt < MAX_TRANSPORT_ATTEMPTS) {
       await new Promise((r) => setTimeout(r, 1000 * Math.pow(2, attempt - 1)));
     }

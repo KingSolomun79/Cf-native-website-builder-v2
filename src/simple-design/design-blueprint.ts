@@ -24,6 +24,7 @@ import { storeBuildStageArtifactIdempotent, getBuildStageArtifact } from "../dom
 import { putImmutableObjectTolerant } from "../lib/assets";
 import { buildVersionRoot } from "../domain/artifact-keys";
 import {
+  DESIGN_BLUEPRINT_NATIVE_JSON_SCHEMA,
   DESIGN_BLUEPRINT_SCHEMA_VERSION,
   DesignBlueprintSchema,
   evaluateBlueprintQualityGate,
@@ -124,7 +125,7 @@ export async function runSimpleDesignBlueprintStage(
   }
 
   const generate: RawAiGenerate =
-    input.generate ?? createSimpleVisionGenerate(env, images, { buildId: input.buildId, stage: "simple-design-blueprint", buildVersionNumber: input.buildVersionNumber }, { maxTokens: 12288 });
+    input.generate ?? createSimpleVisionGenerate(env, images, { buildId: input.buildId, stage: "simple-design-blueprint", buildVersionNumber: input.buildVersionNumber }, { maxTokens: 12288, jsonSchema: DESIGN_BLUEPRINT_NATIVE_JSON_SCHEMA });
 
   let run;
   try {
@@ -140,6 +141,9 @@ export async function runSimpleDesignBlueprintStage(
       inputArtifactIds: ordered.map((entry) => entry.sha256),
       maxTokens: 12288,
       generate,
+      // Native structured output: the schema rides response_format (§3), so
+      // no prose output contract in the prompt.
+      nativeJsonSchema: true,
     });
   } catch (error) {
     // The boundary already spent its ONE targeted structural repair (spec

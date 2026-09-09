@@ -46,7 +46,17 @@ import { runSimpleWebsiteBuilderStage, runSimpleBuilderTransportDiagnostic } fro
 import { runSimpleDesignBlueprintStage } from "../simple-design/design-blueprint";
 import { renderDesignBlueprintMarkdown } from "../simple-design/render-blueprint";
 import { runDeterministicBundleQa } from "../simple-design/bundle-qa";
-import { blueprintSlotsToImageSlots, type DesignBlueprint, type SiteBundle } from "../simple-design/contracts";
+import {
+  blueprintSlotsToImageSlots,
+  DESIGN_BLUEPRINT_NATIVE_JSON_SCHEMA,
+  DESIGN_BLUEPRINT_SCHEMA_VERSION,
+  evaluateBlueprintQualityGate,
+  validateDesignBlueprint,
+  type DesignBlueprint,
+  type SiteBundle,
+} from "../simple-design/contracts";
+import { parseModelJson } from "../domain/ai-boundary";
+import { composeStagePrompt } from "../domain/prompt-contract";
 import type { BusinessFacts } from "../domain/lifecycle-schema";
 
 interface DriverFixtureImage {
@@ -55,7 +65,7 @@ interface DriverFixtureImage {
 }
 
 interface DriverBody {
-  op: "health" | "put-fixture" | "finch-builder" | "builder-diagnostic" | "assemble-stored" | "capture" | "blueprint" | "artifact" | "probe" | "general-api-canary" | "stream-canary-text" | "stream-canary-vision";
+  op: "health" | "put-fixture" | "finch-builder" | "builder-diagnostic" | "assemble-stored" | "capture" | "blueprint" | "artifact" | "probe" | "general-api-canary" | "stream-canary-text" | "stream-canary-vision" | "schema-canary";
   key?: string;
   base64?: string;
   facts?: BusinessFacts;
@@ -170,6 +180,13 @@ export async function expBenchmarkDriver(c: Context<{ Bindings: Env }>): Promise
       case "stream-canary-vision":
         return c.json(await runStreamCanaryVision(c.env, body));
 
+      // §16 schema canary — ONE text-only call with the FINAL design-blueprint
+      // response_format=json_schema against a deliberately varied synthetic
+      // website. Verifies: stream completes, provider accepts the schema,
+      // JSON parses, post-parse validation passes, zero correction calls.
+      case "schema-canary":
+        return c.json(await runSchemaCanary(c.env, body));
+
       default:
         return c.json({ error: "Unknown op" }, 400);
     }
@@ -259,7 +276,7 @@ async function runFinchBuilder(env: Env, body: DriverBody) {
     acceptedImages: body.blueprint.imagery.imageSlots.map((slot) => ({
       slotId: slot.id,
       altText: slot.altText,
-      aspectRatio: slot.aspectRatio,
+      aspectRatio: slot.generationAspectRatio,
       page: slot.page,
       ...(slot.section ? { section: slot.section } : {}),
     })),
@@ -346,7 +363,7 @@ async function runBuilderDiagnostic(env: Env, body: DriverBody) {
     acceptedImages: body.blueprint.imagery.imageSlots.map((slot) => ({
       slotId: slot.id,
       altText: slot.altText,
-      aspectRatio: slot.aspectRatio,
+      aspectRatio: slot.generationAspectRatio,
       page: slot.page,
       ...(slot.section ? { section: slot.section } : {}),
     })),
@@ -777,6 +794,86 @@ async function runStreamCanaryVision(env: Env, body: DriverBody) {
     return {
       ok: false,
       imageBytes: imageBytes.byteLength,
+      durationMs: Date.now() - startedAt,
+      error: error instanceof StreamingTransportExhaustedError ? error.message : (error as Error).message.slice(0, 300),
+    };
+  }
+}
+
+// §16 schema canary — ONE cheap text-only streamed call carrying the FINAL
+// design-blueprint/1 contract as native response_format=json_schema, asked
+// for a deliberately varied SYNTHETIC website (no Reference images, no
+// business data). Success = stream completes, provider accepts the schema
+// dialect, JSON parses, post-parse design-blueprint/1 validation passes,
+// deterministic quality gate passes, and correction calls = 0 (the canary
+// has no correction path at all — a single raw boundary call).
+async function runSchemaCanary(env: Env, body: DriverBody): Promise<unknown> {
+  const startedAt = Date.now();
+  const composed = composeStagePrompt("simple-design-blueprint");
+  try {
+    const result = await generateWorkersAiStreaming(env, {
+      system: composed.systemPrompt,
+      user: `Produce the Design Blueprint for a REPLACEMENT business: an independent specialist bicycle workshop called "Meridian Cycles" — hand-built steel frames, fitting studio, small curated parts counter, repair bookings by enquiry. The Reference design language to translate (you receive no screenshots in this canary — synthesize from this brief): warm utilitarian workshop aesthetic, pale paper ground with deep forest-green ink mass, one burnt-orange accent used sparingly, chunky slab display type over quiet body sans, hairline rules instead of cards, large workshop photography with generous captions, slow calm motion. ${DESIGN_BLUEPRINT_SCHEMA_VERSION} only; businessFactsRef: "onboarding-submission:canary#fact-snapshot".`,
+      maxTokens: 16_384,
+      jsonSchema: DESIGN_BLUEPRINT_NATIVE_JSON_SCHEMA,
+      label: "schema-canary-text",
+    });
+    const parsed = parseModelJson(result.content);
+    if (!parsed.ok) {
+      return {
+        ok: false,
+        phase: "json_parse",
+        parseError: parsed.error,
+        durationMs: Date.now() - startedAt,
+        ttfbMs: result.ttfbMs,
+        streamDurationMs: result.durationMs,
+        chunks: result.chunks,
+        finishReason: result.finishReason,
+        usage: result.usage,
+        contentChars: result.content.length,
+        correctionCalls: 0,
+      };
+    }
+    const validated = validateDesignBlueprint(parsed.value);
+    if (!validated.valid) {
+      return {
+        ok: false,
+        phase: "schema_validation",
+        schemaErrors: validated.errors,
+        schemaVersion: DESIGN_BLUEPRINT_SCHEMA_VERSION,
+        durationMs: Date.now() - startedAt,
+        ttfbMs: result.ttfbMs,
+        streamDurationMs: result.durationMs,
+        chunks: result.chunks,
+        finishReason: result.finishReason,
+        usage: result.usage,
+        contentChars: result.content.length,
+        correctionCalls: 0,
+      };
+    }
+    const gate = evaluateBlueprintQualityGate(validated.value);
+    return {
+      ok: gate.passed,
+      phase: gate.passed ? "complete" : "quality_gate",
+      schemaVersion: DESIGN_BLUEPRINT_SCHEMA_VERSION,
+      schemaValid: true,
+      gateFailures: gate.failures,
+      durationMs: Date.now() - startedAt,
+      ttfbMs: result.ttfbMs,
+      streamDurationMs: result.durationMs,
+      chunks: result.chunks,
+      finishReason: result.finishReason,
+      usage: result.usage,
+      contentChars: result.content.length,
+      designDnaCount: validated.value.designDna.length,
+      imageSlotCount: validated.value.imagery.imageSlots.length,
+      colorRoleCount: validated.value.tokens.colors.length,
+      correctionCalls: 0,
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      phase: "transport",
       durationMs: Date.now() - startedAt,
       error: error instanceof StreamingTransportExhaustedError ? error.message : (error as Error).message.slice(0, 300),
     };

@@ -12,7 +12,7 @@
 import type { Env } from "../env.d";
 import type { RawAiGenerate } from "../domain/ai-boundary";
 import { generateVisionWithGateway } from "../lib/ai-gateway";
-import { generateSimpleStreamingCompletion } from "../lib/ai-streaming";
+import { generateSimpleStreamingCompletion, type StreamingJsonSchema } from "../lib/ai-streaming";
 
 export function simpleStreamingTransportEnabled(env: Env): boolean {
   return env.SIMPLE_STREAMING_TRANSPORT === "zai_general_stream" || env.SIMPLE_STREAMING_TRANSPORT === "workers_ai_stream";
@@ -46,7 +46,7 @@ export function createSimpleVisionGenerate(
   env: Env,
   images: SimpleVisionImage[],
   meta: SimpleVisionMeta,
-  options?: { maxTokens?: number }
+  options?: { maxTokens?: number; jsonSchema?: StreamingJsonSchema }
 ): RawAiGenerate {
   if (simpleStreamingTransportEnabled(env)) {
     return async (systemPrompt, userPrompt, attempt) => {
@@ -59,6 +59,9 @@ export function createSimpleVisionGenerate(
         // window, not the stage's own budget discipline; a length-truncated
         // stream is transport-complete and is the schema layer's business.
         maxTokens: options?.maxTokens ?? 16_384,
+        // Native json_schema structured output (schema-convergence brief §3)
+        // when the caller supplies one; plain json_object otherwise.
+        ...(options?.jsonSchema ? { jsonSchema: options.jsonSchema } : {}),
         jsonMode: true,
         label: `${meta.stage}#${attempt}`,
       });

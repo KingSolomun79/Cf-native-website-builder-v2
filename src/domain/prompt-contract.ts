@@ -109,9 +109,13 @@ export const PROMPT_MANIFEST: Record<PromptStageKey, PromptManifestEntry> = {
     bodyFile: "12-realization-repair-v1.md",
   },
   // ── SIMPLE design pipeline (experiment branch only) ─────────────────────
+  // v3 (schema-convergence brief §13): native json_schema owns structural
+  // compliance, so the body drops its JSON-tutorial clauses and keeps design
+  // intent (typed color roles, composition-vs-generation ratio, narrow
+  // display measures as legitimate).
   "simple-design-blueprint": {
     promptId: "simple-design-blueprint",
-    promptVersion: "v2",
+    promptVersion: "v3",
     bodyFile: "simple/01-design-blueprint.md",
   },
   "simple-website-builder": {

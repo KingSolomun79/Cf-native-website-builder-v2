@@ -497,7 +497,7 @@ export async function runSimpleBuildPipeline(
         acceptedImages: blueprint.imagery.imageSlots.map((slot) => ({
           slotId: slot.id,
           altText: slot.altText,
-          aspectRatio: slot.aspectRatio,
+          aspectRatio: slot.generationAspectRatio,
           page: slot.page,
           ...(slot.section ? { section: slot.section } : {}),
         })),
@@ -623,7 +623,7 @@ export async function runSimpleBuildPipeline(
           acceptedImages: blueprint.imagery.imageSlots.map((slot) => ({
             slotId: slot.id,
             altText: slot.altText,
-            aspectRatio: slot.aspectRatio,
+            aspectRatio: slot.generationAspectRatio,
           })),
           formServiceEndpoint,
           siteFormId,
