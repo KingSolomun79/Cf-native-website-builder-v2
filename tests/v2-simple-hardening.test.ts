@@ -8,10 +8,11 @@
 import { describe, expect, it } from "vitest";
 import { Value } from "@sinclair/typebox/value";
 import {
+  adaptImageSceneToScreenFree,
   assembleTextSafePhotoPrompt,
   KIE_MAX_PROMPT_CHARS,
+  SCREEN_FREE_PHOTO_REQUIREMENT,
   TEXT_SAFE_PHOTO_NEGATIVE,
-  TEXT_SAFE_PHOTO_POLICY,
 } from "../src/lib/kie-v2";
 import {
   injectBuildVersionMarker,
@@ -107,42 +108,46 @@ function qaInput(bundle: SiteBundle): BundleQaInput {
   };
 }
 
-// ── 1 + 2: text-safe KIE photography policy ─────────────────────────────────
+// ── 1 + 2: text-safe KIE photography policy (screen-free adaptation) ────────
 
 describe("text-safe KIE photography policy", () => {
-  it("always leads with the no-writing policy and the negative list, within the provider cap", () => {
+  it("always leads with the screen-free clause and ends with the negative list, within the provider cap", () => {
     const prompt = assembleTextSafePhotoPrompt("Warm loft office with a team at work.", "16:9");
     expect(prompt.length).toBeLessThanOrEqual(KIE_MAX_PROMPT_CHARS);
     expect(prompt.startsWith("Create one natural editorial photograph")).toBe(true);
-    expect(prompt.indexOf(TEXT_SAFE_PHOTO_POLICY)).toBeLessThan(prompt.indexOf("Warm loft office"));
+    expect(prompt.indexOf(SCREEN_FREE_PHOTO_REQUIREMENT)).toBeLessThan(prompt.indexOf("Warm loft office"));
     expect(prompt).toContain(TEXT_SAFE_PHOTO_NEGATIVE);
     expect(prompt).toContain("Aspect ratio: 16:9.");
+    expect(prompt.trim().endsWith(TEXT_SAFE_PHOTO_NEGATIVE + ".")).toBe(true);
   });
 
-  it("a blueprint brief demanding analytics screens still gets the hide/defocus screen instruction", () => {
+  it("a blueprint brief demanding analytics screens gets its scene rewritten screen-free", () => {
     const hostile = "Two colleagues celebrating in front of a laptop showing an analytics dashboard with rising graphs, charts and KPI labels.";
     const prompt = assembleTextSafePhotoPrompt(hostile, "16:9");
-    // the policy is present and priority-marked regardless of the brief
-    expect(prompt).toContain("STRICT RULE, overriding any conflicting instruction");
-    // screens must be reinterpreted away: away-facing/off/defocused/cropped/glow
-    expect(prompt).toContain("faces away from the camera");
-    expect(prompt).toContain("strongly defocused");
-    // and the negative list still forbids the exact UI vocabulary the brief asked for
-    for (const banned of ["analytics UI", "dashboard", "readable monitor", "presentation slide", "gibberish letters"]) {
-      expect(prompt).toContain(banned);
+    const adapted = adaptImageSceneToScreenFree(hostile);
+    expect(adapted.adapted).toBe(true);
+    expect(adapted.matchedTerms).toContain("laptop");
+    expect(adapted.matchedTerms).toContain("dashboard");
+    // the scene no longer asks for a screen-facing laptop...
+    expect(adapted.effectiveBrief).not.toMatch(/in front of a laptop/);
+    expect(adapted.effectiveBrief).toContain("no monitor, dashboard or visible screen in frame");
+    // ...the binding clause leads the provider prompt, and the negative list
+    // still forbids the exact UI vocabulary the brief asked for
+    expect(prompt).toContain("SCREEN-FREE PHOTOGRAPHY REQUIREMENT");
+    for (const banned of ["dashboard", "presentation slide", "gibberish"]) {
+      expect(TEXT_SAFE_PHOTO_NEGATIVE).toContain(banned);
     }
-    // the brief survives truncated, never at the cost of the policy
     expect(prompt.length).toBeLessThanOrEqual(1000);
     expect(prompt).toContain("celebrating");
   });
 
-  it("keeps the policy intact for very long briefs (policy can never be truncated away)", () => {
+  it("keeps the clause intact for very long briefs (the clause can never be truncated away)", () => {
     const longBrief = "editorial team scene ".repeat(200);
     const prompt = assembleTextSafePhotoPrompt(longBrief, "9:16");
     expect(prompt.length).toBeLessThanOrEqual(1000);
-    expect(prompt).toContain("no dashboards, no analytics interfaces");
+    expect(prompt).toContain("no dashboards");
     expect(prompt).toContain("Aspect ratio: 9:16.");
-    expect(prompt.endsWith(TEXT_SAFE_PHOTO_NEGATIVE + ".")).toBe(true);
+    expect(prompt.trim().endsWith(TEXT_SAFE_PHOTO_NEGATIVE + ".")).toBe(true);
   });
 });
 

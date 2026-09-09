@@ -23,7 +23,9 @@ import {
   type QaPackage,
   type SiteBundle,
 } from "./contracts";
-import { bytesToBase64, createSimpleVisionGenerate, mimeForKey } from "./vision";
+import { bytesToBase64, mimeForKey } from "./vision";
+import { generateSimpleStreamingCompletion } from "../lib/ai-streaming";
+import { SIMPLE_PAGE_FILES } from "./bundle-qa";
 import type { SimpleBuilderVisualInput } from "./website-builder";
 
 export class SimpleRepairBudgetExceededError extends Error {
@@ -127,17 +129,79 @@ export interface SimpleSiteRepairResult {
   changedPaths: RepairFilePath[];
 }
 
+// SIMPLE transport pin (final-iteration fix for the Phase 4 Finding B): the
+// repair ALWAYS runs on the configured SIMPLE streaming transport (Workers AI
+// glm-5.3-flash, stream: true, enable_thinking: false) — text-only when no
+// candidate renders exist, multimodal when they do. Whether visual inputs
+// exist is INDEPENDENT of provider selection: a preflight-rejected candidate
+// has no renders, and losing the streaming seam there used to drop the repair
+// to the legacy non-streaming gateway (OpenRouter), which truncated at ~38K
+// chars. No legacy gateway, no AI Gateway, no model-boundary fallback.
+function simpleRepairGenerate(
+  env: Env,
+  images: Array<{ base64: string; mimeType: string }>,
+  meta: { stage: string; buildId: string }
+): RawAiGenerate {
+  return async (systemPrompt, userPrompt, attempt) => {
+    const result = await generateSimpleStreamingCompletion(env, {
+      system: systemPrompt,
+      user: userPrompt,
+      ...(images.length > 0 ? { images } : {}),
+      maxTokens: 32000,
+      jsonMode: true,
+      label: `${meta.stage}#${attempt}`,
+    });
+    return { content: result.content, provider: result.provider, model: result.model };
+  };
+}
+
+// The files the deterministic findings implicate: finding details are
+// prefixed with the page id ("home: …"), mapped to bundle files; shared-file
+// findings map to their own file (site.css / the contact form contract).
+// Any finding that names NO known target could implicate anything, so the
+// repair is told it owns the whole bundle.
+const SHARED_CSS_FINDING_IDS = new Set(["CONTENT_HIDDEN_WITHOUT_JS", "REDUCED_MOTION_MISSING", "FOCUS_VISIBLE_MISSING", "PAGE_HORIZONTAL_OVERFLOW"]);
+const FORM_CONTRACT_FINDING_IDS = new Set(["FORM_CONTRACT_FAILURE"]);
+
+export function failedFilesFromQaPackage(pkg: QaPackage): string[] {
+  const allFiles = Object.values(SIMPLE_PAGE_FILES);
+  const files = new Set<string>();
+  let unattributable = false;
+  for (const finding of [...pkg.technical.findings, ...pkg.truth.findings]) {
+    const page = /^(home|about|services|contact):/.exec(finding.detail)?.[1];
+    if (page) {
+      files.add(SIMPLE_PAGE_FILES[page as keyof typeof SIMPLE_PAGE_FILES]);
+    } else if (SHARED_CSS_FINDING_IDS.has(finding.id)) {
+      files.add("site.css");
+    } else if (FORM_CONTRACT_FINDING_IDS.has(finding.id)) {
+      files.add("contact.html");
+    } else {
+      unattributable = true;
+    }
+  }
+  if (files.size === 0 || unattributable) return allFiles;
+  const ordered = [...allFiles, "site.css", "site.js"] as string[];
+  return ordered.filter((file) => files.has(file));
+}
+
 // Exported for regression tests: the repair must always receive the COMPLETE
 // current bundle as context even though it returns only changed files.
 export function buildRepairUserPrompt(input: RunSimpleSiteRepairInput): string {
   const images = input.acceptedImages
     .map((image) => `- ${image.slotId} [${image.aspectRatio}] — alt: ${image.altText}`)
     .join("\n");
+  const failedFiles = failedFilesFromQaPackage(input.qaPackage);
+  const visualMode = input.candidateDesktopR2Key
+    ? "Attached images, in order: 1) REFERENCE desktop, 2) CANDIDATE desktop current render, then reference/candidate mobile when available. "
+    : "MODE: deterministic preflight-failure repair. The candidate below was rejected BEFORE rendering — no screenshots exist and none are required. Fix the exact deterministic findings in the failed files listed; do not redesign. ";
   return `CURRENT SITE BUNDLE (complete repair context — you own HTML/CSS/JS whole):
 ${JSON.stringify(input.bundle)}
 
 QA PACKAGE (complete repair brief):
 ${JSON.stringify(input.qaPackage)}
+
+DESIGN BLUEPRINT (unchanged design authority — preserve its direction):
+${JSON.stringify(input.blueprint)}
 
 PRESERVATION SET (absolute — spec section 50): Business Facts below, contact details, Accepted Image identities (IMG: slot mappings), Blueprint design direction, and the FORM CONTRACT exactly:
 - form action: ${input.formServiceEndpoint}
@@ -150,9 +214,11 @@ ${input.acceptedImages.length > 0 ? images : "(none — keep the bundle image-fr
 BUSINESS FACTS (unchanged content authority):
 ${JSON.stringify(input.facts)}
 
+FAILED FILES (deterministic findings implicate these): ${failedFiles.join(", ")}
+
 PROGRESSIVE ENHANCEMENT (hard rule, preserve or restore it): all content stays fully visible in plain HTML+CSS with JavaScript disabled; scroll/entrance animation only animates already-visible elements, and prefers-reduced-motion: reduce keeps everything visible.
 
-${input.candidateDesktopR2Key ? "Attached images, in order: 1) REFERENCE desktop, 2) CANDIDATE desktop current render, then reference/candidate mobile when available. " : ""}Fix the highest-impact visual findings first; clear every truth and technical finding. Smallest coherent change set that materially increases fidelity.
+${visualMode}Fix the highest-impact visual findings first; clear every truth and technical finding. Smallest coherent change set that materially increases fidelity.
 
 OUTPUT (changed files only): return {"files":[{"path":"...","content":"..."}]} — the COMPLETE new content of ONLY the files you change. Allowed paths exactly: index.html, about.html, services.html, contact.html, site.css, site.js. At least one file; omit every unchanged file; never invent paths. Each changed file must be the full final version of that file.`;
 }
@@ -185,16 +251,11 @@ export async function runSimpleSiteRepairStage(env: Env, input: RunSimpleSiteRep
     }
   }
 
-  const generate: RawAiGenerate | undefined =
+  // Pinned SIMPLE transport with or without renders (see simpleRepairGenerate);
+  // an injected test seam always wins.
+  const generate: RawAiGenerate =
     input.generate ??
-    (images.length > 0
-      ? createSimpleVisionGenerate(
-          env,
-          images,
-          { buildId: input.buildId, stage: "simple-site-repair", buildVersionNumber: input.buildVersionNumber },
-          { maxTokens: 32000 }
-        )
-      : undefined);
+    simpleRepairGenerate(env, images, { stage: "simple-site-repair", buildId: input.buildId });
 
   const run = await runSchemaValidatedAiStage<unknown>(env, {
     stage: "simple-site-repair",
@@ -207,7 +268,9 @@ export async function runSimpleSiteRepairStage(env: Env, input: RunSimpleSiteRep
     buildVersionNumber: input.buildVersionNumber,
     inputArtifactIds: [referenceFullPage.sha256],
     maxTokens: 32000,
-    ...(generate ? { generate } : {}),
+    // The pinned SIMPLE seam (or the injected test seam) is always present —
+    // the legacy gateway default is unreachable from the SIMPLE repair.
+    generate,
   });
 
   const repairedFiles = (run.value as { files: RepairedFile[] }).files;

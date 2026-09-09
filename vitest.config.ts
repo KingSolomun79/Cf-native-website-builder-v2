@@ -309,6 +309,7 @@ export default defineWorkersConfig({
       "tests/v2-simple-finch-fixture.test.ts",
       "tests/v2-simple-streaming-transport.test.ts",
       "tests/v2-simple-hardening.test.ts",
+      "tests/v2-simple-final-iteration.test.ts",
     ],
   },
 });

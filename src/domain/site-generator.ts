@@ -391,8 +391,40 @@ function isFactSafeLabel(label: string, factWords: Set<string>): boolean {
 //   text     — span/p/div copy. Kept on the strict path (short entity-shaped
 //              fragments in a trust band are still identity claims), except
 //              that a bare decorative numeric mark is not a company.
+//   action   — CTA/navigation/action components (final SIMPLE iteration, #5):
+//              anchors, buttons, role=button, action-classed elements, and
+//              imperative-verb labels ("Learn More About Us"). Behavior, not
+//              identity — never a third-party entity claim, no matter what
+//              trust-classed ANCESTOR they sit in. Genuine trust identities
+//              (testimonial authors, client/partner logos, awards, press,
+//              review attribution) keep the strict path.
 
-type TrustTextRole = "identity" | "heading" | "text";
+type TrustTextRole = "identity" | "heading" | "text" | "action";
+
+// Imperative-verb-led short phrases are call-to-action copy, not entity
+// marks. Conservative shape: verb-led, short, no digits ("Learn More About
+// Us" passes; "Digital Africa Awards" and "Zynthara Labs" do not — "digital"
+// and "zynthara" are not action verbs). Semantic role, NOT an exact-string
+// whitelist.
+const ACTION_LABEL_PATTERN =
+  /^(?:learn|read|see|view|explore|discover|meet|talk|hear|find|check|browse|get|start|join|book|call|email|contact|reach|connect|follow|subscribe|share|visit|dive|unlock|skip|try|download|watch|listen|sign|log|chat|message|request|schedule|reserve|apply|donate|support|search|filter|sort|next|previous|back|continue|return|go|more)\b/i;
+
+function isActionOrientedLabel(label: string): boolean {
+  const trimmed = label.trim().replace(/\s+/g, " ");
+  if (trimmed.length < 2 || trimmed.length > 40) return false;
+  if (/\d/.test(trimmed)) return false;
+  if (trimmed.split(/\s+/).length > 6) return false;
+  return ACTION_LABEL_PATTERN.test(trimmed);
+}
+
+// Elements whose own presentation marks them as an action component — their
+// text is behavior, never an entity claim, regardless of the trust-classed
+// container they sit in.
+const ACTION_ELEMENT_PATTERN = /\b(?:btn|button|cta|nav|navbar|navigation|menu|link|action)\b/i;
+
+function isActionElement(attributes: string): boolean {
+  return ACTION_ELEMENT_PATTERN.test(attributes) || /\brole=["']?button/i.test(attributes);
+}
 
 // Common verbs/nouns of descriptive headings — cannot constitute an entity
 // claim even when Title-Cased ("Who We Serve", "Our Approach"). Deliberately
@@ -457,7 +489,9 @@ function classifyTrustLabelFailure(
   factWords: Set<string>,
   businessNameWords: Set<string>
 ): boolean {
+  if (role === "action") return false; // CTA/nav component — behavior, not identity
   if (!isEntityLikeLabel(label)) return false;
+  if (isActionOrientedLabel(label)) return false; // action-oriented copy in any carrier
   const caps = capitalizedWords(label);
   const safe = caps.every(
     (word) => GENERIC_TRUST_LABEL_WORDS.has(word) || HEADING_COMMON_WORDS.has(word) || factWords.has(word) || businessNameWords.has(word)
@@ -470,8 +504,10 @@ function classifyTrustLabelFailure(
 }
 
 // Collect short entity-carrying labels from a trust context's inner HTML,
-// each with its presentation ROLE (issue #53): list items, image alt texts
-// and text-only elements. The role decides how strictly the label is judged.
+// each with its presentation ROLE (issue #53): list items, image alt texts,
+// text-only elements, and — as pure "action" roles that can never fail —
+// anchors/buttons and action-classed elements (final SIMPLE iteration #5:
+// a CTA inside a testimonial-classed container is navigation, not a client).
 function collectTrustLabels(innerHtml: string): Array<{ text: string; role: TrustTextRole }> {
   const labels: Array<{ text: string; role: TrustTextRole }> = [];
   const stripTags = (html: string) => html.replace(/<[^>]+>/g, " ").replace(/&[a-z]+;/gi, " ").replace(/\s+/g, " ").trim();
@@ -484,11 +520,21 @@ function collectTrustLabels(innerHtml: string): Array<{ text: string; role: Trus
     const text = (alt?.[1] ?? alt?.[2] ?? "").trim();
     if (text) labels.push({ text, role: "identity" });
   }
+  for (const match of innerHtml.matchAll(/<(a|button)\b([^>]*)>([\s\S]*?)<\/\1>/gi)) {
+    const text = stripTags(match[3]);
+    if (text) labels.push({ text, role: "action" });
+  }
   for (const match of innerHtml.matchAll(/<(span|p|h3|h4|h5|h6|div)\b([^>]*)>([^<]*)<\/\1>/gi)) {
     const text = match[3].replace(/&[a-z]+;/gi, " ").replace(/\s+/g, " ").trim();
     if (!text) continue;
     const tagName = match[1].toLowerCase();
     const attributes = match[2] ?? "";
+    // An element presenting itself as an action component (button/CTA/nav/
+    // link classes, role=button) is behavior, not an identity slot.
+    if (isActionElement(attributes)) {
+      labels.push({ text, role: "action" });
+      continue;
+    }
     // h3-h6 are heading prose; eyebrow/kicker presentation is descriptive
     // kicker text in a non-heading element — production (Build 282f9b9d)
     // proved `<p class="eyebrow">Who We Serve</p>` is the same descriptive

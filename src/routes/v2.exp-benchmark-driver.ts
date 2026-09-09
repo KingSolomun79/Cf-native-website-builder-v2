@@ -70,7 +70,7 @@ interface DriverFixtureImage {
 }
 
 interface DriverBody {
-  op: "health" | "put-fixture" | "finch-builder" | "builder-diagnostic" | "assemble-stored" | "capture" | "blueprint" | "artifact" | "probe" | "general-api-canary" | "stream-canary-text" | "stream-canary-vision" | "schema-canary" | "stage-runs" | "simple-kie" | "simple-full-run" | "simple-rerender-qa" | "simple-hardening-run";
+  op: "health" | "put-fixture" | "finch-builder" | "builder-diagnostic" | "assemble-stored" | "capture" | "blueprint" | "artifact" | "probe" | "general-api-canary" | "stream-canary-text" | "stream-canary-vision" | "schema-canary" | "stage-runs" | "simple-kie" | "simple-full-run" | "simple-rerender-qa" | "simple-hardening-run" | "simple-final-run";
   key?: string;
   base64?: string;
   facts?: BusinessFacts;
@@ -90,6 +90,8 @@ interface DriverBody {
   stream?: boolean;
   candidateDesktopR2Key?: string;
   candidateMobileR2Key?: string;
+  cause?: string;
+  detail?: string;
 }
 
 function base64ToBytes(base64: string): Uint8Array {
@@ -232,6 +234,9 @@ export async function expBenchmarkDriver(c: Context<{ Bindings: Env }>): Promise
       // reused byte-exact (never regenerated), then the sanctioned SIMPLE
       // pipeline with fresh KIE under the text-safe photo policy.
       case "simple-hardening-run":
+      // Final SIMPLE DECISION benchmark (operator GO, 2026-09-09): identical
+      // frozen-input shape, distinct provenance cause. Same handler.
+      case "simple-final-run":
         return body.stream ? streamSimpleHardeningRun(c, body) : c.json(await runSimpleHardeningRun(c.env, body));
 
       default:
@@ -1212,8 +1217,9 @@ async function runSimpleHardeningRun(env: Env, body: DriverBody) {
   if (!frozen) throw new Error(`no frozen design_blueprint on source version ${body.buildVersionId}`);
   const created = await createNextBuildVersion(env, {
     buildId: body.buildId,
-    cause: "simple_hardening_benchmark",
-    detail: "Final hardening benchmark: fresh KIE (text-safe policy) + fresh build on the frozen blueprint/reference/facts",
+    cause: body.cause ?? "simple_hardening_benchmark",
+    detail: body.detail ??
+      "Final hardening benchmark: fresh KIE (text-safe policy) + fresh build on the frozen blueprint/reference/facts",
   });
   await storeBuildStageArtifactIdempotent(env, {
     buildId: body.buildId,

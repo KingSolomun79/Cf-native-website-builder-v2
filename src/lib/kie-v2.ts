@@ -12,6 +12,7 @@
 // logged for reconciliation; the attempt ledger keeps the estimate.
 
 import type { Env } from "../env.d";
+import { sha256Hex } from "./crypto";
 import type {
   ImageGenerationProvider,
   ImageProviderFetchResult,
@@ -31,23 +32,126 @@ const CREATE_MAX_ATTEMPTS = 3;
 // Text-safe photography policy (benchmark hardening, Phase 3 finding: KIE
 // photographs baked in fake dashboards/analytics UI/pseudo-text). Applied
 // deterministically at the KIE image-request boundary to EVERY photographic
-// generation regardless of Blueprint wording; it overrides any conflicting
-// instruction inside the slot brief, which is truncated to fit AFTER the
-// policy. Proof elements (stats, charts, UI) must be real HTML/CSS overlays,
-// never baked into generated photography.
-export const TEXT_SAFE_PHOTO_POLICY =
-  "STRICT RULE, overriding any conflicting instruction: the photograph must contain NO visible or pseudo-visible writing — no text, no letters, no numbers, no logos or brand marks, no signage, no posters, no labels, no documents, no website pages, no dashboards, no analytics interfaces, no presentation slides, no charts with labels or axes. If the scene includes a laptop, monitor, tablet or phone, its screen faces away from the camera, is switched off, strongly defocused, cropped out, or reads only as a plain glow. Never invent interface content.";
+// generation regardless of Blueprint wording. Proof elements (stats, charts,
+// UI) must be real HTML/CSS overlays, never baked into generated photography.
+//
+// FINAL SIMPLE ITERATION (operator GO, 2026-09-09): the negative-prompt policy
+// alone is proven insufficient — z-image follows the SCENE semantics and
+// fabricates pseudo-text/UI whenever the brief implies screens, whatever the
+// prohibition says. The effective provider prompt therefore (1) leads with a
+// positive SCENE REWRITE of every screen-bearing clause (deterministic, no
+// extra LLM stage, no slot-id hardcoding), and (2) ends with the binding
+// SCREEN-FREE photography clause before the negative list.
 export const TEXT_SAFE_PHOTO_NEGATIVE =
-  "Avoid: text, pseudo-text, gibberish letters, numbers, logos, signage, website screenshot, user interface, dashboard, browser window, analytics UI, readable monitor, presentation slide, poster, watermark, label.";
+  "Avoid: text, pseudo-text, gibberish, letters, numbers, logo, signage, dashboard, browser, UI, website screenshot, visible screen, presentation slide, chart, watermark.";
 
-// Pure prompt assembly so tests can prove the policy survives any brief
-// (including briefs that ask for screens/analytics) within the 1000-char cap.
-export function assembleTextSafePhotoPrompt(brief: string, aspectRatio: string): string {
-  const head = `Create one natural editorial photograph intended to be placed inside a website. ${TEXT_SAFE_PHOTO_POLICY} Aspect ratio: ${aspectRatio}.`;
+export const SCREEN_FREE_PHOTO_REQUIREMENT =
+  "STRICT RULE, overriding any conflicting instruction. SCREEN-FREE PHOTOGRAPHY REQUIREMENT: no readable or pseudo-readable text anywhere; no visible computer, phone, tablet, television or presentation display — any device shows only its back, edge or closed lid, away from camera, off, defocused or cropped out; no browser windows, no dashboards, no charts, no slides, no documents facing the camera, no signage, no labels, no posters, no logos, no UI elements. Natural documentary style, never composed around a blank screen; never invent interface content.";
+
+// Deterministic screen-safe scene adaptation: rewrites the screen-bearing
+// clauses of a Blueprint image brief so the SEMANTIC PURPOSE survives (team
+// collaboration, analysis, celebration, consulting, presentation) while the
+// text-bearing object no longer faces the camera. Pure prompt transform —
+// not a model stage. Ordered; specific staging rules first, generic leftovers
+// last. Wildcard tails never cross commas (a greedy [a-z ,'-] class once ate
+// whole clauses), and "facing" staging rules guard against the rewrites'
+// own "rear-facing" outputs. Generalizes over semantic terms, never slot ids.
+const SCREEN_SCENE_REWRITES: Array<[RegExp, string]> = [
+  // collaboration around open laptops → lids/backs toward the camera
+  [/\baround (?:their |the )?laptops?\b/gi, "around laptops turned away from the camera (only lids and backs visible)"],
+  // reviewing/analyzing content ON a computer → device closed or rear-facing
+  [/\b(?:reviewing|studying|checking|analyzing|reading) (?:[a-z]{3,20} ){0,3}on (?:a |the |their |her |his )?(laptop|notebook|computer|pc)\b/gi,
+    "working thoughtfully at the desk, a closed or rear-facing $1 to one side"],
+  [/\b(?:reviewing|studying|checking|reading|browsing) (?:[a-z]{3,20} ){0,3}on (?:a |the |their |her |his )?(tablet|ipad|phone|smartphone)\b/gi,
+    "reviewing notes in a paper notebook, no $1 display visible"],
+  // celebrating/facing a screen (with on-screen content) → no screen in frame
+  [/\b(?:in front of|(?<!rear-)facing) (?:a |the |their )?(?:laptop|monitor|screen|display|television)(?: showing [a-z -]{0,24})?/gi,
+    "together, no monitor, dashboard or visible screen in frame"],
+  // presenting content on a screen → plain-wall staging
+  [/\b(?:presenting|explaining) [a-z ]{3,60}? (?:on|via) (?:a )?(?:large |big |giant )?(?:presentation )?(?:screen|monitor|display|television|projector)\b/gi,
+    "leading the session, plain wall behind, no presentation screen or signage,"],
+  [/\bgesturing toward [a-z -]{0,20}?(?:charts|graphs|slides|dashboard)[a-z -]{0,20}/gi,
+    "gesturing expressively as the group follows along"],
+  // screen-lit faces → ambient light (a lit face implies a visible screen)
+  [/\bscreen glow (?:lighting|illuminating) (?:their|his|her) face,? ?/gi, "soft ambient lighting, "],
+  [/\bscreen glow\b/gi, "ambient glow"],
+  [/\bglow from screens\b/gi, "glow"],
+  // any remaining on-screen content clause
+  [/\b(?:showing|displaying|featuring) (?:an |the )?(?:analytics )?(?:dashboard|website|web page|charts?|graphs?|slides?)(?: with [a-z -]{3,40})?/gi, ""],
+  // generic leftover device usage → closed/rear-facing device beside them
+  [/\b(?:on|at|using|with|over) (?:a |the |their |her |his )?(laptop|notebook|computer|monitor|display|screen|tablet|phone)\b/gi,
+    "beside a closed or rear-facing $1"],
+  [/\bwith laptops\b/gi, "with closed laptops"],
+];
+
+// The brief's own tail policy is superseded by the boundary clause and only
+// wastes the 1000-character provider budget. Stripped BEFORE the rewrites so
+// their "on screen" tails cannot re-trigger device rules.
+const SUPERSEDED_SELF_POLICY: RegExp[] = [
+  /,?\s*no readable text(?: or logos)?(?: on screens?)?(?: anywhere)?/gi,
+  /,?\s*no text or logos(?: on screens?)?/gi,
+];
+
+// Screen-bearing vocabulary whose presence in a brief triggers adaptation
+// reporting (matched terms are provenance, not the rewrite itself).
+const SCREEN_TERM_PATTERN =
+  /\b(laptops?|notebooks?|computers?|monitors?|screens?|displays?|tablets?|phones?|smartphones?|ipad|iphone|dashboards?|analytics|charts?|graphs?|website|web ?pages?|browser|presentations?|slides?|projector?|documents?|paperwork|signage|posters?|billboard|kiosk|television|tv)\b/gi;
+
+export interface ScreenSafeSceneAdaptation {
+  effectiveBrief: string;
+  adapted: boolean;
+  matchedTerms: string[];
+}
+
+export function adaptImageSceneToScreenFree(brief: string): ScreenSafeSceneAdaptation {
+  const matchedTerms = [...new Set([...brief.matchAll(SCREEN_TERM_PATTERN)].map((m) => m[1].toLowerCase()))];
+  let effective = brief;
+  for (const pattern of SUPERSEDED_SELF_POLICY) {
+    pattern.lastIndex = 0;
+    effective = effective.replace(pattern, "");
+  }
+  let rewrote = false;
+  for (const [pattern, replacement] of SCREEN_SCENE_REWRITES) {
+    pattern.lastIndex = 0;
+    if (pattern.test(effective)) {
+      pattern.lastIndex = 0;
+      effective = effective.replace(pattern, replacement);
+      rewrote = true;
+    }
+  }
+  return { effectiveBrief: effective.replace(/\s{2,}/g, " ").trim(), adapted: matchedTerms.length > 0 || rewrote, matchedTerms };
+}
+
+export interface ScreenSafePhotoPrompt {
+  prompt: string;
+  blueprintPrompt: string;
+  screenSafeAdaptationApplied: boolean;
+  matchedScreenTerms: string[];
+}
+
+// Pure prompt assembly so tests can prove the screen-free adaptation and the
+// binding clause survive any brief (including briefs that demand screens)
+// within the 1000-char cap.
+export function buildScreenSafePhotoPrompt(brief: string, aspectRatio: string): ScreenSafePhotoPrompt {
+  const adaptation = adaptImageSceneToScreenFree(brief);
+  const head = `Create one natural editorial photograph for a website. ${SCREEN_FREE_PHOTO_REQUIREMENT} Aspect ratio: ${aspectRatio}.`;
   const tail = ` ${TEXT_SAFE_PHOTO_NEGATIVE}.`;
   const budget = MAX_PROMPT_CHARS - head.length - tail.length - 1;
-  const fitted = brief.length > budget ? `${brief.slice(0, Math.max(0, budget - 3))}...` : brief;
-  return `${head} ${fitted}${tail}`;
+  const fitted =
+    adaptation.effectiveBrief.length > budget
+      ? `${adaptation.effectiveBrief.slice(0, Math.max(0, budget - 3))}...`
+      : adaptation.effectiveBrief;
+  return {
+    prompt: `${head} ${fitted}${tail}`,
+    blueprintPrompt: brief,
+    screenSafeAdaptationApplied: adaptation.adapted,
+    matchedScreenTerms: adaptation.matchedTerms,
+  };
+}
+
+// Back-compat string form (existing callers/consumers).
+export function assembleTextSafePhotoPrompt(brief: string, aspectRatio: string): string {
+  return buildScreenSafePhotoPrompt(brief, aspectRatio).prompt;
 }
 
 function sleep(ms: number): Promise<void> {
@@ -86,9 +190,21 @@ export class KieV2ImageProvider implements ImageGenerationProvider {
   }
 
   async createTask(task: ResolvedSlotTask): Promise<{ taskId: string; costUsd: number }> {
-    // The text-safe policy leads the prompt and can never be truncated away
-    // by a long slot brief (the brief fills whatever budget remains).
-    const assembledPrompt = assembleTextSafePhotoPrompt(task.promptText, task.aspectRatio);
+    // The SCREEN-FREE clause leads the prompt and can never be truncated away
+    // by a long slot brief (the brief fills whatever budget remains). Prompt
+    // provenance (blueprint vs effective) is logged per attempt for the
+    // benchmark evidence trail — hashes only, never secrets.
+    const adapted = buildScreenSafePhotoPrompt(task.promptText, task.aspectRatio);
+    const blueprintPromptHash = await sha256Hex(adapted.blueprintPrompt);
+    const effectivePromptHash = await sha256Hex(adapted.prompt);
+    console.info("kie_screen_safe_provenance", {
+      slotId: task.slotId,
+      screenSafeAdaptationApplied: adapted.screenSafeAdaptationApplied,
+      matchedScreenTerms: adapted.matchedScreenTerms,
+      blueprintPromptHash,
+      effectivePromptHash,
+    });
+    const assembledPrompt = adapted.prompt;
 
     // KIE rate-limits bursts (live evidence, issue #30: 429 "call frequency
     // too high"); back off and retry the same creation.
