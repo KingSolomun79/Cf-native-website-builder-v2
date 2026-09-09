@@ -113,19 +113,26 @@ export const PROMPT_MANIFEST: Record<PromptStageKey, PromptManifestEntry> = {
   // compliance, so the body drops its JSON-tutorial clauses and keeps design
   // intent (typed color roles, composition-vs-generation ratio, narrow
   // display measures as legitimate).
+  // v4 (operator GO, 2026-09-09): FOUR-PAGE HERO MEDIA — every routed page
+  // opens with a photographic hero linked to a dedicated hero image slot
+  // (mediaSlotId); unique page heroes by default; screen-free hero rules.
   "simple-design-blueprint": {
     promptId: "simple-design-blueprint",
-    promptVersion: "v3",
+    promptVersion: "v4",
     bodyFile: "simple/01-design-blueprint.md",
   },
+  // v2 (operator GO, 2026-09-09): hero-media hard requirement on every routed
+  // page + traceable Accepted Image identity + mobile hero mass floor.
   "simple-website-builder": {
     promptId: "simple-website-builder",
-    promptVersion: "v1",
+    promptVersion: "v2",
     bodyFile: "simple/02-website-builder.md",
   },
+  // v2 (operator GO, 2026-09-09): visual QA verifies photographic hero
+  // treatment on every routed page.
   "simple-visual-qa": {
     promptId: "simple-visual-qa",
-    promptVersion: "v1",
+    promptVersion: "v2",
     bodyFile: "simple/03-visual-qa.md",
   },
   "simple-site-repair": {

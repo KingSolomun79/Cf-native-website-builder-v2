@@ -34,7 +34,7 @@ function page(title: string, extra = ""): string {
 function contactPage(formAction = endpoint, hidden = siteFormId): string {
   return page(
     "Contact",
-    `<link rel="stylesheet" href="site.css"><form method="post" action="${formAction}"><input type="hidden" name="siteFormId" value="${hidden}"><label for="name">Name</label><input id="name" name="name"><label for="email">Email</label><input id="email" name="email"><label for="message">Message</label><textarea id="message" name="message"></textarea><button type="submit">Send</button></form>`
+    `<link rel="stylesheet" href="site.css"><section class="hero contact-hero"><img src="IMG:contact-atmosphere" data-image-id="contact-atmosphere" alt="contact hero image"></section><form method="post" action="${formAction}"><input type="hidden" name="siteFormId" value="${hidden}"><label for="name">Name</label><input id="name" name="name"><label for="email">Email</label><input id="email" name="email"><label for="message">Message</label><textarea id="message" name="message"></textarea><button type="submit">Send</button></form>`
   );
 }
 
@@ -56,8 +56,8 @@ function goodBundle(): SiteBundle {
         "Home",
         `<link rel="stylesheet" href="site.css"><section class="hero"><img src="IMG:${firstSlot}" data-image-id="${firstSlot}" alt="hero image"></section>`
       ),
-      about: page("About", `<link rel="stylesheet" href="site.css"><img src="IMG:about-story" data-image-id="about-story" alt="story image">`),
-      services: page("Services", `<link rel="stylesheet" href="site.css">`),
+      about: page("About", `<link rel="stylesheet" href="site.css"><section class="hero about-hero"><img src="IMG:about-hero" data-image-id="about-hero" alt="about hero image"></section><img src="IMG:about-story" data-image-id="about-story" alt="story image">`),
+      services: page("Services", `<link rel="stylesheet" href="site.css"><section class="hero services-hero"><img src="IMG:services-hero" data-image-id="services-hero" alt="services hero image"></section>`),
       contact: contactPage(),
     },
     sharedCss: GOOD_CSS,

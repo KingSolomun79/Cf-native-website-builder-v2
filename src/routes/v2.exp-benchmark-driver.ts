@@ -95,6 +95,9 @@ interface DriverBody {
   detail?: string;
   inheritAcceptedImagesFromBuildVersionId?: string;
   resumeBenchmarkVersionId?: string;
+  freshVersion?: boolean;
+  copyBlueprintFromBuildVersionId?: string;
+  inheritAcceptedImagesExceptSlotIds?: string[];
 }
 
 function base64ToBytes(base64: string): Uint8Array {
@@ -1248,11 +1251,65 @@ async function runSimpleRerenderQa(env: Env, body: DriverBody) {
 // KIE reuse inside the pipeline make repeated invocation idempotent; this run
 // executes builder → assemble → QA → (at most ONE repair) → final QA exactly
 // as production would, then returns read-only provenance for the report.
-async function runSimpleFullRun(env: Env, body: DriverBody) {  if (!body.siteGenerationId || !body.buildId) throw new Error("siteGenerationId and buildId required");
+async function runSimpleFullRun(env: Env, body: DriverBody) {  if (!body.siteGenerationId) throw new Error("siteGenerationId required");
+  // FOUR-PAGE HERO REGRESSION (operator GO, 2026-09-09 §18): freshVersion
+  // creates a NEW Build Version carrying NO artifacts — the frozen reference
+  // evidence is reused by the pipeline's idempotent intake, but the blueprint
+  // stage generates FRESH under the changed contract (hero media) and the
+  // image step runs fresh KIE for every slot. The frozen blueprint artifact
+  // is never reused in this mode.
+  let buildId = body.buildId;
+  if (buildId && body.freshVersion) {
+    // The pipeline selects the LATEST version of the build — the version
+    // created here (carrying no artifacts) is therefore the one it runs.
+    const created = await createNextBuildVersion(env, {
+      buildId,
+      cause: body.cause ?? "four_page_hero_regression",
+      detail: body.detail ?? "Four-page hero regression: fresh blueprint (hero-media contract), fresh KIE, fresh build on the frozen reference/facts",
+    });
+    // Optionally seed the new version with an ALREADY gate-passed
+    // fresh-contract blueprint (deterministic re-run of the image/build
+    // stages without re-rolling the blueprint generator).
+    if (body.copyBlueprintFromBuildVersionId) {
+      const sourceBlueprint = await getBuildStageArtifact<DesignBlueprint>(env, body.copyBlueprintFromBuildVersionId, "design_blueprint");
+      if (!sourceBlueprint) throw new Error(`no design_blueprint on source version ${body.copyBlueprintFromBuildVersionId}`);
+      const gate = evaluateBlueprintQualityGate(sourceBlueprint.value);
+      if (!gate.passed) throw new Error(`source blueprint fails the hero-media quality gate: ${gate.failures.join("; ")}`);
+      await storeBuildStageArtifactIdempotent(env, {
+        buildId,
+        buildVersionId: created.buildVersionId,
+        siteGenerationId: body.siteGenerationId,
+        kind: "design_blueprint",
+        schemaVersion: "design-blueprint/1",
+        value: sourceBlueprint.value,
+      });
+    }
+    // Optionally inherit accepted images EXCEPT the listed slots — a bounded
+    // ONE-slot stochastic retry: the excluded slot regenerates fresh through
+    // the pipeline's image step (same prompt authority, no semantic edit).
+    if (body.copyBlueprintFromBuildVersionId && body.inheritAcceptedImagesExceptSlotIds) {
+      const excluded = new Set(body.inheritAcceptedImagesExceptSlotIds);
+      const rows = await env.DB.prepare(
+        "SELECT slot_id, attempt_id, r2_key FROM accepted_images WHERE build_version_id = ?1"
+      )
+        .bind(body.copyBlueprintFromBuildVersionId)
+        .all<{ slot_id: string; attempt_id: string; r2_key: string }>();
+      for (const row of rows.results) {
+        if (excluded.has(row.slot_id)) continue;
+        await env.DB.prepare(
+          `INSERT INTO accepted_images (build_version_id, slot_id, attempt_id, r2_key, accepted_at)
+           VALUES (?1, ?2, ?3, ?4, datetime('now'))
+           ON CONFLICT (build_version_id, slot_id) DO NOTHING`
+        )
+          .bind(created.buildVersionId, row.slot_id, row.attempt_id, row.r2_key)
+          .run();
+      }
+    }
+  }
   const startedAt = Date.now();
   const outcome = await runSimpleBuildPipeline(env, {
     siteGenerationId: body.siteGenerationId,
-    buildId: body.buildId,
+    buildId,
     deps: { sleep: driverSleep },
   });
   const durationMs = Date.now() - startedAt;

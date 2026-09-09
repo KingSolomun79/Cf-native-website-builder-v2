@@ -31,22 +31,22 @@ Registered for the `DESIGN_PIPELINE_VERSION=simple_blueprint_v1` experiment (bra
 
 | Stage | Reconciled prompt id/version | Detailed body |
 |---|---|---|
-| SIMPLE Design Blueprint Generator | `simple-design-blueprint/v2` | `simple/01-design-blueprint.md` |
-| SIMPLE Website Builder | `simple-website-builder/v1` | `simple/02-website-builder.md` |
-| SIMPLE Visual QA | `simple-visual-qa/v1` | `simple/03-visual-qa.md` |
+| SIMPLE Design Blueprint Generator | `simple-design-blueprint/v4` | `simple/01-design-blueprint.md` |
+| SIMPLE Website Builder | `simple-website-builder/v2` | `simple/02-website-builder.md` |
+| SIMPLE Visual QA | `simple-visual-qa/v2` | `simple/03-visual-qa.md` |
 | SIMPLE Site Repair | `simple-site-repair/v1` | `simple/04-site-repair.md` |
 
 ### simple-design-blueprint v1
 
 One multimodal call translating the Reference screenshots into an implementation-ready Design Blueprint (`design-blueprint/1`) for a DIFFERENT business. Screenshots are design authority; business content authority is never carried (businessFactsRef provenance only). Emits image slots with ready KIE prompts — no separate KIE prompt LLM stage. Deterministic quality gate (DNA count, page specs, signature elements, checklist) follows; one schema correction, then HUMAN_REVIEW_REQUIRED.
 
-### simple-website-builder v1
+### simple-website-builder v2
 
-The ONE visual owner producing `site-bundle/1` (four pages + shared site.css/site.js) from the frozen Blueprint + immutable Business Facts + Accepted Images + form contract. Reference screenshots remain visible as visual ground truth. IMG:{slotId} placeholder convention identical to legacy assembly.
+The ONE visual owner producing `site-bundle/1` (four pages + shared site.css/site.js) from the frozen Blueprint + immutable Business Facts + Accepted Images + form contract. Reference screenshots remain visible as visual ground truth. IMG:{slotId} placeholder convention identical to legacy assembly. v2 adds the FOUR-PAGE HERO MEDIA hard requirement: every routed page opens with its blueprint hero section containing that page's Accepted Image (traceable `data-image-id`), inner-page hero mass ~0.45-0.75 viewport desktop / >=35-50svh media on mobile, unique page heroes by default.
 
-### simple-visual-qa v1
+### simple-visual-qa v2
 
-One multimodal comparative judgement (Reference vs Candidate, desktop + mobile): nine 0–100 scores plus AT MOST 5 impact-ranked findings that constitute the entire repair brief. Content replacement is explicitly not penalizable.
+One multimodal comparative judgement (Reference vs Candidate, desktop + mobile): nine 0–100 scores plus AT MOST 5 impact-ranked findings that constitute the entire repair brief. Content replacement is explicitly not penalizable. v2 adds: verify each routed page opens with meaningful photographic hero treatment consistent with the Reference design language.
 
 ### simple-site-repair v1
 

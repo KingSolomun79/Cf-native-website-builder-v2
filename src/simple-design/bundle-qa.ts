@@ -8,7 +8,7 @@
 
 import type { BusinessFacts } from "../domain/lifecycle-schema";
 import { factVocabulary, lintTrustContexts, UNSUPPORTED_FACT_PATTERNS } from "../domain/site-generator";
-import type { DesignBlueprint, SiteBundle } from "./contracts";
+import { blueprintHeroSlotId, type DesignBlueprint, type SiteBundle } from "./contracts";
 import type { TechnicalGateResults } from "./release-mapping";
 import type { SimpleTechnicalFinding, SimpleTruthFinding } from "./contracts";
 
@@ -140,6 +140,15 @@ export function runDeterministicBundleQa(input: BundleQaInput): BundleQaResult {
         technical("BROKEN_NAV_LINK", "blocker", `${pageId}: missing nav link to '${other}'`);
       }
     }
+
+    // ── FOUR-PAGE HERO MEDIA (operator GO, 2026-09-09) ──
+    // Every routed page opens with a hero section that contains/references
+    // its Accepted Image. Deterministic and identity-traceable: the page must
+    // carry a hero-element marker (class/id containing "hero") AND reference
+    // the blueprint's hero slot (IMG:{slotId} src or data-image-id) INSIDE
+    // that hero region. No geometry scoring — presence only.
+    const heroFinding = findInnerPageHeroMediaFinding(pageId, html, blueprint);
+    if (heroFinding) technical("INNER_PAGE_HERO_MEDIA_MISSING", "blocker", heroFinding);
   }
 
   // ── Contact form contract (central Form Service, spec KEEP list) ──
@@ -229,13 +238,14 @@ export function runDeterministicBundleQa(input: BundleQaInput): BundleQaResult {
     CRAWLABILITY: !technicalFindings.some((finding) => finding.id === "CRAWLABILITY"),
     // The SIMPLE pipeline has no separate Implementation Contract artifact by
     // design; its equivalent is the deterministic bundle/blueprint conformance
-    // above (slots, nav, shared CSS/JS, form contract).
+    // above (slots, nav, shared CSS/JS, form contract, page-hero media).
     IMPLEMENTATION_CONTRACT_INTEGRITY: !technicalFindings.some(
       (finding) =>
         finding.id === "MISSING_SHARED_CSS" ||
         finding.id === "MISSING_SHARED_JS" ||
         finding.id === "UNKNOWN_IMG_SLOT" ||
-        finding.id === "CONTENT_HIDDEN_WITHOUT_JS"
+        finding.id === "CONTENT_HIDDEN_WITHOUT_JS" ||
+        finding.id === "INNER_PAGE_HERO_MEDIA_MISSING"
     ),
   };
 
@@ -248,6 +258,42 @@ export function runDeterministicBundleQa(input: BundleQaInput): BundleQaResult {
 }
 
 export const SIMPLE_PAGE_FILES = FILE_FOR_PAGE;
+
+// ── FOUR-PAGE HERO MEDIA check (operator GO, 2026-09-09) ────────────────────
+
+// INNER_PAGE_HERO_MEDIA_MISSING: the page's blueprint declares a hero media
+// slot, but the generated page does not open with it — either no hero-marked
+// element (class/id containing "hero"), or the hero slot's Accepted Image is
+// not referenced inside that hero region (<img src="IMG:{slotId}"> or the
+// traceable data-image-id="{slotId}"). Presence-only by design: no geometry
+// scoring, no second visual subsystem.
+export function findInnerPageHeroMediaFinding(
+  pageId: PageId,
+  html: string,
+  blueprint: DesignBlueprint
+): string | null {
+  const heroSlotId = blueprintHeroSlotId(blueprint, pageId);
+  if (!heroSlotId) {
+    return `${pageId}: blueprint declares no hero image slot for this page — every routed page needs a photographic hero`;
+  }
+  const heroElement = /<(?:section|div|figure|header)[^>]*(?:class|id)="[^"]*hero[^"]*"[^>]*>/i.exec(html);
+  if (!heroElement) {
+    return `${pageId}: no hero-marked section found — the page must open with a photographic hero, not a typography-only header`;
+  }
+  const heroStart = heroElement.index;
+  const nextSection = html.indexOf("<section", heroStart + heroElement[0].length);
+  const heroRegionEnd = nextSection === -1 ? html.length : nextSection;
+  const imgIndex = html.indexOf(`IMG:${heroSlotId}`);
+  const dataIdIndex = html.indexOf(`data-image-id="${heroSlotId}"`);
+  const referenceIndex = [imgIndex, dataIdIndex].filter((index) => index >= 0).sort((a, b) => a - b)[0] ?? -1;
+  if (referenceIndex < 0) {
+    return `${pageId}: hero image slot '${heroSlotId}' is not referenced — the hero section must contain its Accepted Image`;
+  }
+  if (referenceIndex < heroStart || referenceIndex >= heroRegionEnd) {
+    return `${pageId}: hero image slot '${heroSlotId}' is referenced outside the hero region — the page must OPEN with the photographic hero`;
+  }
+  return null;
+}
 
 // ── Progressive-enhancement CSS analysis (benchmark hardening F2) ───────────
 

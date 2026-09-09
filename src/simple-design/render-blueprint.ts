@@ -19,6 +19,7 @@ function renderSection(page: string, sections: DesignBlueprint["pages"]["home"][
       if (section.surface) fields.push(`Surface: ${section.surface}`);
       if (section.typography) fields.push(`Typography: ${section.typography}`);
       if (section.media) fields.push(`Media: ${section.media}`);
+      if (section.mediaSlotId) fields.push(`Hero media slot: ${section.mediaSlotId}`);
       if (section.cta) fields.push(`CTA: ${section.cta}`);
       if (section.responsive) fields.push(`Responsive: ${section.responsive}`);
       return `#### ${page} §${index + 1} — ${section.name}\n\nPurpose: ${section.purpose}\n\nLayout: ${section.layout}${fields.length ? `\n\n${fields.map((line) => `- ${line}`).join("\n")}` : ""}`;

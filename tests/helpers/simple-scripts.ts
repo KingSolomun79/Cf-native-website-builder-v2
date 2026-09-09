@@ -103,14 +103,14 @@ function homeHtml(): string {
 function aboutHtml(): string {
   return shell(
     `About — RankForge Kenya`,
-    `<section class="hero"><h1>About</h1></section><section class="section"><div class="section-inner split"><div>${img("about-story", "Craft detail")}</div><div><h2>Our story</h2><p>We are an SEO agency in Nairobi.</p><a href="/services">See services</a></div></div></section>`
+    `<section class="hero about-hero"><div><img src="IMG:about-hero" data-image-id="about-hero" alt="Guiding team at first light"><h1>About</h1><p>Quiet authority since the first season.</p></div></section><section class="section"><div class="section-inner split"><div>${img("about-story", "Craft detail")}</div><div><h2>Our story</h2><p>We are an SEO agency in Nairobi.</p><a href="/services">See services</a></div></div></section>`
   );
 }
 
 function servicesHtml(): string {
   return shell(
     `Services — RankForge Kenya`,
-    `<section class="hero"><h1>Services</h1></section><section class="section"><div class="section-inner"><div class="rows">` +
+    `<section class="hero services-hero"><div><img src="IMG:services-hero" data-image-id="services-hero" alt="Guides preparing for a drive"><h1>Services</h1><p>Three disciplines, one standard.</p></div></section><section class="section"><div class="section-inner"><div class="rows">` +
       ["Technical audits", "Content systems", "Digital PR"].map((row, index) => `<div class="row"><span class="index">0${index + 1}</span><h3>${row}</h3><p><a href="/contact">Enquire</a></p></div>`).join("") +
       `</div></div></section>`
   );
@@ -119,7 +119,7 @@ function servicesHtml(): string {
 function contactHtml(endpoint: string, siteFormId: string): string {
   return shell(
     `Contact — RankForge Kenya`,
-    `<section class="hero"><h1>Contact</h1></section><section class="section"><div class="section-inner split"><div><form method="post" action="${endpoint}"><input type="hidden" name="siteFormId" value="${siteFormId}"><label for="name">Name</label><input id="name" name="name" required><label for="email">Email</label><input id="email" name="email" type="email" required><label for="message">Message</label><textarea id="message" name="message" required></textarea><button class="cta" type="submit">Send enquiry</button></form></div><div><h2>Reach us</h2><p>ops@wazibizwebsites.example</p></div></div></section>`
+    `<section class="hero contact-hero"><div><img src="IMG:contact-atmosphere" data-image-id="contact-atmosphere" alt="Evening at the camp fire"><h1>Contact</h1><p>Begin the conversation.</p></div></section><section class="section"><div class="section-inner split"><div><form method="post" action="${endpoint}"><input type="hidden" name="siteFormId" value="${siteFormId}"><label for="name">Name</label><input id="name" name="name" required><label for="email">Email</label><input id="email" name="email" type="email" required><label for="message">Message</label><textarea id="message" name="message" required></textarea><button class="cta" type="submit">Send enquiry</button></form></div><div><h2>Reach us</h2><p>ops@wazibizwebsites.example</p></div></div></section>`
   );
 }
 

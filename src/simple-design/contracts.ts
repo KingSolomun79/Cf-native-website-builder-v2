@@ -21,6 +21,7 @@
 
 import { Type, type Static } from "@sinclair/typebox";
 import { Value } from "@sinclair/typebox/value";
+import { resolveProviderAspectRatio, aspectRatioClass } from "../lib/aspect-ratio";
 import type { ImagePromptRecord } from "../domain/image-pipeline";
 import type { ImageSlot } from "../domain/site-generator";
 
@@ -105,6 +106,12 @@ export const BlueprintSectionSpecSchema = Type.Object(
     media: Type.Optional(Type.String({ minLength: 1, maxLength: 800 })),
     cta: Type.Optional(Type.String({ minLength: 1, maxLength: 800 })),
     responsive: Type.Optional(Type.String({ minLength: 1, maxLength: 1200 })),
+    // FOUR-PAGE HERO MEDIA (operator GO, 2026-09-09): every routed page opens
+    // with a photographic hero. The page spec's FIRST section names the image
+    // slot that carries its hero photography — the deterministic quality gate
+    // enforces the link (slot exists, same page, hero section, CRITICAL/HIGH,
+    // unique per page). No typography-only pale page header.
+    mediaSlotId: Type.Optional(Type.String({ minLength: 1, maxLength: 160 })),
   },
   { additionalProperties: false }
 );
@@ -369,7 +376,52 @@ export function evaluateBlueprintQualityGate(blueprint: DesignBlueprint): { pass
     slotIds.add(slot.id);
     if (!slot.kiePrompt || slot.kiePrompt.length < 40) failures.push(`image slot '${slot.id}' has no usable kiePrompt`);
   }
+
+  // FOUR-PAGE HERO MEDIA (operator GO, 2026-09-09): every routed page's FIRST
+  // section is a photographic hero linked to a dedicated hero image slot —
+  // existing, same page, hero section, CRITICAL/HIGH priority. The same-page
+  // requirement IS the unique-page-hero default: a slot belongs to exactly one
+  // page, so no second page's hero can reference it without failing here.
+  for (const page of ["home", "about", "services", "contact"] as const) {
+    const firstSection = blueprint?.pages?.[page]?.sections?.[0];
+    if (!firstSection) continue; // missing page spec already reported above
+    if (!/hero/i.test(firstSection.name)) {
+      failures.push(`page '${page}' must open with a hero section (first section '${firstSection.name}')`);
+      continue;
+    }
+    const mediaSlotId = firstSection.mediaSlotId;
+    if (!mediaSlotId) {
+      failures.push(`page '${page}' hero section has no mediaSlotId — every page needs a photographic hero`);
+      continue;
+    }
+    const slot = slots.find((candidate) => candidate.id === mediaSlotId);
+    if (!slot) {
+      failures.push(`page '${page}' hero mediaSlotId '${mediaSlotId}' does not match any image slot`);
+      continue;
+    }
+    if (slot.page !== page) {
+      failures.push(`page '${page}' hero slot '${mediaSlotId}' belongs to page '${slot.page}' — page heroes are unique by default`);
+      continue;
+    }
+    if (!/hero/i.test(slot.section ?? "")) {
+      failures.push(`page '${page}' hero slot '${mediaSlotId}' must target the hero section (got '${slot.section ?? "none"}')`);
+      continue;
+    }
+    if (slot.priority === "NORMAL") {
+      failures.push(`page '${page}' hero slot '${mediaSlotId}' must be CRITICAL or HIGH priority`);
+    }
+  }
   return { passed: failures.length === 0, failures };
+}
+
+// The hero image slot id for a routed page from its blueprint spec (first
+// section's mediaSlotId), or null when the blueprint does not declare one.
+export function blueprintHeroSlotId(blueprint: DesignBlueprint, page: "home" | "about" | "services" | "contact"): string | null {
+  const firstSection = blueprint?.pages?.[page]?.sections?.[0];
+  const mediaSlotId = firstSection?.mediaSlotId;
+  if (!mediaSlotId) return null;
+  const slot = blueprint?.imagery?.imageSlots?.find((candidate) => candidate.id === mediaSlotId);
+  return slot && slot.page === page ? mediaSlotId : null;
 }
 
 // ── site-bundle/1 ───────────────────────────────────────────────────────────
@@ -487,18 +539,18 @@ export interface QaPackage {
 
 // ── Blueprint image slots → existing KIE machinery (spec section 21) ───────
 
-// Orientation follows the GENERATION ratio (the provider request), never the
-// composition ratio (the design observation).
-const ORIENTATION_BY_GENERATION_ASPECT: Record<
-  BlueprintImageSlot["generationAspectRatio"],
-  ImageSlot["orientation"]
-> = {
-  "16:9": "landscape",
-  "4:3": "landscape",
-  "3:2": "landscape",
-  "1:1": "square",
-  "9:16": "portrait",
-};
+// Orientation follows the ratio the PROVIDER will actually be asked for —
+// resolved from the blueprint's composition/generation pair by the same
+// bridge the KIE adapter uses. Judging a correct provider image against the
+// legacy generation-ratio class burned both attempts of 4:3-composition /
+// 1:1-generation slots in the four-page-hero regression (live finding
+// 2026-09-09); orientation and request ratio must never disagree.
+function orientationForSlot(slot: BlueprintImageSlot): ImageSlot["orientation"] {
+  const legacyRatio =
+    slot.generationAspectRatio === "9:16" ? "9:16" : slot.generationAspectRatio === "1:1" ? "1:1" : "16:9";
+  const resolved = resolveProviderAspectRatio(slot.compositionAspectRatio, slot.generationAspectRatio, legacyRatio);
+  return aspectRatioClass(resolved.providerAspectRatio);
+}
 
 // Deterministic, zero-LLM bridge: the Design Blueprint's own slot fields map
 // onto the legacy ImageSlot + ImagePromptRecord shapes the durable KIE
@@ -512,7 +564,7 @@ export function blueprintSlotsToImageSlots(blueprint: DesignBlueprint): ImageSlo
     semanticRole: `${slot.subjectDirection}${slot.compositionDirection ? ` — ${slot.compositionDirection}` : ""}`,
     blueprintRole: `simple-${slot.section || slot.page}`,
     priority: slot.priority,
-    orientation: ORIENTATION_BY_GENERATION_ASPECT[slot.generationAspectRatio],
+    orientation: orientationForSlot(slot),
     // Both blueprint ratios travel with the slot as provenance; the provider
     // adapter maps them onto the selected model's supported request ratios.
     compositionAspectRatio: slot.compositionAspectRatio,

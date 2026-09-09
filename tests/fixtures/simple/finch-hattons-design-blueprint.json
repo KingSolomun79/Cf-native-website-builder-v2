@@ -218,7 +218,8 @@
           "typography": "Hero H1 serif + one-line sans subtitle, generous letter-spacing",
           "media": "single dominant landscape photograph, subject weighted right, dark lower third for text",
           "cta": "Capsule-outline 'Enquire' bottom center",
-          "responsive": "80svh on tablet, 70svh on phone; subtitle wraps; CTA stays visible above the fold"
+          "responsive": "80svh on tablet, 70svh on phone; subtitle wraps; CTA stays visible above the fold",
+          "mediaSlotId": "home-hero"
         },
         {
           "name": "Introduction Statement",
@@ -272,7 +273,8 @@
           "layout": "50svh full-bleed photograph with bottom-aligned page title over scrim",
           "surface": "photographic with scrim",
           "typography": "Hero H1 at reduced scale",
-          "responsive": "40svh on mobile"
+          "responsive": "40svh on mobile",
+          "mediaSlotId": "about-hero"
         },
         {
           "name": "Story Editorial",
@@ -292,7 +294,8 @@
           "purpose": "Frame the offering in one calm statement",
           "layout": "50svh photographic header, title over scrim",
           "surface": "photographic with scrim",
-          "responsive": "40svh mobile"
+          "responsive": "40svh mobile",
+          "mediaSlotId": "services-hero"
         },
         {
           "name": "Offering Rows",
@@ -312,7 +315,8 @@
           "purpose": "A direct, personal invitation to enquire",
           "layout": "40svh quiet photographic header with page title",
           "surface": "photographic with scrim",
-          "responsive": "32svh mobile"
+          "responsive": "32svh mobile",
+          "mediaSlotId": "contact-atmosphere"
         },
         {
           "name": "Enquiry Form + Details",
@@ -434,7 +438,7 @@
         "id": "services-hero",
         "page": "services",
         "section": "Services Hero",
-        "priority": "NORMAL",
+        "priority": "HIGH",
         "subjectDirection": "Quiet guiding moment — footprints leading through pale grass toward hills",
         "compositionDirection": "Full-bleed banner crop with dark upper area for title",
         "lighting": "Overcast soft light",
@@ -448,7 +452,7 @@
         "id": "contact-atmosphere",
         "page": "contact",
         "section": "Contact Hero",
-        "priority": "NORMAL",
+        "priority": "HIGH",
         "subjectDirection": "Misty morning landscape, muted and calm",
         "compositionDirection": "Banner crop, dimmed for title overlay",
         "lighting": "Soft misty dawn",
@@ -457,6 +461,23 @@
         "altText": "Misty morning over quiet grassland",
         "compositionAspectRatio": "16:9",
         "generationAspectRatio": "16:9"
+      },
+      {
+        "id": "about-hero",
+        "page": "about",
+        "section": "Hero",
+        "priority": "HIGH",
+        "compositionAspectRatio": "3:2",
+        "generationAspectRatio": "3:2",
+        "cropStrategy": "Identical 3:2 generation and composition ratios — no crop required",
+        "subjectDirection": "Warm portrait-landscape of the lodge guiding team gathered at first light beside the mess tent, faces turned toward one another in conversation, acacia savanna softly out of focus behind them",
+        "compositionDirection": "Team weighted to the left third with open savanna negative space to the right for the headline, eye-level, medium-wide",
+        "lighting": "Golden dawn side-light with soft shadow falloff",
+        "palette": "Warm sand, olive and the brand's deep earth tones",
+        "cropBehavior": "Mobile crop keeps the group centered; savanna edge falls away first",
+        "kiePrompt": "Documentary photograph at first light of a small safari guiding team gathered in easy conversation beside a canvas mess tent on the savanna edge, warm golden side lighting, acacia trees soft in the background, natural candid expressions, no text or logos anywhere in the frame",
+        "negativePrompt": "no text, no logos, no signage, no readable screens, no dashboards, no watermarks, no lens flares over faces",
+        "altText": "The lodge guiding team gathered at first light beside the mess tent"
       }
     ]
   },

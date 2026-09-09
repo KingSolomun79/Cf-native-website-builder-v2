@@ -238,10 +238,16 @@ describe("SIMPLE prompt contract registration", () => {
       "simple-site-repair",
     ] as const) {
       const composed = composeStagePrompt(stage);
-      // simple-design-blueprint is v3 (schema-convergence brief §13: native
-      // json_schema owns structure, the prompt keeps design intent); the
-      // other three remain at their original v1.
-      expect(composed.promptVersion).toBe(stage === "simple-design-blueprint" ? "v3" : "v1");
+      // Versions per the operator GOs: blueprint v4 (four-page hero media),
+      // builder v2 (hero-media hard requirement), visual QA v2 (hero
+      // verification); site repair remains at its original v1.
+      expect(composed.promptVersion).toBe(
+        stage === "simple-design-blueprint"
+          ? "v4"
+          : stage === "simple-site-repair"
+            ? "v1"
+            : "v2"
+      );
       expect(composed.systemPrompt).toContain("Retained detailed stage prompt body");
       expect(composed.systemPrompt.length).toBeGreaterThan(2000); // contract + body
     }

@@ -37,6 +37,8 @@ export interface SimpleVisualQaResult {
 function buildVisualQaUserPrompt(input: RunSimpleVisualQaInput): string {
   return `Compare the CANDIDATE renders against the REFERENCE screenshots for design-identity fidelity. The replacement business's copy, identity, services and photo subjects are INTENTIONALLY different — judge only the design: silhouette, section order and mass, hero composition, typography, spacing rhythm, surface/color rhythm, image treatment, component language, the blueprint's signature elements, and responsive character.
 
+FOUR-PAGE HERO MEDIA: verify that each routed page opens with meaningful photographic hero treatment consistent with the Reference design language — a typography-only page header on any of home/about/services/contact is a finding.
+
 DESIGN BLUEPRINT (the intent the candidate must realize — acceptance checklist included):
 ${JSON.stringify(input.blueprint)}
 

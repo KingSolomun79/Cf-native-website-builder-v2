@@ -13,6 +13,7 @@
 
 import type { Env } from "../env.d";
 import { sha256Hex } from "./crypto";
+import { resolveProviderAspectRatio } from "./aspect-ratio";
 import type {
   ImageGenerationProvider,
   ImageProviderFetchResult,
@@ -41,65 +42,17 @@ const CREATE_MAX_ATTEMPTS = 3;
 //   text-to-image this workflow omits it). Authentication/jobs envelope and
 //   the /api/v1/jobs/recordInfo status lifecycle are shared KIE jobs-API
 //   surfaces, reused unchanged.
+// The composition→provider ratio bridge lives in lib/aspect-ratio.ts (shared
+// with the blueprint slot bridge, which must derive slot orientation from the
+// SAME resolution — see that file for the conformance-gate rationale).
 export const NANO_BANANA_MODEL_ID = "nano-banana-2-lite";
 export const NANO_BANANA_MAX_PROMPT_CHARS = 20_000;
-export const NANO_BANANA_SUPPORTED_ASPECT_RATIOS: ReadonlySet<string> = new Set([
-  "1:1", "1:4", "1:8", "2:3", "3:2", "3:4", "4:1", "4:3", "4:5", "5:4", "8:1", "9:16", "16:9", "21:9", "auto",
-]);
-
-export interface ProviderAspectRatioResolution {
-  providerAspectRatio: string;
-  mappingReason: string;
-}
-
-// Deterministic composition→provider ratio bridge (GO §5). The Blueprint is
-// never mutated: where its compositionAspectRatio is natively supported it is
-// used DIRECTLY (no 21:9 → 16:9 downgrade); an unsupported composition ratio
-// (e.g. 5:3) falls to the frozen generationAspectRatio; a numeric-nearest
-// supported ratio is the deterministic last resort; no composition context at
-// all keeps the legacy orientation bridge value.
-export function resolveProviderAspectRatio(
-  compositionAspectRatio: string | undefined,
-  generationAspectRatio: string | undefined,
-  legacyRatio: string,
-): ProviderAspectRatioResolution {
-  const supported = NANO_BANANA_SUPPORTED_ASPECT_RATIOS;
-  if (compositionAspectRatio && supported.has(compositionAspectRatio)) {
-    return { providerAspectRatio: compositionAspectRatio, mappingReason: `composition ratio ${compositionAspectRatio} natively supported by ${NANO_BANANA_MODEL_ID}` };
-  }
-  if (compositionAspectRatio && generationAspectRatio && supported.has(generationAspectRatio)) {
-    return { providerAspectRatio: generationAspectRatio, mappingReason: `composition ratio ${compositionAspectRatio} unsupported; frozen generation ratio ${generationAspectRatio} used` };
-  }
-  if (compositionAspectRatio) {
-    const target = parseAspectRatioValue(compositionAspectRatio);
-    if (target !== null) {
-      let best: string | null = null;
-      let bestDistance = Number.POSITIVE_INFINITY;
-      for (const candidate of supported) {
-        const value = parseAspectRatioValue(candidate);
-        if (value === null) continue;
-        const distance = Math.abs(value - target);
-        if (distance < bestDistance) {
-          bestDistance = distance;
-          best = candidate;
-        }
-      }
-      if (best) {
-        return { providerAspectRatio: best, mappingReason: `composition ratio ${compositionAspectRatio} and generation ratio ${generationAspectRatio ?? "none"} unsupported; nearest supported ratio used` };
-      }
-    }
-  }
-  return { providerAspectRatio: legacyRatio, mappingReason: "no composition ratio available; legacy orientation bridge used" };
-}
-
-function parseAspectRatioValue(ratio: string): number | null {
-  const match = /^([0-9]{1,4}(?:\.[0-9]{1,2})?):([0-9]{1,4}(?:\.[0-9]{1,2})?)$/.exec(ratio);
-  if (!match) return null;
-  const width = Number.parseFloat(match[1]);
-  const height = Number.parseFloat(match[2]);
-  if (!Number.isFinite(width) || !Number.isFinite(height) || height === 0) return null;
-  return width / height;
-}
+export {
+  NANO_BANANA_SUPPORTED_ASPECT_RATIOS,
+  resolveProviderAspectRatio,
+  aspectRatioClass,
+  type ProviderAspectRatioResolution,
+} from "./aspect-ratio";
 
 // The full model-specific request decision for one image task, as a PURE
 // function: the adapter's createTask and the benchmark driver's provenance

@@ -10,6 +10,8 @@ Squint-test fidelity: silhouette, rhythm, mass, language — not pixel identity.
 
 ## Evaluate, scoring each 0–100
 
+Verify first that each routed page opens with meaningful photographic hero treatment consistent with the Reference design language — a typography-only page header on home, about, services or contact is a finding and weighs on macroLayout and imageTreatment.
+
 1. **macroLayout** — overall silhouette, section order and visual mass per section, hero composition.
 2. **typography** — family character (serif/sans, display vs body contrast), scale, weight discipline.
 3. **spacingRhythm** — vertical rhythm, section padding, whitespace as a layout device.
