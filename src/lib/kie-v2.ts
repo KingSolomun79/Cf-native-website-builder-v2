@@ -24,8 +24,31 @@ const POLL_TIMEOUT_MS_DEFAULT = 150_000;
 // KIE z-image documents a 1000-character prompt maximum; exceeding it fails
 // with code 500 "The text length cannot exceed the maximum limit" (live
 // evidence, issue #30). Cap the assembled prompt at the documented limit.
-const MAX_PROMPT_CHARS = 1000;
+export const KIE_MAX_PROMPT_CHARS = 1000;
+const MAX_PROMPT_CHARS = KIE_MAX_PROMPT_CHARS;
 const CREATE_MAX_ATTEMPTS = 3;
+
+// Text-safe photography policy (benchmark hardening, Phase 3 finding: KIE
+// photographs baked in fake dashboards/analytics UI/pseudo-text). Applied
+// deterministically at the KIE image-request boundary to EVERY photographic
+// generation regardless of Blueprint wording; it overrides any conflicting
+// instruction inside the slot brief, which is truncated to fit AFTER the
+// policy. Proof elements (stats, charts, UI) must be real HTML/CSS overlays,
+// never baked into generated photography.
+export const TEXT_SAFE_PHOTO_POLICY =
+  "STRICT RULE, overriding any conflicting instruction: the photograph must contain NO visible or pseudo-visible writing — no text, no letters, no numbers, no logos or brand marks, no signage, no posters, no labels, no documents, no website pages, no dashboards, no analytics interfaces, no presentation slides, no charts with labels or axes. If the scene includes a laptop, monitor, tablet or phone, its screen faces away from the camera, is switched off, strongly defocused, cropped out, or reads only as a plain glow. Never invent interface content.";
+export const TEXT_SAFE_PHOTO_NEGATIVE =
+  "Avoid: text, pseudo-text, gibberish letters, numbers, logos, signage, website screenshot, user interface, dashboard, browser window, analytics UI, readable monitor, presentation slide, poster, watermark, label.";
+
+// Pure prompt assembly so tests can prove the policy survives any brief
+// (including briefs that ask for screens/analytics) within the 1000-char cap.
+export function assembleTextSafePhotoPrompt(brief: string, aspectRatio: string): string {
+  const head = `Create one natural editorial photograph intended to be placed inside a website. ${TEXT_SAFE_PHOTO_POLICY} Aspect ratio: ${aspectRatio}.`;
+  const tail = ` ${TEXT_SAFE_PHOTO_NEGATIVE}.`;
+  const budget = MAX_PROMPT_CHARS - head.length - tail.length - 1;
+  const fitted = brief.length > budget ? `${brief.slice(0, Math.max(0, budget - 3))}...` : brief;
+  return `${head} ${fitted}${tail}`;
+}
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -63,13 +86,9 @@ export class KieV2ImageProvider implements ImageGenerationProvider {
   }
 
   async createTask(task: ResolvedSlotTask): Promise<{ taskId: string; costUsd: number }> {
-    const brief = task.promptText.length > 640 ? `${task.promptText.slice(0, 640)}...` : task.promptText;
-    const assembledPrompt = [
-      "Create one natural editorial photograph intended to be placed inside a website, grounded in the supplied slot brief.",
-      `Aspect ratio: ${task.aspectRatio}.`,
-      brief,
-      "Output only the photographic scene: no website, UI, screen, poster, infographic or mockup; no text, letters, logos or badges.",
-    ].join(" ").slice(0, MAX_PROMPT_CHARS);
+    // The text-safe policy leads the prompt and can never be truncated away
+    // by a long slot brief (the brief fills whatever budget remains).
+    const assembledPrompt = assembleTextSafePhotoPrompt(task.promptText, task.aspectRatio);
 
     // KIE rate-limits bursts (live evidence, issue #30: 429 "call frequency
     // too high"); back off and retry the same creation.

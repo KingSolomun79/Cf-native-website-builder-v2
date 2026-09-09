@@ -383,7 +383,7 @@ export async function runSimpleBuildPipeline(
               buildVersionId: ctx.buildVersionId,
               buildVersionNumber: ctx.buildVersionNumber,
               siteGenerationId: ctx.siteGenerationId,
-              capture: deps.qaCapture ? deps.qaCapture(previewUrl) : createProductionQaCapture(env, previewUrl),
+              capture: deps.qaCapture ? deps.qaCapture(previewUrl) : createProductionQaCapture(env, previewUrl, { expectedBuildVersionId: ctx.buildVersionId }),
             })
           )
         : null;

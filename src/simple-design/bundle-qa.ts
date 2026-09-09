@@ -70,8 +70,7 @@ export function runDeterministicBundleQa(input: BundleQaInput): BundleQaResult {
   const slotIds = input.slotIds;
 
   const pageText: Partial<Record<PageId, string>> = {};
-  for (const pageId of PAGE_IDS) {
-    const html = bundle.pages[pageId];
+  for (const pageId of PAGE_IDS) {    const html = bundle.pages[pageId];
     if (typeof html !== "string" || html.length === 0) {
       technical("MISSING_CORE_PAGE", "blocker", `page '${pageId}' missing from bundle`);
       continue;
@@ -179,6 +178,20 @@ export function runDeterministicBundleQa(input: BundleQaInput): BundleQaResult {
   if (!css.includes(":focus-visible")) {
     technical("FOCUS_VISIBLE_MISSING", "blocker", "site.css has no :focus-visible style");
   }
+  // Progressive-enhancement gate (benchmark hardening F2): reveal-style
+  // hidden resting states make content disappear without JavaScript — the
+  // exact defect that rendered valid sections blank in static captures. A
+  // bundle whose script animates via IntersectionObserver must not define
+  // reveal/fade content hidden (opacity 0 / visibility hidden) as its
+  // resting CSS state outside prefers-reduced-motion blocks.
+  const hiddenRevealSelectors = findHiddenByDefaultRevealRules(css);
+  if (hiddenRevealSelectors.length > 0) {
+    technical(
+      "CONTENT_HIDDEN_WITHOUT_JS",
+      /IntersectionObserver/.test(bundle.sharedJs) || motionPresent ? "blocker" : "warning",
+      `site.css hides content by default (JavaScript would be required to reveal it): ${hiddenRevealSelectors.join("; ")}`
+    );
+  }
   const hasMediaQueries = /@media[^{]+\d{3,4}px/.test(css);
   const fixedWide = /(?:width|min-width)\s*:\s*(1[0-9]{3,}|[2-9][0-9]{3,})px/.test(css);
   if (fixedWide && !hasMediaQueries) {
@@ -221,7 +234,8 @@ export function runDeterministicBundleQa(input: BundleQaInput): BundleQaResult {
       (finding) =>
         finding.id === "MISSING_SHARED_CSS" ||
         finding.id === "MISSING_SHARED_JS" ||
-        finding.id === "UNKNOWN_IMG_SLOT"
+        finding.id === "UNKNOWN_IMG_SLOT" ||
+        finding.id === "CONTENT_HIDDEN_WITHOUT_JS"
     ),
   };
 
@@ -234,3 +248,57 @@ export function runDeterministicBundleQa(input: BundleQaInput): BundleQaResult {
 }
 
 export const SIMPLE_PAGE_FILES = FILE_FOR_PAGE;
+
+// ── Progressive-enhancement CSS analysis (benchmark hardening F2) ───────────
+
+// Flattens @media blocks so their inner rules scan like top-level rules;
+// prefers-reduced-motion blocks are dropped entirely — hiding rules there are
+// the FIX (reduce animation), not a content-visibility defect.
+function flattenMediaBlocks(css: string): string {
+  let out = "";
+  let index = 0;
+  while (index < css.length) {
+    const start = css.indexOf("@media", index);
+    if (start < 0) {
+      out += css.slice(index);
+      break;
+    }
+    out += css.slice(index, start);
+    const braceOpen = css.indexOf("{", start);
+    if (braceOpen < 0) {
+      out += css.slice(start);
+      break;
+    }
+    let depth = 1;
+    let cursor = braceOpen + 1;
+    while (cursor < css.length && depth > 0) {
+      if (css[cursor] === "{") depth += 1;
+      else if (css[cursor] === "}") depth -= 1;
+      cursor += 1;
+    }
+    const inner = css.slice(braceOpen + 1, cursor - 1);
+    if (!/prefers-reduced-motion/i.test(css.slice(start, braceOpen))) {
+      out += inner;
+    }
+    index = cursor;
+  }
+  return out;
+}
+
+// Reports reveal/fade-style selectors whose resting state HIDES content
+// (opacity 0 or visibility hidden) — content that would vanish without
+// JavaScript or before any scroll event fires.
+export function findHiddenByDefaultRevealRules(css: string): string[] {
+  const flattened = flattenMediaBlocks(css);
+  const offenders: string[] = [];
+  for (const match of flattened.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
+    const selector = match[1].trim();
+    if (!/reveal|fade|animate|entrance|appear/i.test(selector)) continue;
+    if (selector.includes("@")) continue;
+    const declarations = match[2].toLowerCase();
+    if (/(^|[;{\s])opacity\s*:\s*0\s*(!important)?\s*(;|$)/.test(declarations) || /visibility\s*:\s*hidden/.test(declarations)) {
+      offenders.push(selector.slice(0, 120));
+    }
+  }
+  return offenders;
+}

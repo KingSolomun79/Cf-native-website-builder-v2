@@ -19,6 +19,7 @@ import type { CraftCapture } from "./craft-preflight";
 import { playwrightAdapter, type RawLayout } from "../lib/browser-adapter";
 import { withBrowser } from "../lib/browser-lifecycle";
 import type { ViewportName } from "../lib/viewports";
+import { PREVIEW_MARKER_META_NAME } from "./assembly";
 
 const PAGE_PATHS: Record<PageId, string> = {
   home: "",
@@ -26,6 +27,61 @@ const PAGE_PATHS: Record<PageId, string> = {
   services: "services",
   contact: "contact",
 };
+
+// Preview readiness (benchmark hardening F1): a freshly deployed preview
+// Worker can briefly serve the platform placeholder while assets propagate.
+// Captures may begin ONLY after the preview proves it serves THIS candidate —
+// proven by the build-version meta marker assembly injected into every page.
+// Bounded wait; a preview that never proves itself fails as PREVIEW_NOT_READY
+// instead of feeding a placeholder page into Visual QA. No semantic retries.
+export class PreviewNotReadyError extends Error {
+  constructor(
+    readonly previewUrl: string,
+    readonly expectedBuildVersionId: string,
+    readonly timeoutMs: number,
+    readonly lastStatus: number | null
+  ) {
+    super(
+      `PREVIEW_NOT_READY: ${previewUrl} did not serve the expected ${PREVIEW_MARKER_META_NAME}=${expectedBuildVersionId} marker within ${timeoutMs}ms (last status ${lastStatus ?? "n/a"})`
+    );
+    this.name = "PreviewNotReadyError";
+  }
+}
+
+function previewMarkerNeedle(buildVersionId: string): string {
+  return `name="${PREVIEW_MARKER_META_NAME}" content="${buildVersionId}"`;
+}
+
+export async function waitForPreviewMarker(options: {
+  previewUrl: string;
+  buildVersionId: string;
+  timeoutMs?: number;
+  intervalMs?: number;
+  fetchImpl?: typeof fetch;
+}): Promise<void> {
+  const timeoutMs = options.timeoutMs ?? 60_000;
+  const intervalMs = options.intervalMs ?? 2_000;
+  const fetchImpl = options.fetchImpl ?? fetch;
+  // Cache-buster: a placeholder response must not be served from an edge cache.
+  const url = `${options.previewUrl.replace(/\/$/, "")}/?preview-readiness=${Date.now()}`;
+  const deadline = Date.now() + timeoutMs;
+  let lastStatus: number | null = null;
+  for (;;) {
+    try {
+      const response = await fetchImpl(url, { headers: { "cache-control": "no-cache" } });
+      lastStatus = response.status;
+      if (response.ok && (await response.text()).includes(previewMarkerNeedle(options.buildVersionId))) {
+        return;
+      }
+    } catch {
+      // Connection refused while the deployment propagates — keep polling.
+    }
+    if (Date.now() >= deadline) {
+      throw new PreviewNotReadyError(options.previewUrl, options.buildVersionId, timeoutMs, lastStatus);
+    }
+    await new Promise((resolve) => setTimeout(resolve, intervalMs));
+  }
+}
 
 function viewportName(width: number): ViewportName {
   if (width <= 500) return "mobile";
@@ -89,16 +145,33 @@ export async function createCraftCapture(env: Env, previewUrl: string): Promise<
   });
 }
 
-export function createProductionQaCapture(env: Env, previewUrl: string): QaCaptureFn {
+export interface ProductionQaCaptureOptions {
+  /** When set, captures wait until the preview proves it serves THIS Build
+   *  Version (marker poll) and fail as PREVIEW_NOT_READY otherwise. */
+  expectedBuildVersionId?: string;
+  readinessTimeoutMs?: number;
+}
+
+export function createProductionQaCapture(env: Env, previewUrl: string, options?: ProductionQaCaptureOptions): QaCaptureFn {
   const base = previewUrl.replace(/\/$/, "");
   return async (spec) => {
+    if (options?.expectedBuildVersionId) {
+      await waitForPreviewMarker({
+        previewUrl: base,
+        buildVersionId: options.expectedBuildVersionId,
+        ...(options.readinessTimeoutMs ? { timeoutMs: options.readinessTimeoutMs } : {}),
+      });
+    }
     const session = await playwrightAdapter.launch(env);
     return withBrowser(session, async (browser) => {
       const captures: PageCapture[] = [];
       for (const entry of spec) {
         const page = await browser.newPage({
           viewport: { name: viewportName(entry.viewportWidth), width: entry.viewportWidth, height: 900 },
-          reducedMotion: false,
+          // Reduced motion for QA captures: scroll/entrance animation must
+          // never suppress content in a static screenshot (progressive
+          // enhancement is asserted separately by the bundle gate).
+          reducedMotion: true,
         });
         try {
           const diagnostics = await page.goto(`${base}/${PAGE_PATHS[entry.page]}`, {

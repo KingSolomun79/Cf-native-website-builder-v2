@@ -221,19 +221,11 @@ export function createSimpleScripts(options: SimpleScriptsOptions = {}): SimpleP
       if (repairCalls > 1) {
         throw new Error("SIMPLE repair script invoked twice — the one-repair budget was violated");
       }
-      const endpoint = /form action:\s*(\S+)/.exec(user)?.[1] ?? "";
-      const siteFormId = /value="(site:[^"]+)"/.exec(user)?.[1] ?? "site:unknown";
+      // Changed-files repair (hardening F-repair): the repair returns ONLY the
+      // changed file; the deterministic merge must reproduce the full bundle.
       return respond({
-        version: "1",
-        pages: {
-          home: homeHtml().replace("clamp(2.5rem", "clamp(2.5rem"),
-          about: aboutHtml(),
-          services: servicesHtml(),
-          contact: contactHtml(endpoint, siteFormId),
-        },
-        sharedCss: SIMPLE_CSS,
-        sharedJs: SIMPLE_JS,
-        notes: "scripted repaired bundle",
+        files: [{ path: "index.html", content: homeHtml() }],
+        notes: "scripted repair: home file replaced",
       });
     }
     throw new Error(`simple script has no output for prompt: ${user.slice(0, 120)}`);
