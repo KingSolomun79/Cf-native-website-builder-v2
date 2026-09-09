@@ -1,0 +1,108 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  // EXPERIMENT BRANCH ONLY (experiment/simplified-design-pipeline).
+  // Dedicated experimental runtime for the SIMPLE design pipeline live
+  // benchmark (spec sections 17-18). Deploy with:
+  //   CLOUDFLARE_ACCOUNT_ID=c1c0f6b100d55a09ce6a7a3121a19224 \
+  //     npx wrangler deploy -c wrangler.exp.jsonc
+  // It reuses the operator's dormant sandbox Worker name (last deployed
+  // 2026-08-25, V1-era) so the existing provider Worker secrets
+  // (ZHIPU_API_KEY / KIE_API_KEY / CF_AIG_TOKEN / CF_DEPLOY_API_TOKEN /
+  // WEBHOOK_SECRET) carry over WITHOUT any secret ever leaving the platform.
+  // Data resources are FRESH and experimental-only: migration 0035 is applied
+  // to THIS D1 only, never to production website_factory_v2.
+  // NEVER deploy this config's bindings to cf-website-factory-v2 (spec 74-75).
+  "name": "cf-website-factory-sandbox",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-08-04",
+  "compatibility_flags": ["nodejs_compat"],
+  "account_id": "c1c0f6b100d55a09ce6a7a3121a19224",
+  "limits": {
+    "cpu_ms": 120000
+  },
+  "rules": [
+    {
+      "type": "Text",
+      "globs": ["**/*.md"],
+      "fallthrough": true
+    }
+  ],
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "website_factory_v2_simple_exp",
+      "database_id": "81084e55-bd84-4099-ad5b-78b5dab5b63d"
+    }
+  ],
+  "r2_buckets": [
+    {
+      "binding": "SITE_BUCKET",
+      "bucket_name": "website-factory-v2-simple-exp-assets"
+    }
+  ],
+  "workflows": [
+    {
+      "name": "website-build-workflow",
+      "binding": "WEBSITE_BUILD_WORKFLOW",
+      "class_name": "WebsiteBuildWorkflow"
+    }
+  ],
+  "send_email": [
+    {
+      "name": "EMAIL"
+    }
+  ],
+  "triggers": {
+    "crons": ["*/10 * * * *"]
+  },
+  "browser": {
+    "binding": "BROWSER"
+  },
+  "images": {
+    "binding": "IMAGES"
+  },
+  // TRANSPORT ITERATION (§16): Workers AI binding for the experiment-only
+  // alternate transport @cf/zai-org/glm-5.3-flash. NEVER production config.
+  "ai": {
+    "binding": "AI"
+  },
+  "observability": {
+    "logs": {
+      "enabled": true,
+      "invocation_logs": true
+    },
+    "traces": {
+      "enabled": false
+    }
+  },
+  "vars": {
+    "CF_ACCOUNT_ID": "c1c0f6b100d55a09ce6a7a3121a19224",
+    "CF_AI_GATEWAY_ID": "website-factory",
+    "PUBLIC_APP_URL": "https://cf-website-factory-sandbox.wazibizwebsites.workers.dev",
+    "WAZIBIZ_SENDER_EMAIL": "notifications@wazibiz.ke",
+    "KIE_API_URL": "https://api.kie.ai",
+    "KIE_MODEL": "nano-banana-2-lite",
+    "KIE_POLL_INTERVAL_MS": "30000",
+    "KIE_ATTEMPT_TIMEOUT_MS": "900000",
+    "ZHIPU_API_URL": "https://api.z.ai/api/coding/paas/v4",
+    "ZHIPU_GATEWAY_PROVIDER": "custom-zhipu",
+    "LLM_MODEL": "glm-5.3-flash",
+    "PRIMARY_PROVIDER": "zhipu",
+    "DESIGN_PIPELINE_VERSION": "simple_blueprint_v1",
+    "VISION_PRIMARY_PROVIDER": "zhipu",
+    "VISION_FALLBACK_PROVIDER": "ai-gateway",
+    "VISION_REQUEST_TIMEOUT_MS": "120000",
+    "VISION_MAX_ATTEMPTS_PER_PROVIDER": "2",
+    "VISION_RETRY_DELAY_MS": "500",
+    "VISION_INPUT_MAX_BYTES": "4194304",
+    "VISION_INPUT_MAX_WIDTH": "1920",
+    "VISION_INPUT_MAX_HEIGHT": "12000",
+    "EXP_BENCHMARK_DRIVER": "1",
+    // TRANSPORT ITERATION (operator brief §16): the Z.AI General API failed
+    // the §5 entitlement check (error 1113 — Coding-Plan key, no General API
+    // resource package), so the experiment pins the §16 alternate transport:
+    // Workers AI hosting the SAME model release (@cf/zai-org/glm-5.3-flash),
+    // streamed. Explicit experiment-only provenance exception. Never production.
+    "SIMPLE_STREAMING_TRANSPORT": "workers_ai_stream"
+  }
+}

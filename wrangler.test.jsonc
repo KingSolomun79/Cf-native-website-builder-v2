@@ -37,6 +37,7 @@
     "KIE_API_KEY": "test-kie-key",
     "KIE_MODEL": "z-image",
     "LLM_MODEL": "glm-5.3-flash",
+    "DESIGN_PIPELINE_VERSION": "legacy_v2",
     "CF_ACCOUNT_ID": "test-account",
     "CF_DEPLOY_API_TOKEN": "test-deploy-token",
     "OPENROUTER_API_KEY": "test-or-key",

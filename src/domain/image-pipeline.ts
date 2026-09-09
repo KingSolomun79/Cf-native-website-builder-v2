@@ -123,6 +123,12 @@ export interface ResolvedSlotTask {
   slotId: string;
   promptText: string;
   aspectRatio: string;
+  /** Blueprint provenance ratios (SIMPLE blueprint bridge). The provider
+   *  adapter decides the actual request ratio from them (native support vs
+   *  frozen generation ratio vs legacy orientation bridge); optional so
+   *  non-blueprint pipelines are unaffected. */
+  compositionAspectRatio?: string;
+  generationAspectRatio?: string;
 }
 
 export type ImageProviderFetchResult =
@@ -455,6 +461,12 @@ export interface RunImageGenerationInput {
   provider: ImageGenerationProvider;
   generate?: RawAiGenerate;
   expandToTarget?: boolean;
+  /** SIMPLE pipeline only (experiment branch): pre-derived prompt records —
+   *  the Design Blueprint itself is the prompt authority, so the
+   *  kie-image-prompt-generator LLM stage is skipped. Legacy callers omit
+   *  this and get the unchanged prompt-stage behavior. Records must cover
+   *  every slot id. */
+  promptRecords?: ImagePromptRecord[];
 }
 
 export interface ImageGenerationResult {

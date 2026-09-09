@@ -53,6 +53,33 @@ export interface Env {
   // provider failover must keep serving this exact model.
   LLM_MODEL?: string;
 
+  // EXPERIMENT BRANCH ONLY (experiment/simplified-design-pipeline): internal
+  // A/B selector for the design pipeline. "simple_blueprint_v1" routes Builds
+  // through src/simple-design/ (Design Blueprint → Website Builder → QA →
+  // ONE Repair); "legacy_v2" keeps the canonical chain. Never exposed in
+  // onboarding; the business-facing Build Mode remains REFERENCE_BOUND.
+  DESIGN_PIPELINE_VERSION?: string;
+
+  // EXPERIMENT BRANCH ONLY: live benchmark driver switches (never set in the
+  // production config). EXP_BENCHMARK_DRIVER="1" enables the driver route;
+  // EXP_BENCHMARK_SECRET (optional) overrides the HMAC secret it accepts.
+  EXP_BENCHMARK_DRIVER?: string;
+  EXP_BENCHMARK_SECRET?: string;
+
+  // EXPERIMENT TRANSPORT ITERATION ONLY (sections 3-13 of the operator brief):
+  // Z.AI GENERAL API streaming for SIMPLE large-output calls. The endpoint
+  // base defaults to https://api.z.ai/api/paas/v4; SIMPLE_STREAMING_TRANSPORT
+  // = "zai_general_stream" routes SIMPLE default seams through the streaming
+  // boundary (src/lib/ai-streaming.ts). Never set in the production config.
+  ZHIPU_GENERAL_API_URL?: string;
+  SIMPLE_STREAMING_TRANSPORT?: string;
+  SIMPLE_STREAM_STALL_TIMEOUT_MS?: string;
+  SIMPLE_STREAM_MAX_DURATION_MS?: string;
+  // TRANSPORT ITERATION (§16): Workers AI binding for the experiment-only
+  // alternate transport (@cf/zai-org/glm-5.3-flash). Optional at type level;
+  // bound only in wrangler.exp.jsonc.
+  AI?: Ai;
+
   // OpenRouter leg (operator decision 2026-09-02): optional — ZAI is primary
   // and the Cloudflare AI Gateway is the working fallback; provider chains
   // are key-driven, so an absent key skips the OpenRouter leg without error.

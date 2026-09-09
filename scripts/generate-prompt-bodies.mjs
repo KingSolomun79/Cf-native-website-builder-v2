@@ -7,13 +7,28 @@
 // runs the same generation before tests; this script serves dev/deploy. The
 // markdown files remain the single source of truth.
 
-import { readdirSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
+import { readdirSync, readFileSync, writeFileSync, mkdirSync, existsSync } from "node:fs";
 import { resolve, basename } from "node:path";
 
 const promptsDir = resolve(process.cwd(), "v2-docs", "prompts");
 const outPath = resolve(process.cwd(), "src", "domain", "generated", "prompt-bodies.ts");
 
-const files = readdirSync(promptsDir).filter((name) => name.endsWith(".md") && name !== "PROMPT-MANIFEST.md").sort();
+// Top-level canonical bodies PLUS the experiment branch's simple-design
+// bodies in v2-docs/prompts/simple/ (keyed as "simple/<file>"). PROMPT-
+// MANIFEST.md and the manifest mirror stay excluded.
+const simpleDir = resolve(promptsDir, "simple");
+const files = [
+  ...readdirSync(promptsDir)
+    .filter((name) => name.endsWith(".md") && name !== "PROMPT-MANIFEST.md")
+    .sort()
+    .map((name) => name),
+  ...(existsSync(simpleDir)
+    ? readdirSync(simpleDir)
+        .filter((name) => name.endsWith(".md"))
+        .sort()
+        .map((name) => `simple/${name}`)
+    : []),
+];
 
 const entries = files
   .map((name) => {

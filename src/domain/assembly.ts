@@ -70,6 +70,23 @@ export class AssemblyPreflightError extends Error {
   }
 }
 
+// Preview-readiness marker (benchmark hardening F1): every assembled page
+// carries its Build Version identity so the QA capture can prove the preview
+// is serving THIS exact candidate before any screenshot is taken — a
+// workers.dev propagation placeholder can never enter Visual QA.
+export const PREVIEW_MARKER_META_NAME = "wazibiz-build-version";
+
+export function previewMarkerMeta(buildVersionId: string): string {
+  return `<meta name="${PREVIEW_MARKER_META_NAME}" content="${buildVersionId}">`;
+}
+
+export function injectBuildVersionMarker(html: string, buildVersionId: string): string {
+  if (html.includes(`name="${PREVIEW_MARKER_META_NAME}"`)) return html;
+  const meta = previewMarkerMeta(buildVersionId);
+  if (/<head[^>]*>/i.test(html)) return html.replace(/<head[^>]*>/i, (match) => `${match}${meta}`);
+  return `${meta}${html}`;
+}
+
 // Pure candidate build (issue #49 lifecycle seam): resolves placeholders,
 // computes the artifact manifest and runs the Technical Preflight — with NO
 // release-facing persistence. Splitting build from freeze lets the pipeline
@@ -105,9 +122,10 @@ export async function buildAssembledCandidate(env: Env, input: AssemblyInput): P
 
   const pages: Record<string, string> = {};
   for (const [pageId, html] of Object.entries(input.pages)) {
-    pages[pageId] = html.replace(/src="IMG:([a-zA-Z0-9_-]+)"/g, (full, slotId: string) =>
+    const resolved = html.replace(/src="IMG:([a-zA-Z0-9_-]+)"/g, (full, slotId: string) =>
       publicPathBySlot.has(slotId) ? `src="assets/images/${slotId}.webp"` : full
     );
+    pages[pageId] = injectBuildVersionMarker(resolved, input.buildVersionId);
   }
 
   const files = new Map<string, Uint8Array>();

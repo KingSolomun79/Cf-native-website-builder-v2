@@ -1,0 +1,255 @@
+{
+  "sourceFrozenBlueprintVersionId": "597cf07f-3ff6-4db0-be9c-a89108f56ccc",
+  "validationVersionId": "2f8f3841-7710-463c-8bb1-bce4f8c4e991",
+  "validationVersionNumber": 8,
+  "buildId": "06025a7d-74cc-4655-9718-b3a190e78f92",
+  "buildVersionId": "2f8f3841-7710-463c-8bb1-bce4f8c4e991",
+  "buildVersionNumber": 8,
+  "model": "nano-banana-2-lite",
+  "plannedSlots": [
+    "hero-team-collab",
+    "about-strategist",
+    "results-celebration",
+    "testimonial-office",
+    "newsletter-owner",
+    "contact-presentation"
+  ],
+  "unresolvedSlots": [
+    "hero-team-collab",
+    "about-strategist",
+    "results-celebration",
+    "testimonial-office",
+    "newsletter-owner",
+    "contact-presentation"
+  ],
+  "slotProvenance": [
+    {
+      "slotId": "hero-team-collab",
+      "model": "nano-banana-2-lite",
+      "profile": "nano-banana-2-lite",
+      "compositionAspectRatio": "21:9",
+      "generationAspectRatio": "16:9",
+      "providerAspectRatio": "21:9",
+      "mappingReason": "composition ratio 21:9 natively supported by nano-banana-2-lite",
+      "screenSafeAdaptationApplied": true,
+      "matchedScreenTerms": [
+        "laptops",
+        "screens"
+      ],
+      "blueprintPromptHash": "07a7512331bc7613f019b0c09cfbbc25ecfde47b5a0d814b209ce5298335a734",
+      "effectivePromptHash": "e9e0c2843aac7e26c67a212dd271c7ad84838279d6bb4f4ff9496b893e06dd59"
+    },
+    {
+      "slotId": "about-strategist",
+      "model": "nano-banana-2-lite",
+      "profile": "nano-banana-2-lite",
+      "compositionAspectRatio": "5:3",
+      "generationAspectRatio": "16:9",
+      "providerAspectRatio": "16:9",
+      "mappingReason": "composition ratio 5:3 unsupported; frozen generation ratio 16:9 used",
+      "screenSafeAdaptationApplied": true,
+      "matchedScreenTerms": [
+        "analytics",
+        "laptop",
+        "screen"
+      ],
+      "blueprintPromptHash": "17b7d40b86542306e77ca15706e2b7d1873f995dc514a80056870766b58158f5",
+      "effectivePromptHash": "8b78f50df935e40f04b5d3a4eceed838dec53fef46ca7f4ad3d192784c2ee2f1"
+    },
+    {
+      "slotId": "results-celebration",
+      "model": "nano-banana-2-lite",
+      "profile": "nano-banana-2-lite",
+      "compositionAspectRatio": "5:3",
+      "generationAspectRatio": "16:9",
+      "providerAspectRatio": "16:9",
+      "mappingReason": "composition ratio 5:3 unsupported; frozen generation ratio 16:9 used",
+      "screenSafeAdaptationApplied": true,
+      "matchedScreenTerms": [
+        "laptop",
+        "graphs",
+        "screen"
+      ],
+      "blueprintPromptHash": "3ccc5680352ada490cf979ae0b0edb081d53d9bf69f393186048deeaf2234ae6",
+      "effectivePromptHash": "7bde3d36029ccb48b0e5f666f654db798f0a201c05832585c515c94d991f1080"
+    },
+    {
+      "slotId": "testimonial-office",
+      "model": "nano-banana-2-lite",
+      "profile": "nano-banana-2-lite",
+      "compositionAspectRatio": "4:3",
+      "generationAspectRatio": "16:9",
+      "providerAspectRatio": "4:3",
+      "mappingReason": "composition ratio 4:3 natively supported by nano-banana-2-lite",
+      "screenSafeAdaptationApplied": true,
+      "matchedScreenTerms": [
+        "laptops"
+      ],
+      "blueprintPromptHash": "08e6c909758576f153276e9c3d17c95cad03f5ff8ef5f3c7f07dffcb60075d00",
+      "effectivePromptHash": "38d3fda0b117ca18a48d7bed8f53d152e22b70a2656cd7dbf50bd26ee6cb43b5"
+    },
+    {
+      "slotId": "newsletter-owner",
+      "model": "nano-banana-2-lite",
+      "profile": "nano-banana-2-lite",
+      "compositionAspectRatio": "3:2",
+      "generationAspectRatio": "16:9",
+      "providerAspectRatio": "3:2",
+      "mappingReason": "composition ratio 3:2 natively supported by nano-banana-2-lite",
+      "screenSafeAdaptationApplied": true,
+      "matchedScreenTerms": [
+        "tablet",
+        "screen"
+      ],
+      "blueprintPromptHash": "6901c7d7a77ec7bf869827252f36c074d0e61e9b09d986d175c837dfdae5444c",
+      "effectivePromptHash": "979d4562a653e1d459bcc8216f54ff947dc6ac42bb23fa7c544953cfcfe512c1"
+    },
+    {
+      "slotId": "contact-presentation",
+      "model": "nano-banana-2-lite",
+      "profile": "nano-banana-2-lite",
+      "compositionAspectRatio": "16:9",
+      "generationAspectRatio": "16:9",
+      "providerAspectRatio": "16:9",
+      "mappingReason": "composition ratio 16:9 natively supported by nano-banana-2-lite",
+      "screenSafeAdaptationApplied": true,
+      "matchedScreenTerms": [
+        "screen",
+        "charts"
+      ],
+      "blueprintPromptHash": "e9b7f6874dd9997cc956139eb9cbf03c78351222b5beb5ec9f91e4b18d425fb9",
+      "effectivePromptHash": "21bff7f9fe81c397b61983e7a09077649d953c669bc5ee2404bd4fa5091c004a"
+    }
+  ],
+  "outcomes": [
+    {
+      "slotId": "hero-team-collab",
+      "status": "accepted",
+      "attemptId": "65514a3f-d307-4c24-98d7-f734dcafa5e6",
+      "r2Key": "builds/06025a7d-74cc-4655-9718-b3a190e78f92/v8/assets/images/hero-team-collab-a1.webp",
+      "costUsd": 0.05
+    },
+    {
+      "slotId": "testimonial-office",
+      "status": "accepted",
+      "attemptId": "55c3aac2-3fa1-494a-b2bf-6fb236f2ecf0",
+      "r2Key": "builds/06025a7d-74cc-4655-9718-b3a190e78f92/v8/assets/images/testimonial-office-a1.webp",
+      "costUsd": 0.05
+    },
+    {
+      "slotId": "about-strategist",
+      "status": "accepted",
+      "attemptId": "f4ce20fd-89fa-48e8-9747-d12b29c06313",
+      "r2Key": "builds/06025a7d-74cc-4655-9718-b3a190e78f92/v8/assets/images/about-strategist-a1.webp",
+      "costUsd": 0.05
+    },
+    {
+      "slotId": "contact-presentation",
+      "status": "accepted",
+      "attemptId": "001dff94-6af0-4913-8801-2366f880c34a",
+      "r2Key": "builds/06025a7d-74cc-4655-9718-b3a190e78f92/v8/assets/images/contact-presentation-a1.webp",
+      "costUsd": 0.05
+    },
+    {
+      "slotId": "newsletter-owner",
+      "status": "accepted",
+      "attemptId": "4d5bab83-506a-4913-92ce-a742ca98098c",
+      "r2Key": "builds/06025a7d-74cc-4655-9718-b3a190e78f92/v8/assets/images/newsletter-owner-a1.webp",
+      "costUsd": 0.05
+    },
+    {
+      "slotId": "results-celebration",
+      "status": "accepted",
+      "attemptId": "5ae074db-3faa-4837-9f4f-8dbea119b05c",
+      "r2Key": "builds/06025a7d-74cc-4655-9718-b3a190e78f92/v8/assets/images/results-celebration-a1.webp",
+      "costUsd": 0.05
+    }
+  ],
+  "spendReport": {
+    "spentUsd": 1.2,
+    "hardLimitUsd": 3,
+    "generationBudgetUsd": 2.325,
+    "repairReserveUsd": 0.675,
+    "acceptedCount": 6,
+    "unresolvedSlots": [],
+    "targetAcceptedImages": 12
+  },
+  "attempts": [
+    {
+      "slot_id": "about-strategist",
+      "wave": 1,
+      "attempt_number": 1,
+      "status": "succeeded",
+      "provider_task_id": "ad32055c3b76e27343ab5eb0edaa1db5",
+      "cost_usd": 0.05
+    },
+    {
+      "slot_id": "contact-presentation",
+      "wave": 1,
+      "attempt_number": 1,
+      "status": "succeeded",
+      "provider_task_id": "be46bf4bb1252d9ce57b0350606fee71",
+      "cost_usd": 0.05
+    },
+    {
+      "slot_id": "hero-team-collab",
+      "wave": 1,
+      "attempt_number": 1,
+      "status": "succeeded",
+      "provider_task_id": "fd97a84505167e0d7127b5edbc7b8bf0",
+      "cost_usd": 0.05
+    },
+    {
+      "slot_id": "newsletter-owner",
+      "wave": 1,
+      "attempt_number": 1,
+      "status": "succeeded",
+      "provider_task_id": "d45d6c285c95314dc9b1cf0f19af849b",
+      "cost_usd": 0.05
+    },
+    {
+      "slot_id": "results-celebration",
+      "wave": 1,
+      "attempt_number": 1,
+      "status": "succeeded",
+      "provider_task_id": "2e15d7852da9f859f0f62cecc9da4fab",
+      "cost_usd": 0.05
+    },
+    {
+      "slot_id": "testimonial-office",
+      "wave": 1,
+      "attempt_number": 1,
+      "status": "succeeded",
+      "provider_task_id": "59a39eb1b016db66f59a6ec2b9cc256b",
+      "cost_usd": 0.05
+    }
+  ],
+  "acceptedImages": [
+    {
+      "slotId": "about-strategist",
+      "r2Key": "builds/06025a7d-74cc-4655-9718-b3a190e78f92/v8/assets/images/about-strategist-a1.webp"
+    },
+    {
+      "slotId": "contact-presentation",
+      "r2Key": "builds/06025a7d-74cc-4655-9718-b3a190e78f92/v8/assets/images/contact-presentation-a1.webp"
+    },
+    {
+      "slotId": "hero-team-collab",
+      "r2Key": "builds/06025a7d-74cc-4655-9718-b3a190e78f92/v8/assets/images/hero-team-collab-a1.webp"
+    },
+    {
+      "slotId": "newsletter-owner",
+      "r2Key": "builds/06025a7d-74cc-4655-9718-b3a190e78f92/v8/assets/images/newsletter-owner-a1.webp"
+    },
+    {
+      "slotId": "results-celebration",
+      "r2Key": "builds/06025a7d-74cc-4655-9718-b3a190e78f92/v8/assets/images/results-celebration-a1.webp"
+    },
+    {
+      "slotId": "testimonial-office",
+      "r2Key": "builds/06025a7d-74cc-4655-9718-b3a190e78f92/v8/assets/images/testimonial-office-a1.webp"
+    }
+  ],
+  "acceptedCount": 6,
+  "durationMs": 190271
+}

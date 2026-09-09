@@ -25,7 +25,12 @@ export type StageArtifactKind =
   | "qa_evidence_bundle"
   | "qa_report"
   | "release_record"
-  | "craft_preflight";
+  | "craft_preflight"
+  // Experiment branch only (migrations/0035_v2_simple_design_experiment.sql):
+  // SIMPLE design pipeline artifacts. Never produced by the legacy pipeline.
+  | "design_blueprint"
+  | "site_bundle"
+  | "qa_package";
 
 export class StageArtifactError extends Error {
   readonly code: "ARTIFACT_ALREADY_EXISTS" | "BUILD_VERSION_NOT_FOUND" | "REPAIR_ARTIFACT_MISMATCH";
