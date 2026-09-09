@@ -65,7 +65,7 @@ interface DriverFixtureImage {
 }
 
 interface DriverBody {
-  op: "health" | "put-fixture" | "finch-builder" | "builder-diagnostic" | "assemble-stored" | "capture" | "blueprint" | "artifact" | "probe" | "general-api-canary" | "stream-canary-text" | "stream-canary-vision" | "schema-canary";
+  op: "health" | "put-fixture" | "finch-builder" | "builder-diagnostic" | "assemble-stored" | "capture" | "blueprint" | "artifact" | "probe" | "general-api-canary" | "stream-canary-text" | "stream-canary-vision" | "schema-canary" | "stage-runs";
   key?: string;
   base64?: string;
   facts?: BusinessFacts;
@@ -186,6 +186,11 @@ export async function expBenchmarkDriver(c: Context<{ Bindings: Env }>): Promise
       // JSON parses, post-parse validation passes, zero correction calls.
       case "schema-canary":
         return c.json(await runSchemaCanary(c.env, body));
+
+      // Read-only provenance: ai_stage_runs rows for a build+stage — report
+      // evidence (attempt counts, outcomes, token usage). No model spend.
+      case "stage-runs":
+        return c.json(await runStageRunsQuery(c.env, body));
 
       default:
         return c.json({ error: "Unknown op" }, 400);
@@ -878,4 +883,15 @@ async function runSchemaCanary(env: Env, body: DriverBody): Promise<unknown> {
       error: error instanceof StreamingTransportExhaustedError ? error.message : (error as Error).message.slice(0, 300),
     };
   }
+}
+
+async function runStageRunsQuery(env: Env, body: DriverBody): Promise<unknown> {
+  if (!body.buildId) throw new Error("buildId required");
+  const stage = "simple-design-blueprint";
+  const rows = await env.DB.prepare(
+    "SELECT run_id, attempt, outcome, model, provider, schema_version, token_usage_json, error_summary, created_at FROM ai_stage_runs WHERE build_id = ? AND stage = ? ORDER BY created_at ASC, attempt ASC"
+  )
+    .bind(body.buildId, stage)
+    .all();
+  return { buildId: body.buildId, stage, runs: rows.results };
 }
