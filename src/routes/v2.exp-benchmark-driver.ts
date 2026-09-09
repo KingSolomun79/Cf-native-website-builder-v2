@@ -37,7 +37,10 @@ import { startSiteGeneration, createInitialBuild } from "../domain/lifecycle";
 import { getEffectiveBusinessFacts } from "../domain/revision";
 import { runReferenceIntake, getFrozenReferenceEvidence } from "../domain/reference-intake";
 import { putObject } from "../lib/assets";
-import { getAcceptedImageMap } from "../domain/image-pipeline";
+import { getAcceptedImageMap, type ImageSpendReport, type SlotGenerationOutcome } from "../domain/image-pipeline";
+import { runImageGenerationDurable } from "../domain/image-orchestration";
+import { KieV2ImageProvider } from "../lib/kie-v2";
+import { runSimpleBuildPipeline } from "../simple-design/pipeline";
 import { buildAssembledCandidate, deployPreview, freezeAssembledCandidate, AssemblyPreflightError } from "../domain/assembly";
 import { storeBuildStageArtifactIdempotent, getBuildStageArtifact } from "../domain/stage-artifacts";
 import { buildStandardEvidenceBundle } from "../domain/qa-evidence";
@@ -46,8 +49,10 @@ import { runSimpleWebsiteBuilderStage, runSimpleBuilderTransportDiagnostic } fro
 import { runSimpleDesignBlueprintStage } from "../simple-design/design-blueprint";
 import { renderDesignBlueprintMarkdown } from "../simple-design/render-blueprint";
 import { runDeterministicBundleQa } from "../simple-design/bundle-qa";
+import { runSimpleVisualQaStage } from "../simple-design/visual-qa";
 import {
   blueprintSlotsToImageSlots,
+  blueprintSlotsToPromptRecords,
   DESIGN_BLUEPRINT_NATIVE_JSON_SCHEMA,
   DESIGN_BLUEPRINT_SCHEMA_VERSION,
   evaluateBlueprintQualityGate,
@@ -65,7 +70,7 @@ interface DriverFixtureImage {
 }
 
 interface DriverBody {
-  op: "health" | "put-fixture" | "finch-builder" | "builder-diagnostic" | "assemble-stored" | "capture" | "blueprint" | "artifact" | "probe" | "general-api-canary" | "stream-canary-text" | "stream-canary-vision" | "schema-canary" | "stage-runs";
+  op: "health" | "put-fixture" | "finch-builder" | "builder-diagnostic" | "assemble-stored" | "capture" | "blueprint" | "artifact" | "probe" | "general-api-canary" | "stream-canary-text" | "stream-canary-vision" | "schema-canary" | "stage-runs" | "simple-kie" | "simple-full-run" | "simple-rerender-qa";
   key?: string;
   base64?: string;
   facts?: BusinessFacts;
@@ -81,6 +86,10 @@ interface DriverBody {
   canaryItems?: number;
   canaryThinking?: "low" | "high" | "max";
   canaryTransport?: CanaryTransport;
+  stage?: string;
+  stream?: boolean;
+  candidateDesktopR2Key?: string;
+  candidateMobileR2Key?: string;
 }
 
 function base64ToBytes(base64: string): Uint8Array {
@@ -187,10 +196,36 @@ export async function expBenchmarkDriver(c: Context<{ Bindings: Env }>): Promise
       case "schema-canary":
         return c.json(await runSchemaCanary(c.env, body));
 
-      // Read-only provenance: ai_stage_runs rows for a build+stage — report
+      // Read-only provenance: ai_stage_runs rows for a build — report
       // evidence (attempt counts, outcomes, token usage). No model spend.
+      // Optional stage filter; all stages when omitted.
       case "stage-runs":
         return c.json(await runStageRunsQuery(c.env, body));
+
+      // Phase 3 (§5): the pipeline's EXACT image step in isolation — frozen
+      // blueprint slots → durable KIE machinery with a REAL timer sleep (the
+      // driver has no Workflow engine to sleep for it). Idempotent: only
+      // unresolved slots generate.
+      case "simple-kie":
+        return c.json(await runSimpleKie(c.env, body));
+
+      // Phase 3 (§7-23): the FULL sanctioned SIMPLE pipeline via
+      // runSimpleBuildPipeline — capture/blueprint/KIE reuse makes this
+      // idempotent; it runs builder → assemble → QA → (≤1 repair) → final QA.
+      // stream=true returns NDJSON progress + heartbeats so a long run (the
+      // pages call alone can stream for many minutes) holds the client
+      // connection without triggering client/proxy idle timeouts.
+      case "simple-full-run":
+        return body.stream ? streamSimpleFullRun(c, body) : c.json(await runSimpleFullRun(c.env, body));
+
+      // Phase 3 evaluation-integrity tooling: re-assemble an ALREADY-STORED
+      // pipeline bundle (zero builder/repair/KIE calls), re-capture renders,
+      // re-run deterministic QA and the visual-QA judgement. Used when the
+      // original evidence capture raced preview propagation and Visual QA
+      // judged the workers.dev placeholder instead of the candidate. Never
+      // mutates build state; no repair budget is touched.
+      case "simple-rerender-qa":
+        return c.json(await runSimpleRerenderQa(c.env, body));
 
       default:
         return c.json({ error: "Unknown op" }, 400);
@@ -461,18 +496,26 @@ async function assembleAndJudge(
   ctx: Scaffold,
   bundle: SiteBundle,
   body: DriverBody,
-  acceptedKeys: Map<string, string>
+  acceptedKeys: Map<string, string>,
+  opts?: { skipFreeze?: boolean }
 ) {
   const blueprint = body.blueprint!;
   const facts = body.facts!;
   const formServiceEndpoint = `${env.PUBLIC_APP_URL}/api/v2/forms/submit`;
   const siteFormId = `site:${ctx.siteId}`;
+  const djStep = async <T>(label: string, fn: () => Promise<T>): Promise<T> => {
+    try {
+      return await fn();
+    } catch (error) {
+      throw new Error(`[judge.${label}] ${(error as Error).name}: ${(error as Error).message}`);
+    }
+  };
 
   // Deterministic assembly + Technical Preflight + preview, exactly as the
   // pipeline does it (KEEP-list path).
-  const acceptedEntries = await getAcceptedImageMap(env, ctx.buildVersionId);
+  const acceptedEntries = await djStep("accepted-map", () => getAcceptedImageMap(env, ctx.buildVersionId));
   const acceptedImages = new Map([...acceptedEntries].map(([slotId, entry]) => [slotId, entry.r2Key] as const));
-  const candidate = await buildAssembledCandidate(env, {
+  const candidate = await djStep("build-candidate", () => buildAssembledCandidate(env, {
     siteGenerationId: ctx.siteGenerationId,
     buildId: ctx.buildId,
     buildVersionId: ctx.buildVersionId,
@@ -484,38 +527,43 @@ async function assembleAndJudge(
     acceptedImages,
     formServiceEndpoint,
     expectedSiteFormId: siteFormId,
-  });
-  await freezeAssembledCandidate(env, {
-    siteGenerationId: ctx.siteGenerationId,
+  }));
+  // Re-render evaluations skip re-freezing: the immutable candidate objects
+  // already exist from the original assembly, and reproducing the identical
+  // manifest requires no new writes.
+  if (!opts?.skipFreeze) {
+    await djStep("freeze-candidate", () => freezeAssembledCandidate(env, {
+      siteGenerationId: ctx.siteGenerationId,
+      buildId: ctx.buildId,
+      buildVersionId: ctx.buildVersionId,
+      buildVersionNumber: ctx.buildVersionNumber,
+      pages: bundle.pages,
+      sharedCss: bundle.sharedCss,
+      sharedJs: bundle.sharedJs,
+      candidate,
+      imagePlanSlots: blueprintSlotsToImageSlots(blueprint),
+      acceptedImages,
+      formServiceEndpoint,
+      expectedSiteFormId: siteFormId,
+    }));
+  }
+  const preview = await djStep("deploy-preview", () => deployPreview(env, {
     buildId: ctx.buildId,
     buildVersionId: ctx.buildVersionId,
     buildVersionNumber: ctx.buildVersionNumber,
-    pages: bundle.pages,
-    sharedCss: bundle.sharedCss,
-    sharedJs: bundle.sharedJs,
     candidate,
-    imagePlanSlots: blueprintSlotsToImageSlots(blueprint),
-    acceptedImages,
-    formServiceEndpoint,
-    expectedSiteFormId: siteFormId,
-  });
-  const preview = await deployPreview(env, {
-    buildId: ctx.buildId,
-    buildVersionId: ctx.buildVersionId,
-    buildVersionNumber: ctx.buildVersionNumber,
-    candidate,
-  });
+  }));
 
   // Standard render evidence (real browser captures of the preview) + the
   // deterministic truth/technical contract.
   const evidence = preview.previewUrl
-    ? await buildStandardEvidenceBundle(env, {
+    ? await djStep("qa-evidence", () => buildStandardEvidenceBundle(env, {
         buildId: ctx.buildId,
         buildVersionId: ctx.buildVersionId,
         buildVersionNumber: ctx.buildVersionNumber,
         siteGenerationId: ctx.siteGenerationId,
         capture: createProductionQaCapture(env, preview.previewUrl),
-      })
+      }))
     : null;
   const qa = runDeterministicBundleQa({
     bundle,
@@ -888,10 +936,229 @@ async function runSchemaCanary(env: Env, body: DriverBody): Promise<unknown> {
 async function runStageRunsQuery(env: Env, body: DriverBody): Promise<unknown> {
   if (!body.buildId) throw new Error("buildId required");
   const stage = "simple-design-blueprint";
-  const rows = await env.DB.prepare(
-    "SELECT run_id, attempt, outcome, model, provider, schema_version, token_usage_json, error_summary, created_at FROM ai_stage_runs WHERE build_id = ? AND stage = ? ORDER BY created_at ASC, attempt ASC"
+  const base = "SELECT stage, run_id, attempt, outcome, model, provider, schema_version, token_usage_json, error_summary, created_at FROM ai_stage_runs WHERE build_id = ?1";
+  const rows = body.stage
+    ? await env.DB.prepare(`${base} AND stage = ?2 ORDER BY created_at ASC, attempt ASC`).bind(body.buildId, body.stage).all()
+    : await env.DB.prepare(`${base} ORDER BY created_at ASC, attempt ASC`).bind(body.buildId).all();
+  return { buildId: body.buildId, ...(body.stage ? { stage } : { stage: "all" }), runs: rows.results };
+}
+
+// Driver-side real timer sleep. In production the Workflow engine maps the
+// orchestration's sleep seam to step.sleep; the driver route has no engine,
+// and the seam default is instant — which would burn the bounded poll budget
+// in seconds and fail every KIE attempt as a domain timeout. Benchmark
+// tooling only; the pipeline's own seam wiring is unchanged.
+function driverSleep(_name: string, ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+// Phase 3 §5: EXACTLY the pipeline's image step (src/simple-design/pipeline.ts
+// "simple: images") — frozen blueprint is the prompt authority (no LLM prompt
+// stage), expandToTarget false, hard budget gates unchanged. Idempotent via
+// accepted-image identity + persisted KIE task ids.
+async function runSimpleKie(env: Env, body: DriverBody) {
+  if (!body.siteGenerationId || !body.buildId) throw new Error("siteGenerationId and buildId required");
+  const version = await latestVersion(env, body.buildId);
+  const stored = await getBuildStageArtifact<DesignBlueprint>(env, version.id, "design_blueprint");
+  if (!stored) throw new Error(`no stored design_blueprint for Build Version ${version.id} — run the blueprint stage first`);
+  const blueprint = stored.value;
+
+  const slots = blueprintSlotsToImageSlots(blueprint);
+  const acceptedBefore = await getAcceptedImageMap(env, version.id);
+  const unresolved = slots.filter((slot) => !acceptedBefore.has(slot.id));
+
+  const startedAt = Date.now();
+  let outcomes: SlotGenerationOutcome[] = [];
+  let spendReport: ImageSpendReport | null = null;
+  if (unresolved.length > 0) {
+    const result = await runImageGenerationDurable(
+      env,
+      {
+        siteGenerationId: body.siteGenerationId,
+        buildId: body.buildId,
+        buildVersionId: version.id,
+        buildVersionNumber: version.versionNumber,
+        slots: unresolved,
+        provider: new KieV2ImageProvider(env),
+        expandToTarget: false,
+        promptRecords: blueprintSlotsToPromptRecords(blueprint),
+      },
+      { stepDo: async <T>(_name: string, fn: () => Promise<T>) => fn(), sleep: driverSleep }
+    );
+    outcomes = result.outcomes;
+    spendReport = result.report;
+  }
+  const durationMs = Date.now() - startedAt;
+
+  const acceptedAfter = await getAcceptedImageMap(env, version.id);
+  const attempts = await env.DB.prepare(
+    "SELECT slot_id, wave, attempt_number, status, provider_task_id, cost_usd FROM image_attempts WHERE build_version_id = ?1 ORDER BY slot_id, attempt_number"
   )
-    .bind(body.buildId, stage)
+    .bind(version.id)
     .all();
-  return { buildId: body.buildId, stage, runs: rows.results };
+  return {
+    buildId: body.buildId,
+    buildVersionId: version.id,
+    buildVersionNumber: version.versionNumber,
+    plannedSlots: slots.map((slot) => slot.id),
+    unresolvedSlots: unresolved.map((slot) => slot.id),
+    outcomes,
+    spendReport,
+    attempts: attempts.results,
+    acceptedImages: [...acceptedAfter].map(([slotId, entry]) => ({ slotId, r2Key: entry.r2Key })),
+    acceptedCount: acceptedAfter.size,
+    durationMs,
+  };
+}
+
+// NDJSON streaming wrapper for the long full-run: response headers return
+// immediately, heartbeat ticks keep client/proxy idle timers fed, and the
+// final `done` event carries the same payload as the non-streaming op.
+function streamSimpleFullRun(c: Context<{ Bindings: Env }>, body: DriverBody): Response {
+  const { readable, writable } = new TransformStream();
+  const writer = writable.getWriter();
+  const encoder = new TextEncoder();
+  const send = (payload: unknown) => writer.write(encoder.encode(JSON.stringify(payload) + "\n"));
+  const startedAt = Date.now();
+  const heartbeat = setInterval(() => {
+    void send({ event: "tick", elapsedMs: Date.now() - startedAt }).catch(() => {});
+  }, 15_000);
+  void (async () => {
+    try {
+      await send({ event: "started", at: new Date().toISOString() });
+      const result = await runSimpleFullRun(c.env, body);
+      await send({ event: "done", elapsedMs: Date.now() - startedAt, result });
+    } catch (error) {
+      await send({ event: "error", elapsedMs: Date.now() - startedAt, message: (error as Error).message.slice(0, 500), name: (error as Error).name }).catch(() => {});
+    } finally {
+      clearInterval(heartbeat);
+      await writer.close().catch(() => {});
+    }
+  })();
+  return new Response(readable, { headers: { "content-type": "application/x-ndjson", "cache-control": "no-store" } });
+}
+
+// Evaluation-integrity re-render: the stored pipeline bundle for a Build
+// Version is re-assembled (deterministic), the preview re-verified, fresh
+// render evidence captured, deterministic QA re-run, and the visual-QA
+// judgement executed against the REAL captures. No builder/repair/KIE call.
+async function runSimpleRerenderQa(env: Env, body: DriverBody) {
+  const step = async <T>(label: string, fn: () => Promise<T>): Promise<T> => {
+    try {
+      return await fn();
+    } catch (error) {
+      throw new Error(`[${label}] ${(error as Error).name}: ${(error as Error).message}`);
+    }
+  };
+  if (!body.siteGenerationId || !body.buildId || !body.buildVersionId) {
+    throw new Error("siteGenerationId, buildId and buildVersionId required");
+  }
+  const stored = await step("load-site-bundle", () => getBuildStageArtifact<SiteBundle>(env, body.buildVersionId!, "site_bundle"));
+  if (!stored) throw new Error(`no stored site_bundle for Build Version ${body.buildVersionId}`);
+  const bpStored = await step("load-blueprint", () => getBuildStageArtifact<DesignBlueprint>(env, body.buildVersionId!, "design_blueprint"));
+  if (!bpStored) throw new Error(`no stored design_blueprint for Build Version ${body.buildVersionId}`);
+  const blueprint = bpStored.value;
+  const facts = await step("load-facts", async () => (await getEffectiveBusinessFacts(env, body.buildId!)).facts);
+  const versionRow = await step("load-version", () =>
+    env.DB.prepare("SELECT version_number FROM build_versions WHERE id = ?1")
+      .bind(body.buildVersionId!)
+      .first<{ version_number: number }>()
+  );
+  if (!versionRow) throw new Error(`Build Version ${body.buildVersionId} not found`);
+  const generationRow = await step("load-generation", () =>
+    env.DB.prepare("SELECT site_id FROM site_generations WHERE id = ?1")
+      .bind(body.siteGenerationId!)
+      .first<{ site_id: string }>()
+  );
+  if (!generationRow) throw new Error("Site Generation not found");
+  const ctx: Scaffold = {
+    siteGenerationId: body.siteGenerationId,
+    siteId: generationRow.site_id,
+    buildId: body.buildId,
+    buildVersionId: body.buildVersionId,
+    buildVersionNumber: versionRow.version_number,
+  };
+  const acceptedKeys = await step("load-accepted-images", async () => {
+    const acceptedEntries = await getAcceptedImageMap(env, body.buildVersionId!);
+    return new Map([...acceptedEntries].map(([slotId, entry]) => [slotId, entry.r2Key] as const));
+  });
+
+  const judged = await step("assemble-and-judge", () => assembleAndJudge(env, ctx, stored.value, { blueprint, facts } as DriverBody, acceptedKeys, { skipFreeze: true }));
+
+  // The honest visual-QA judgement on the fresh captures (the original
+  // Visual QA 1 judged the workers.dev placeholder page). Explicit R2 keys
+  // override the evidence captures when the stored evidence PNGs themselves
+  // are known-corrupt (immutable keys cannot be replaced).
+  const desktop =
+    body.candidateDesktopR2Key ??
+    judged.evidenceCaptures.find((cap) => cap.page === "home" && cap.viewportWidth === 1440)?.artifactR2Key;
+  const mobile =
+    body.candidateMobileR2Key ??
+    judged.evidenceCaptures.find((cap) => cap.page === "home" && cap.viewportWidth === 390)?.artifactR2Key;
+  if (!desktop) throw new Error("re-render produced no home desktop capture");
+  const frozen = await step("load-frozen-evidence", () => getFrozenReferenceEvidence(env, body.siteGenerationId!));
+  if (!frozen) throw new Error("frozen reference evidence missing");
+  const visualQa = await step("visual-qa", () =>
+    runSimpleVisualQaStage(env, {
+      siteGenerationId: body.siteGenerationId!,
+      buildId: body.buildId!,
+      buildVersionId: body.buildVersionId!,
+      buildVersionNumber: versionRow.version_number,
+      blueprint,
+      referenceVisualInputs: frozen.evidence.visualInputs ?? [],
+      candidateDesktopR2Key: desktop,
+      ...(mobile ? { candidateMobileR2Key: mobile } : {}),
+    })
+  );
+  return {
+    ...judged,
+    siteBundleArtifactR2Key: stored.artifactR2Key,
+    candidateDesktopR2Key: desktop,
+    ...(mobile ? { candidateMobileR2Key: mobile } : {}),
+    visualQa: visualQa.report,
+  };
+}
+
+// Phase 3 §7-23: the FULL sanctioned SIMPLE pipeline. Capture, blueprint and
+// KIE reuse inside the pipeline make repeated invocation idempotent; this run
+// executes builder → assemble → QA → (at most ONE repair) → final QA exactly
+// as production would, then returns read-only provenance for the report.
+async function runSimpleFullRun(env: Env, body: DriverBody) {  if (!body.siteGenerationId || !body.buildId) throw new Error("siteGenerationId and buildId required");
+  const startedAt = Date.now();
+  const outcome = await runSimpleBuildPipeline(env, {
+    siteGenerationId: body.siteGenerationId,
+    buildId: body.buildId,
+    deps: { sleep: driverSleep },
+  });
+  const durationMs = Date.now() - startedAt;
+
+  const versions = await env.DB.prepare(
+    "SELECT id, version_number, created_at FROM build_versions WHERE build_id = ?1 ORDER BY version_number"
+  )
+    .bind(outcome.buildId)
+    .all();
+  const artifacts = await env.DB.prepare(
+    "SELECT build_version_id, kind, subkey, artifact_r2_key, created_at FROM build_stage_artifacts WHERE build_id = ?1 ORDER BY created_at"
+  )
+    .bind(outcome.buildId)
+    .all();
+  const stageRuns = await env.DB.prepare(
+    "SELECT stage, run_id, attempt, outcome, model, provider, schema_version, token_usage_json, error_summary, created_at FROM ai_stage_runs WHERE build_id = ?1 ORDER BY created_at, attempt"
+  )
+    .bind(outcome.buildId)
+    .all();
+  const imageAttempts = await env.DB.prepare(
+    "SELECT slot_id, wave, attempt_number, status, provider_task_id, cost_usd FROM image_attempts WHERE build_id = ?1 ORDER BY slot_id, attempt_number"
+  )
+    .bind(outcome.buildId)
+    .all();
+
+  return {
+    durationMs,
+    outcome,
+    versions: versions.results,
+    artifacts: artifacts.results,
+    stageRuns: stageRuns.results,
+    imageAttempts: imageAttempts.results,
+  };
 }
