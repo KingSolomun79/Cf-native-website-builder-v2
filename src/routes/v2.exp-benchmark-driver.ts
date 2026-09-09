@@ -33,7 +33,7 @@ function canaryStream(env: Env, transport: CanaryTransport | undefined, options:
     ? generateWorkersAiStreaming(env, options)
     : generateStreamingCompletion(env, options);
 }
-import { startSiteGeneration, createInitialBuild } from "../domain/lifecycle";
+import { startSiteGeneration, createInitialBuild, createNextBuildVersion } from "../domain/lifecycle";
 import { getEffectiveBusinessFacts } from "../domain/revision";
 import { runReferenceIntake, getFrozenReferenceEvidence } from "../domain/reference-intake";
 import { putObject } from "../lib/assets";
@@ -70,7 +70,7 @@ interface DriverFixtureImage {
 }
 
 interface DriverBody {
-  op: "health" | "put-fixture" | "finch-builder" | "builder-diagnostic" | "assemble-stored" | "capture" | "blueprint" | "artifact" | "probe" | "general-api-canary" | "stream-canary-text" | "stream-canary-vision" | "schema-canary" | "stage-runs" | "simple-kie" | "simple-full-run" | "simple-rerender-qa";
+  op: "health" | "put-fixture" | "finch-builder" | "builder-diagnostic" | "assemble-stored" | "capture" | "blueprint" | "artifact" | "probe" | "general-api-canary" | "stream-canary-text" | "stream-canary-vision" | "schema-canary" | "stage-runs" | "simple-kie" | "simple-full-run" | "simple-rerender-qa" | "simple-hardening-run";
   key?: string;
   base64?: string;
   facts?: BusinessFacts;
@@ -226,6 +226,13 @@ export async function expBenchmarkDriver(c: Context<{ Bindings: Env }>): Promise
       // mutates build state; no repair budget is touched.
       case "simple-rerender-qa":
         return c.json(await runSimpleRerenderQa(c.env, body));
+
+      // Final hardening benchmark: fresh Build on the SAME Site Generation
+      // (frozen reference capture reuse), the FROZEN blueprint artifact
+      // reused byte-exact (never regenerated), then the sanctioned SIMPLE
+      // pipeline with fresh KIE under the text-safe photo policy.
+      case "simple-hardening-run":
+        return body.stream ? streamSimpleHardeningRun(c, body) : c.json(await runSimpleHardeningRun(c.env, body));
 
       default:
         return c.json({ error: "Unknown op" }, 400);
@@ -562,7 +569,7 @@ async function assembleAndJudge(
         buildVersionId: ctx.buildVersionId,
         buildVersionNumber: ctx.buildVersionNumber,
         siteGenerationId: ctx.siteGenerationId,
-        capture: createProductionQaCapture(env, preview.previewUrl),
+        capture: createProductionQaCapture(env, preview.previewUrl, { expectedBuildVersionId: ctx.buildVersionId }),
       }))
     : null;
   const qa = runDeterministicBundleQa({
@@ -1155,6 +1162,98 @@ async function runSimpleFullRun(env: Env, body: DriverBody) {  if (!body.siteGen
 
   return {
     durationMs,
+    outcome,
+    versions: versions.results,
+    artifacts: artifacts.results,
+    stageRuns: stageRuns.results,
+    imageAttempts: imageAttempts.results,
+  };
+}
+
+// NDJSON streaming wrapper (same contract as streamSimpleFullRun) for the
+// final hardening benchmark run.
+function streamSimpleHardeningRun(c: Context<{ Bindings: Env }>, body: DriverBody): Response {
+  const { readable, writable } = new TransformStream();
+  const writer = writable.getWriter();
+  const encoder = new TextEncoder();
+  const send = (payload: unknown) => writer.write(encoder.encode(JSON.stringify(payload) + "\n"));
+  const startedAt = Date.now();
+  const heartbeat = setInterval(() => {
+    void send({ event: "tick", elapsedMs: Date.now() - startedAt }).catch(() => {});
+  }, 15_000);
+  void (async () => {
+    try {
+      await send({ event: "started", at: new Date().toISOString() });
+      const result = await runSimpleHardeningRun(c.env, body);
+      await send({ event: "done", elapsedMs: Date.now() - startedAt, result });
+    } catch (error) {
+      await send({ event: "error", elapsedMs: Date.now() - startedAt, message: (error as Error).message.slice(0, 500), name: (error as Error).name }).catch(() => {});
+    } finally {
+      clearInterval(heartbeat);
+      await writer.close().catch(() => {});
+    }
+  })();
+  return new Response(readable, { headers: { "content-type": "application/x-ndjson", "cache-control": "no-store" } });
+}
+
+// Final hardening benchmark (operator brief, 2026-09-09): a fresh Build
+// Version on the SAME frozen Build/Site Generation — the frozen reference
+// capture, facts and blueprint artifact all reuse byte-exact (never
+// regenerated) — then runSimpleBuildPipeline executes the sanctioned
+// pipeline on that version: fresh KIE under the text-safe photo policy,
+// streamed builder, assemble, marker-gated capture, QA, and at most ONE
+// changed-files repair.
+async function runSimpleHardeningRun(env: Env, body: DriverBody) {
+  if (!body.siteGenerationId || !body.buildId || !body.buildVersionId) {
+    throw new Error("siteGenerationId, buildId and buildVersionId (frozen blueprint source version) required");
+  }
+  const startedAt = Date.now();
+  const frozen = await getBuildStageArtifact<DesignBlueprint>(env, body.buildVersionId, "design_blueprint");
+  if (!frozen) throw new Error(`no frozen design_blueprint on source version ${body.buildVersionId}`);
+  const created = await createNextBuildVersion(env, {
+    buildId: body.buildId,
+    cause: "simple_hardening_benchmark",
+    detail: "Final hardening benchmark: fresh KIE (text-safe policy) + fresh build on the frozen blueprint/reference/facts",
+  });
+  await storeBuildStageArtifactIdempotent(env, {
+    buildId: body.buildId,
+    buildVersionId: created.buildVersionId,
+    siteGenerationId: body.siteGenerationId,
+    kind: "design_blueprint",
+    schemaVersion: "design-blueprint/1",
+    value: frozen.value,
+  });
+  const outcome = await runSimpleBuildPipeline(env, {
+    siteGenerationId: body.siteGenerationId,
+    buildId: body.buildId,
+    deps: { sleep: driverSleep },
+  });
+  const durationMs = Date.now() - startedAt;
+  const versions = await env.DB.prepare(
+    "SELECT id, version_number, created_at FROM build_versions WHERE build_id = ?1 ORDER BY version_number"
+  )
+    .bind(outcome.buildId)
+    .all();
+  const artifacts = await env.DB.prepare(
+    "SELECT build_version_id, kind, subkey, artifact_r2_key, created_at FROM build_stage_artifacts WHERE build_id = ?1 ORDER BY created_at"
+  )
+    .bind(outcome.buildId)
+    .all();
+  const stageRuns = await env.DB.prepare(
+    "SELECT stage, run_id, attempt, outcome, model, provider, schema_version, token_usage_json, error_summary, created_at FROM ai_stage_runs WHERE build_id = ?1 ORDER BY created_at, attempt"
+  )
+    .bind(outcome.buildId)
+    .all();
+  const imageAttempts = await env.DB.prepare(
+    "SELECT slot_id, wave, attempt_number, status, provider_task_id, cost_usd, build_version_id FROM image_attempts WHERE build_id = ?1 ORDER BY slot_id, attempt_number"
+  )
+    .bind(outcome.buildId)
+    .all();
+  return {
+    durationMs,
+    sourceFrozenBlueprintVersionId: body.buildVersionId,
+    benchmarkVersionId: created.buildVersionId,
+    benchmarkVersionNumber: created.buildVersionNumber,
     outcome,
     versions: versions.results,
     artifacts: artifacts.results,
