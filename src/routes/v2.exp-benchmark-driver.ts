@@ -1287,7 +1287,7 @@ async function runSimpleFullRun(env: Env, body: DriverBody) {  if (!body.siteGen
     // Optionally inherit accepted images EXCEPT the listed slots — a bounded
     // ONE-slot stochastic retry: the excluded slot regenerates fresh through
     // the pipeline's image step (same prompt authority, no semantic edit).
-    if (body.copyBlueprintFromBuildVersionId && body.inheritAcceptedImagesExceptSlotIds) {
+    if (body.copyBlueprintFromBuildVersionId && body.inheritAcceptedImagesExceptSlotIds !== undefined) {
       const excluded = new Set(body.inheritAcceptedImagesExceptSlotIds);
       const rows = await env.DB.prepare(
         "SELECT slot_id, attempt_id, r2_key FROM accepted_images WHERE build_version_id = ?1"
