@@ -70,7 +70,7 @@ interface DriverFixtureImage {
 }
 
 interface DriverBody {
-  op: "health" | "put-fixture" | "finch-builder" | "builder-diagnostic" | "assemble-stored" | "capture" | "blueprint" | "artifact" | "probe" | "general-api-canary" | "stream-canary-text" | "stream-canary-vision" | "schema-canary" | "stage-runs" | "simple-kie" | "simple-full-run" | "simple-rerender-qa" | "simple-hardening-run" | "simple-final-run";
+  op: "health" | "put-fixture" | "finch-builder" | "builder-diagnostic" | "assemble-stored" | "capture" | "blueprint" | "artifact" | "probe" | "fetch-probe" | "sql-probe" | "general-api-canary" | "stream-canary-text" | "stream-canary-vision" | "schema-canary" | "stage-runs" | "simple-kie" | "simple-full-run" | "simple-rerender-qa" | "simple-hardening-run" | "simple-final-run";
   key?: string;
   base64?: string;
   facts?: BusinessFacts;
@@ -176,6 +176,29 @@ export async function expBenchmarkDriver(c: Context<{ Bindings: Env }>): Promise
       case "probe":
         return c.json(await runTransportProbe(c.env, body));
 
+      // Preview-routing diagnostic (final benchmark, 2026-09-09): the marker
+      // gate inside THIS Worker consistently 404s on a preview workers.dev
+      // host that external clients see 200 with the exact candidate marker.
+      // Fetch the URL from the Worker's own context and report what it sees
+      // (status, cf-ray, colo, body head) — benchmark instrumentation only.
+      case "fetch-probe": {
+        if (!body.key) return c.json({ error: "key (url) required" }, 400);
+        const target = body.key!;
+        const response = await fetch(`${target}${target.includes("?") ? "&" : "?"}probe=${Date.now()}`, {
+          headers: { "cache-control": "no-cache" },
+        });
+        const text = await response.text();
+        return c.json({
+          url: target,
+          status: response.status,
+          cfRay: response.headers.get("cf-ray"),
+          cfColo: (response.headers.get("cf-meta-colo") ?? response.headers.get("cf-ray") ?? "").split("-")[1] ?? null,
+          server: response.headers.get("server"),
+          bodyHead: text.slice(0, 300),
+          hasMarker: text.includes("wazibiz-build-version"),
+        });
+      }
+
       // §5 credential check: can the EXISTING ZHIPU_API_KEY call the General
       // API (api.z.ai/api/paas/v4) with model glm-5.3-flash? Returns only
       // auth/model-availability — never the key. Optional thinking level:
@@ -203,6 +226,18 @@ export async function expBenchmarkDriver(c: Context<{ Bindings: Env }>): Promise
       // Optional stage filter; all stages when omitted.
       case "stage-runs":
         return c.json(await runStageRunsQuery(c.env, body));
+
+      // Benchmark forensics: READ-ONLY arbitrary SELECT against the
+      // experimental D1 (benchmark driver is HMAC-gated, experiment-only).
+      // Anything that is not a single SELECT statement is rejected.
+      case "sql-probe": {
+        const sql = (body.detail as string | undefined)?.trim() ?? "";
+        if (!/^select\b/i.test(sql) || /;/.test(sql.replace(/;+\s*$/, "")) || /\b(insert|update|delete|drop|alter|create|attach|pragma)\b/i.test(sql)) {
+          return c.json({ error: "only a single SELECT statement is allowed" }, 400);
+        }
+        const rows = await c.env.DB.prepare(sql).all();
+        return c.json({ sql, rows: rows.results });
+      }
 
       // Phase 3 (§5): the pipeline's EXACT image step in isolation — frozen
       // blueprint slots → durable KIE machinery with a REAL timer sleep (the

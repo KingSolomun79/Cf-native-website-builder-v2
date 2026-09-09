@@ -83,6 +83,49 @@ export async function waitForPreviewMarker(options: {
   }
 }
 
+// Browser-context marker verification (final benchmark fix, 2026-09-09): the
+// Workers Runtime cannot fetch *.workers.dev hosts from inside a Worker at
+// all — Cloudflare answers with loopback error 1042 (live evidence: the gate
+// 404'd for 45+ minutes on a preview external clients served fine). The
+// browser binding is a REAL client and reaches the preview; the gate's
+// semantics are unchanged: poll until the EXACT Build Version marker meta is
+// present, fail as PREVIEW_NOT_READY otherwise.
+export async function waitForPreviewMarkerViaBrowser(
+  env: Env,
+  options: { previewUrl: string; buildVersionId: string; timeoutMs?: number; intervalMs?: number }
+): Promise<void> {
+  const timeoutMs = options.timeoutMs ?? 60_000;
+  const intervalMs = options.intervalMs ?? 5_000;
+  const base = options.previewUrl.replace(/\/$/, "");
+  const session = await playwrightAdapter.launch(env);
+  await withBrowser(session, async (browser) => {
+    const page = await browser.newPage({
+      viewport: { name: "desktop", width: 1440, height: 900 },
+      reducedMotion: true,
+    });
+    try {
+      const deadline = Date.now() + timeoutMs;
+      for (;;) {
+        try {
+          // Cache-buster, same rationale as the fetch probe.
+          await page.goto(`${base}/?preview-readiness=${Date.now()}`, { timeoutMs: 30_000, waitUntil: "networkidle" });
+          const markers = await page.countMatches(
+            `meta[name="${PREVIEW_MARKER_META_NAME}"][content="${options.buildVersionId}"]`
+          );
+          if (markers > 0) return;
+        } catch {
+          // Navigation hiccup while the deployment propagates — keep polling.
+        }
+        if (Date.now() >= deadline) break;
+        await page.settle(intervalMs);
+      }
+      throw new PreviewNotReadyError(base, options.buildVersionId, timeoutMs, null);
+    } finally {
+      await page.close();
+    }
+  });
+}
+
 function viewportName(width: number): ViewportName {
   if (width <= 500) return "mobile";
   if (width <= 900) return "tablet";
@@ -156,11 +199,23 @@ export function createProductionQaCapture(env: Env, previewUrl: string, options?
   const base = previewUrl.replace(/\/$/, "");
   return async (spec) => {
     if (options?.expectedBuildVersionId) {
-      await waitForPreviewMarker({
-        previewUrl: base,
-        buildVersionId: options.expectedBuildVersionId,
-        ...(options.readinessTimeoutMs ? { timeoutMs: options.readinessTimeoutMs } : {}),
-      });
+      // In the Workers Runtime the fetch-based poll can never pass on a
+      // workers.dev preview (loopback error 1042) — verify through the
+      // browser binding when present; the fetch path remains for
+      // browserless contexts and tests.
+      if (env.BROWSER) {
+        await waitForPreviewMarkerViaBrowser(env, {
+          previewUrl: base,
+          buildVersionId: options.expectedBuildVersionId,
+          ...(options.readinessTimeoutMs ? { timeoutMs: options.readinessTimeoutMs } : {}),
+        });
+      } else {
+        await waitForPreviewMarker({
+          previewUrl: base,
+          buildVersionId: options.expectedBuildVersionId,
+          ...(options.readinessTimeoutMs ? { timeoutMs: options.readinessTimeoutMs } : {}),
+        });
+      }
     }
     const session = await playwrightAdapter.launch(env);
     return withBrowser(session, async (browser) => {

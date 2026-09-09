@@ -1,0 +1,840 @@
+{
+ "durationMs": 575040,
+ "outcome": {
+  "terminal": "HUMAN_REVIEW_REQUIRED",
+  "reasons": [
+   "visual fidelity 7 < 90",
+   "9 P1 finding(s)",
+   "hard composition gate(s) failed: FIRST_VIEWPORT_MATERIALLY_CORRECT, PAGE_SILHOUETTE_REGION_ORDER, DOMINANT_TEXT_IMAGE_MASS, CRITICAL_SIGNATURE_TRAITS_PRESERVED, MOBILE_PRESERVES_VISUAL_IDENTITY, CRITICAL_IMAGERY_SERVES_ROLE",
+   "technical 0 < 90",
+   "1 P1 finding(s)",
+   "mandatory gate(s) failed: RUNTIME_CONSOLE_NETWORK_CLEAN, IMPLEMENTATION_CONTRACT_INTEGRITY"
+  ],
+  "siteGenerationId": "f9b671cc-be01-46e4-a689-1f99e5af1582",
+  "siteId": "9066410a-1bed-421b-b540-9448957adae2",
+  "buildId": "06025a7d-74cc-4655-9718-b3a190e78f92",
+  "releaseReadyBuildVersionId": null,
+  "artifactManifestHash": "db9425987fb3578fde517c02d6f71afe1e5d6cac04e322944e38ef88395fef3d",
+  "previewUrl": "https://b-06025a7d74-v7.wazibizwebsites.workers.dev",
+  "repairApplied": true,
+  "builderStrategy": "ONE_CALL",
+  "designBlueprintR2Key": "builds/06025a7d-74cc-4655-9718-b3a190e78f92/v6/design_blueprint.json"
+ },
+ "versions": [
+  {
+   "id": "105f2f8b-7854-487b-92ea-23077dabb6fb",
+   "version_number": 1,
+   "created_at": "2026-09-08T17:48:49.046Z"
+  },
+  {
+   "id": "70de1b79-6547-407c-9f5b-ad2a5f9ad6a8",
+   "version_number": 2,
+   "created_at": "2026-09-09T08:38:29.874Z"
+  },
+  {
+   "id": "7b0737c2-3b92-4a5d-8e05-2276013b43b1",
+   "version_number": 3,
+   "created_at": "2026-09-09T11:23:18.077Z"
+  },
+  {
+   "id": "00b241ee-5067-4374-be93-0041c75e2da6",
+   "version_number": 4,
+   "created_at": "2026-09-09T11:35:27.180Z"
+  },
+  {
+   "id": "597cf07f-3ff6-4db0-be9c-a89108f56ccc",
+   "version_number": 5,
+   "created_at": "2026-09-09T14:00:33.828Z"
+  },
+  {
+   "id": "2d615f6c-cbcc-48b3-930f-06a53b5f9c10",
+   "version_number": 6,
+   "created_at": "2026-09-09T15:41:25.767Z"
+  },
+  {
+   "id": "84009d37-bd0a-40b8-be91-ea56eda1ac7b",
+   "version_number": 7,
+   "created_at": "2026-09-09T15:50:55.259Z"
+  }
+ ],
+ "artifacts": [
+  {
+   "build_version_id": "105f2f8b-7854-487b-92ea-23077dabb6fb",
+   "kind": "design_blueprint",
+   "subkey": "",
+   "artifact_r2_key": "builds/06025a7d-74cc-4655-9718-b3a190e78f92/v1/design_blueprint.json",
+   "created_at": "2026-09-09T00:26:08.101Z"
+  },
+  {
+   "build_version_id": "105f2f8b-7854-487b-92ea-23077dabb6fb",
+   "kind": "site_bundle",
+   "subkey": "",
+   "artifact_r2_key": "builds/06025a7d-74cc-4655-9718-b3a190e78f92/v1/site_bundle.json",
+   "created_at": "2026-09-09T08:37:11.711Z"
+  },
+  {
+   "build_version_id": "105f2f8b-7854-487b-92ea-23077dabb6fb",
+   "kind": "assembled_manifest",
+   "subkey": "",
+   "artifact_r2_key": "builds/06025a7d-74cc-4655-9718-b3a190e78f92/v1/assembled_manifest.json",
+   "created_at": "2026-09-09T08:37:18.535Z"
+  },
+  {
+   "build_version_id": "105f2f8b-7854-487b-92ea-23077dabb6fb",
+   "kind": "qa_evidence_bundle",
+   "subkey": "",
+   "artifact_r2_key": "builds/06025a7d-74cc-4655-9718-b3a190e78f92/v1/qa_evidence_bundle.json",
+   "created_at": "2026-09-09T08:37:55.467Z"
+  },
+  {
+   "build_version_id": "105f2f8b-7854-487b-92ea-23077dabb6fb",
+   "kind": "qa_report",
+   "subkey": "",
+   "artifact_r2_key": "builds/06025a7d-74cc-4655-9718-b3a190e78f92/v1/qa_report.json",
+   "created_at": "2026-09-09T08:38:29.115Z"
+  },
+  {
+   "build_version_id": "105f2f8b-7854-487b-92ea-23077dabb6fb",
+   "kind": "qa_package",
+   "subkey": "",
+   "artifact_r2_key": "builds/06025a7d-74cc-4655-9718-b3a190e78f92/v1/qa_package.json",
+   "created_at": "2026-09-09T08:38:29.477Z"
+  },
+  {
+   "build_version_id": "70de1b79-6547-407c-9f5b-ad2a5f9ad6a8",
+   "kind": "design_blueprint",
+   "subkey": "",
+   "artifact_r2_key": "builds/06025a7d-74cc-4655-9718-b3a190e78f92/v2/design_blueprint.json",
+   "created_at": "2026-09-09T08:38:30.057Z"
+  },
+  {
+   "build_version_id": "7b0737c2-3b92-4a5d-8e05-2276013b43b1",
+   "kind": "design_blueprint",
+   "subkey": "",
+   "artifact_r2_key": "builds/06025a7d-74cc-4655-9718-b3a190e78f92/v3/design_blueprint.json",
+   "created_at": "2026-09-09T11:23:18.259Z"
+  },
+  {
+   "build_version_id": "7b0737c2-3b92-4a5d-8e05-2276013b43b1",
+   "kind": "site_bundle",
+   "subkey": "",
+   "artifact_r2_key": "builds/06025a7d-74cc-4655-9718-b3a190e78f92/v3/site_bundle.json",
+   "created_at": "2026-09-09T11:35:23.157Z"
+  },
+  {
+   "build_version_id": "7b0737c2-3b92-4a5d-8e05-2276013b43b1",
+   "kind": "qa_report",
+   "subkey": "",
+   "artifact_r2_key": "builds/06025a7d-74cc-4655-9718-b3a190e78f92/v3/qa_report.json",
+   "created_at": "2026-09-09T11:35:26.273Z"
+  },
+  {
+   "build_version_id": "7b0737c2-3b92-4a5d-8e05-2276013b43b1",
+   "kind": "qa_package",
+   "subkey": "",
+   "artifact_r2_key": "builds/06025a7d-74cc-4655-9718-b3a190e78f92/v3/qa_package.json",
+   "created_at": "2026-09-09T11:35:26.718Z"
+  },
+  {
+   "build_version_id": "00b241ee-5067-4374-be93-0041c75e2da6",
+   "kind": "design_blueprint",
+   "subkey": "",
+   "artifact_r2_key": "builds/06025a7d-74cc-4655-9718-b3a190e78f92/v4/design_blueprint.json",
+   "created_at": "2026-09-09T11:35:27.391Z"
+  },
+  {
+   "build_version_id": "597cf07f-3ff6-4db0-be9c-a89108f56ccc",
+   "kind": "design_blueprint",
+   "subkey": "",
+   "artifact_r2_key": "builds/06025a7d-74cc-4655-9718-b3a190e78f92/v5/design_blueprint.json",
+   "created_at": "2026-09-09T14:00:34.045Z"
+  },
+  {
+   "build_version_id": "597cf07f-3ff6-4db0-be9c-a89108f56ccc",
+   "kind": "site_bundle",
+   "subkey": "",
+   "artifact_r2_key": "builds/06025a7d-74cc-4655-9718-b3a190e78f92/v5/site_bundle.json",
+   "created_at": "2026-09-09T15:03:19.187Z"
+  },
+  {
+   "build_version_id": "597cf07f-3ff6-4db0-be9c-a89108f56ccc",
+   "kind": "assembled_manifest",
+   "subkey": "",
+   "artifact_r2_key": "builds/06025a7d-74cc-4655-9718-b3a190e78f92/v5/assembled_manifest.json",
+   "created_at": "2026-09-09T15:03:26.667Z"
+  },
+  {
+   "build_version_id": "597cf07f-3ff6-4db0-be9c-a89108f56ccc",
+   "kind": "qa_evidence_bundle",
+   "subkey": "",
+   "artifact_r2_key": "builds/06025a7d-74cc-4655-9718-b3a190e78f92/v5/qa_evidence_bundle.json",
+   "created_at": "2026-09-09T15:40:54.838Z"
+  },
+  {
+   "build_version_id": "597cf07f-3ff6-4db0-be9c-a89108f56ccc",
+   "kind": "qa_report",
+   "subkey": "",
+   "artifact_r2_key": "builds/06025a7d-74cc-4655-9718-b3a190e78f92/v5/qa_report.json",
+   "created_at": "2026-09-09T15:41:24.897Z"
+  },
+  {
+   "build_version_id": "597cf07f-3ff6-4db0-be9c-a89108f56ccc",
+   "kind": "qa_package",
+   "subkey": "",
+   "artifact_r2_key": "builds/06025a7d-74cc-4655-9718-b3a190e78f92/v5/qa_package.json",
+   "created_at": "2026-09-09T15:41:25.351Z"
+  },
+  {
+   "build_version_id": "2d615f6c-cbcc-48b3-930f-06a53b5f9c10",
+   "kind": "design_blueprint",
+   "subkey": "",
+   "artifact_r2_key": "builds/06025a7d-74cc-4655-9718-b3a190e78f92/v6/design_blueprint.json",
+   "created_at": "2026-09-09T15:41:25.984Z"
+  },
+  {
+   "build_version_id": "2d615f6c-cbcc-48b3-930f-06a53b5f9c10",
+   "kind": "site_bundle",
+   "subkey": "",
+   "artifact_r2_key": "builds/06025a7d-74cc-4655-9718-b3a190e78f92/v6/site_bundle.json",
+   "created_at": "2026-09-09T15:45:03.091Z"
+  },
+  {
+   "build_version_id": "2d615f6c-cbcc-48b3-930f-06a53b5f9c10",
+   "kind": "assembled_manifest",
+   "subkey": "",
+   "artifact_r2_key": "builds/06025a7d-74cc-4655-9718-b3a190e78f92/v6/assembled_manifest.json",
+   "created_at": "2026-09-09T15:45:09.377Z"
+  },
+  {
+   "build_version_id": "2d615f6c-cbcc-48b3-930f-06a53b5f9c10",
+   "kind": "qa_evidence_bundle",
+   "subkey": "",
+   "artifact_r2_key": "builds/06025a7d-74cc-4655-9718-b3a190e78f92/v6/qa_evidence_bundle.json",
+   "created_at": "2026-09-09T15:46:17.669Z"
+  },
+  {
+   "build_version_id": "2d615f6c-cbcc-48b3-930f-06a53b5f9c10",
+   "kind": "qa_report",
+   "subkey": "",
+   "artifact_r2_key": "builds/06025a7d-74cc-4655-9718-b3a190e78f92/v6/qa_report.json",
+   "created_at": "2026-09-09T15:50:54.388Z"
+  },
+  {
+   "build_version_id": "2d615f6c-cbcc-48b3-930f-06a53b5f9c10",
+   "kind": "qa_package",
+   "subkey": "",
+   "artifact_r2_key": "builds/06025a7d-74cc-4655-9718-b3a190e78f92/v6/qa_package.json",
+   "created_at": "2026-09-09T15:50:54.803Z"
+  },
+  {
+   "build_version_id": "84009d37-bd0a-40b8-be91-ea56eda1ac7b",
+   "kind": "design_blueprint",
+   "subkey": "",
+   "artifact_r2_key": "builds/06025a7d-74cc-4655-9718-b3a190e78f92/v7/design_blueprint.json",
+   "created_at": "2026-09-09T15:50:55.508Z"
+  },
+  {
+   "build_version_id": "84009d37-bd0a-40b8-be91-ea56eda1ac7b",
+   "kind": "site_bundle",
+   "subkey": "",
+   "artifact_r2_key": "builds/06025a7d-74cc-4655-9718-b3a190e78f92/v7/site_bundle.json",
+   "created_at": "2026-09-09T15:58:46.282Z"
+  },
+  {
+   "build_version_id": "84009d37-bd0a-40b8-be91-ea56eda1ac7b",
+   "kind": "assembled_manifest",
+   "subkey": "",
+   "artifact_r2_key": "builds/06025a7d-74cc-4655-9718-b3a190e78f92/v7/assembled_manifest.json",
+   "created_at": "2026-09-09T15:58:52.315Z"
+  },
+  {
+   "build_version_id": "84009d37-bd0a-40b8-be91-ea56eda1ac7b",
+   "kind": "qa_evidence_bundle",
+   "subkey": "",
+   "artifact_r2_key": "builds/06025a7d-74cc-4655-9718-b3a190e78f92/v7/qa_evidence_bundle.json",
+   "created_at": "2026-09-09T15:59:27.281Z"
+  },
+  {
+   "build_version_id": "84009d37-bd0a-40b8-be91-ea56eda1ac7b",
+   "kind": "qa_report",
+   "subkey": "",
+   "artifact_r2_key": "builds/06025a7d-74cc-4655-9718-b3a190e78f92/v7/qa_report.json",
+   "created_at": "2026-09-09T15:59:50.653Z"
+  },
+  {
+   "build_version_id": "84009d37-bd0a-40b8-be91-ea56eda1ac7b",
+   "kind": "qa_package",
+   "subkey": "",
+   "artifact_r2_key": "builds/06025a7d-74cc-4655-9718-b3a190e78f92/v7/qa_package.json",
+   "created_at": "2026-09-09T15:59:51.069Z"
+  }
+ ],
+ "stageRuns": [
+  {
+   "stage": "simple-design-blueprint",
+   "run_id": "d4933973-385b-4bfd-932b-7288dd325f95",
+   "attempt": 1,
+   "outcome": "invalid",
+   "model": "@cf/zai-org/glm-5.3-flash",
+   "provider": "workers-ai",
+   "schema_version": "design-blueprint/1",
+   "token_usage_json": null,
+   "error_summary": "unparseable JSON: Unexpected token ']', ...\"er.\",\n    ]}\" is not valid JSON",
+   "created_at": "2026-09-08T19:37:23.923Z"
+  },
+  {
+   "stage": "simple-design-blueprint",
+   "run_id": "3cab569b-8bfa-451d-b958-f58da5b00961",
+   "attempt": 1,
+   "outcome": "invalid",
+   "model": "@cf/zai-org/glm-5.3-flash",
+   "provider": "workers-ai",
+   "schema_version": "design-blueprint/1",
+   "token_usage_json": null,
+   "error_summary": "unparseable JSON: Unterminated string in JSON at position 4159 (line 1 column 4160)",
+   "created_at": "2026-09-08T20:05:54.365Z"
+  },
+  {
+   "stage": "simple-design-blueprint",
+   "run_id": "f229f364-9ba8-42b4-8521-37d9f201587e",
+   "attempt": 1,
+   "outcome": "invalid",
+   "model": "@cf/zai-org/glm-5.3-flash",
+   "provider": "workers-ai",
+   "schema_version": "design-blueprint/1",
+   "token_usage_json": null,
+   "error_summary": "unparseable JSON: Unexpected token 'L', \"Let me stu\"... is not valid JSON",
+   "created_at": "2026-09-08T21:14:17.937Z"
+  },
+  {
+   "stage": "simple-design-blueprint",
+   "run_id": "f229f364-9ba8-42b4-8521-37d9f201587e",
+   "attempt": 2,
+   "outcome": "invalid",
+   "model": "@cf/zai-org/glm-5.3-flash",
+   "provider": "workers-ai",
+   "schema_version": "design-blueprint/1",
+   "token_usage_json": null,
+   "error_summary": "unparseable JSON: Unexpected token 'T', \"The user w\"... is not valid JSON",
+   "created_at": "2026-09-08T21:14:17.937Z"
+  },
+  {
+   "stage": "simple-design-blueprint",
+   "run_id": "89298b20-d00d-474e-aef6-52ab48fb62b8",
+   "attempt": 1,
+   "outcome": "invalid",
+   "model": "@cf/zai-org/glm-5.3-flash",
+   "provider": "workers-ai",
+   "schema_version": "design-blueprint/1",
+   "token_usage_json": null,
+   "error_summary": "/tokens/colors/accentOnDark: Unexpected property; /tokens/shape/borderRadius: Expected string length less or equal to 120",
+   "created_at": "2026-09-08T21:26:09.296Z"
+  },
+  {
+   "stage": "simple-design-blueprint",
+   "run_id": "89298b20-d00d-474e-aef6-52ab48fb62b8",
+   "attempt": 2,
+   "outcome": "invalid",
+   "model": "@cf/zai-org/glm-5.3-flash",
+   "provider": "workers-ai",
+   "schema_version": "design-blueprint/1",
+   "token_usage_json": null,
+   "error_summary": "/tokens/typography/scale/0/maxWidthCh: Expected integer to be greater or equal to 20; /imagery/imageSlots/1/aspectRatio: Expected union value; /imagery/imageSlots/2/aspectRatio: Expected union value; /imagery/imageSlots/8/aspectRatio: Expected union value",
+   "created_at": "2026-09-08T21:26:09.296Z"
+  },
+  {
+   "stage": "simple-design-blueprint",
+   "run_id": "20728559-357b-4c5f-a8d7-ffd75cfbb1ae",
+   "attempt": 1,
+   "outcome": "invalid",
+   "model": "@cf/zai-org/glm-5.3-flash",
+   "provider": "workers-ai",
+   "schema_version": "design-blueprint/1",
+   "token_usage_json": null,
+   "error_summary": "/tokens/typography/scale/0/maxWidthCh: Expected integer to be greater or equal to 20",
+   "created_at": "2026-09-08T21:36:58.910Z"
+  },
+  {
+   "stage": "simple-design-blueprint",
+   "run_id": "20728559-357b-4c5f-a8d7-ffd75cfbb1ae",
+   "attempt": 2,
+   "outcome": "invalid",
+   "model": "@cf/zai-org/glm-5.3-flash",
+   "provider": "workers-ai",
+   "schema_version": "design-blueprint/1",
+   "token_usage_json": null,
+   "error_summary": "/tokens/typography/scale/0/maxWidthCh: Expected integer to be greater or equal to 20",
+   "created_at": "2026-09-08T21:36:58.910Z"
+  },
+  {
+   "stage": "simple-design-blueprint",
+   "run_id": "be598087-e285-4060-9629-f512a0f9c77d",
+   "attempt": 1,
+   "outcome": "invalid",
+   "model": "@cf/zai-org/glm-5.3-flash",
+   "provider": "workers-ai",
+   "schema_version": "design-blueprint/1",
+   "token_usage_json": null,
+   "error_summary": "/imagery/imageSlots/2/aspectRatio: Expected union value; /imagery/imageSlots/6/aspectRatio: Expected union value; /imagery/imageSlots/7/aspectRatio: Expected union value",
+   "created_at": "2026-09-08T21:46:31.736Z"
+  },
+  {
+   "stage": "simple-design-blueprint",
+   "run_id": "be598087-e285-4060-9629-f512a0f9c77d",
+   "attempt": 2,
+   "outcome": "invalid",
+   "model": "@cf/zai-org/glm-5.3-flash",
+   "provider": "workers-ai",
+   "schema_version": "design-blueprint/1",
+   "token_usage_json": null,
+   "error_summary": "/tokens/typography/scale/0/maxWidthCh: Expected integer to be greater or equal to 20; /imagery/imageSlots/8/priority: Expected union value; /imagery/imageSlots/9/priority: Expected union value; /imagery/imageSlots/10/priority: Expected union value",
+   "created_at": "2026-09-08T21:46:31.736Z"
+  },
+  {
+   "stage": "simple-design-blueprint",
+   "run_id": "d8fac165-5d23-411b-ab18-f5a975638fca",
+   "attempt": 1,
+   "outcome": "valid",
+   "model": "@cf/zai-org/glm-5.3-flash",
+   "provider": "workers-ai",
+   "schema_version": "design-blueprint/1",
+   "token_usage_json": null,
+   "error_summary": null,
+   "created_at": "2026-09-09T00:22:22.265Z"
+  },
+  {
+   "stage": "simple-website-builder",
+   "run_id": "49c611dd-cbd6-4223-94f4-f097157842e1",
+   "attempt": 1,
+   "outcome": "invalid",
+   "model": "@cf/zai-org/glm-5.3-flash",
+   "provider": "workers-ai",
+   "schema_version": "site-bundle/1",
+   "token_usage_json": null,
+   "error_summary": "/pages/home: Expected string length greater or equal to 200; /pages/about: Expected string length greater or equal to 200; /pages/services: Expected string length greater or equal to 200; /pages/contact: Expected string length greater or equal to 200; /sharedCss: Expected string length greater or equal to 200",
+   "created_at": "2026-09-09T08:12:41.974Z"
+  },
+  {
+   "stage": "simple-website-builder",
+   "run_id": "49c611dd-cbd6-4223-94f4-f097157842e1",
+   "attempt": 2,
+   "outcome": "invalid",
+   "model": "@cf/zai-org/glm-5.3-flash",
+   "provider": "workers-ai",
+   "schema_version": "site-bundle/1",
+   "token_usage_json": null,
+   "error_summary": "/pages/home: Expected string length greater or equal to 200; /pages/about: Expected string length greater or equal to 200; /pages/services: Expected string length greater or equal to 200; /pages/contact: Expected string length greater or equal to 200; /sharedCss: Expected string length greater or equal to 200",
+   "created_at": "2026-09-09T08:12:41.974Z"
+  },
+  {
+   "stage": "simple-website-builder",
+   "run_id": "35958e0b-b354-401f-98c3-1d1432c670d7",
+   "attempt": 1,
+   "outcome": "valid",
+   "model": "@cf/zai-org/glm-5.3-flash",
+   "provider": "workers-ai",
+   "schema_version": "site-bundle-shell/1",
+   "token_usage_json": null,
+   "error_summary": null,
+   "created_at": "2026-09-09T08:12:45.570Z"
+  },
+  {
+   "stage": "simple-website-builder",
+   "run_id": "28790ec0-d97d-4563-bda8-0233cd7ffba4",
+   "attempt": 1,
+   "outcome": "invalid",
+   "model": "@cf/zai-org/glm-5.3-flash",
+   "provider": "workers-ai",
+   "schema_version": "site-bundle/1",
+   "token_usage_json": null,
+   "error_summary": "/pages/home: Expected string length greater or equal to 200; /pages/about: Expected string length greater or equal to 200; /pages/services: Expected string length greater or equal to 200; /pages/contact: Expected string length greater or equal to 200; /sharedCss: Expected string length greater or equal to 200",
+   "created_at": "2026-09-09T08:27:57.389Z"
+  },
+  {
+   "stage": "simple-website-builder",
+   "run_id": "28790ec0-d97d-4563-bda8-0233cd7ffba4",
+   "attempt": 2,
+   "outcome": "repaired",
+   "model": "@cf/zai-org/glm-5.3-flash",
+   "provider": "workers-ai",
+   "schema_version": "site-bundle/1",
+   "token_usage_json": null,
+   "error_summary": null,
+   "created_at": "2026-09-09T08:27:57.389Z"
+  },
+  {
+   "stage": "simple-visual-qa",
+   "run_id": "b53201f7-87c6-467a-a67d-515f3e410a83",
+   "attempt": 1,
+   "outcome": "valid",
+   "model": "@cf/zai-org/glm-5.3-flash",
+   "provider": "workers-ai",
+   "schema_version": "simple-visual-qa/1",
+   "token_usage_json": null,
+   "error_summary": null,
+   "created_at": "2026-09-09T08:37:56.307Z"
+  },
+  {
+   "stage": "simple-site-repair",
+   "run_id": "66d8ef1d-d940-4e9a-ae83-c76f7cc93028",
+   "attempt": 1,
+   "outcome": "invalid",
+   "model": "@cf/zai-org/glm-5.3-flash",
+   "provider": "workers-ai",
+   "schema_version": "site-bundle/1",
+   "token_usage_json": null,
+   "error_summary": "/pages/home: Expected string length greater or equal to 200; /pages/about: Expected string length greater or equal to 200; /pages/services: Expected string length greater or equal to 200; /pages/contact: Expected string length greater or equal to 200; /sharedCss: Expected string length greater or equal to 200",
+   "created_at": "2026-09-09T08:38:30.751Z"
+  },
+  {
+   "stage": "simple-site-repair",
+   "run_id": "66d8ef1d-d940-4e9a-ae83-c76f7cc93028",
+   "attempt": 2,
+   "outcome": "invalid",
+   "model": "@cf/zai-org/glm-5.3-flash",
+   "provider": "workers-ai",
+   "schema_version": "site-bundle/1",
+   "token_usage_json": null,
+   "error_summary": "unparseable JSON: Unterminated string in JSON at position 105852 (line 1 column 105853)",
+   "created_at": "2026-09-09T08:38:30.751Z"
+  },
+  {
+   "stage": "simple-visual-qa",
+   "run_id": "a9738e9f-384f-480f-a7eb-b4f6401d3475",
+   "attempt": 1,
+   "outcome": "valid",
+   "model": "@cf/zai-org/glm-5.3-flash",
+   "provider": "workers-ai",
+   "schema_version": "simple-visual-qa/1",
+   "token_usage_json": null,
+   "error_summary": null,
+   "created_at": "2026-09-09T09:05:13.633Z"
+  },
+  {
+   "stage": "simple-visual-qa",
+   "run_id": "c191b436-ffff-4dc6-9fc2-1caf3079a021",
+   "attempt": 1,
+   "outcome": "valid",
+   "model": "@cf/zai-org/glm-5.3-flash",
+   "provider": "workers-ai",
+   "schema_version": "simple-visual-qa/1",
+   "token_usage_json": null,
+   "error_summary": null,
+   "created_at": "2026-09-09T09:14:42.859Z"
+  },
+  {
+   "stage": "simple-website-builder",
+   "run_id": "a657bbfc-0893-4ff2-b08d-2aabcbfbe014",
+   "attempt": 1,
+   "outcome": "valid",
+   "model": "@cf/zai-org/glm-5.3-flash",
+   "provider": "workers-ai",
+   "schema_version": "site-bundle/1",
+   "token_usage_json": null,
+   "error_summary": null,
+   "created_at": "2026-09-09T11:26:31.120Z"
+  },
+  {
+   "stage": "simple-site-repair",
+   "run_id": "e76cf120-1be1-4f39-ba83-87db23371aa5",
+   "attempt": 1,
+   "outcome": "invalid",
+   "model": "z-ai/glm-5.3-flash",
+   "provider": "openrouter",
+   "schema_version": "site-repair-files/1",
+   "token_usage_json": "{\"prompt_tokens\":34602,\"completion_tokens\":32000,\"total_tokens\":66602,\"cost\":0.0188805573,\"is_byok\":false,\"prompt_tokens_details\":{\"cached_tokens\":0,\"cache_write_tokens\":0,\"audio_tokens\":0,\"video_tokens\":0},\"cost_details\":{\"upstream_inference_cost\":0.01907127,\"upstream_inference_prompt_cost\":0.00467127,\"upstream_inference_completions_cost\":0.0144},\"completion_tokens_details\":{\"reasoning_tokens\":16535,\"image_tokens\":0,\"audio_tokens\":0}}",
+   "error_summary": "unparseable JSON: Bad escaped character in JSON at position 53286 (line 13 column 1218)",
+   "created_at": "2026-09-09T11:35:27.930Z"
+  },
+  {
+   "stage": "simple-site-repair",
+   "run_id": "e76cf120-1be1-4f39-ba83-87db23371aa5",
+   "attempt": 2,
+   "outcome": "invalid",
+   "model": "z-ai/glm-5.3-flash",
+   "provider": "openrouter",
+   "schema_version": "site-repair-files/1",
+   "token_usage_json": "{\"prompt_tokens\":30818,\"completion_tokens\":10970,\"total_tokens\":41788,\"cost\":0,\"is_byok\":false,\"prompt_tokens_details\":{\"cached_tokens\":0,\"cache_write_tokens\":0,\"audio_tokens\":0,\"video_tokens\":0},\"cost_details\":{\"upstream_inference_cost\":0.0069213,\"upstream_inference_prompt_cost\":0.0030818,\"upstream_inference_completions_cost\":0.0038395},\"completion_tokens_details\":{\"reasoning_tokens\":1474,\"image_tokens\":0,\"audio_tokens\":0}}",
+   "error_summary": "unparseable JSON: Unterminated string in JSON at position 37942 (line 1 column 37943)",
+   "created_at": "2026-09-09T11:35:27.930Z"
+  },
+  {
+   "stage": "simple-website-builder",
+   "run_id": "fa4b7044-23bc-468f-ae2d-c51288f33cef",
+   "attempt": 1,
+   "outcome": "invalid",
+   "model": "@cf/zai-org/glm-5.3-flash",
+   "provider": "workers-ai",
+   "schema_version": "site-bundle/1",
+   "token_usage_json": null,
+   "error_summary": "unparseable JSON: Unterminated string in JSON at position 111029 (line 1 column 111030)",
+   "created_at": "2026-09-09T14:03:48.764Z"
+  },
+  {
+   "stage": "simple-website-builder",
+   "run_id": "fa4b7044-23bc-468f-ae2d-c51288f33cef",
+   "attempt": 2,
+   "outcome": "invalid",
+   "model": "@cf/zai-org/glm-5.3-flash",
+   "provider": "workers-ai",
+   "schema_version": "site-bundle/1",
+   "token_usage_json": null,
+   "error_summary": "unparseable JSON: Unterminated string in JSON at position 105733 (line 1 column 105734)",
+   "created_at": "2026-09-09T14:03:48.764Z"
+  },
+  {
+   "stage": "simple-website-builder",
+   "run_id": "a4c0e022-7d8f-47a1-bcb5-08e6df4da04c",
+   "attempt": 1,
+   "outcome": "invalid",
+   "model": "@cf/zai-org/glm-5.3-flash",
+   "provider": "workers-ai",
+   "schema_version": "site-bundle/1",
+   "token_usage_json": null,
+   "error_summary": "unparseable JSON: Unterminated string in JSON at position 102147 (line 1 column 102148)",
+   "created_at": "2026-09-09T14:32:19.205Z"
+  },
+  {
+   "stage": "simple-website-builder",
+   "run_id": "a4c0e022-7d8f-47a1-bcb5-08e6df4da04c",
+   "attempt": 2,
+   "outcome": "invalid",
+   "model": "@cf/zai-org/glm-5.3-flash",
+   "provider": "workers-ai",
+   "schema_version": "site-bundle/1",
+   "token_usage_json": null,
+   "error_summary": "unparseable JSON: Bad escaped character in JSON at position 105008 (line 1 column 105009)",
+   "created_at": "2026-09-09T14:32:19.205Z"
+  },
+  {
+   "stage": "simple-website-builder",
+   "run_id": "d5397ca5-c8df-4813-ae4d-776aac2da83a",
+   "attempt": 1,
+   "outcome": "valid",
+   "model": "@cf/zai-org/glm-5.3-flash",
+   "provider": "workers-ai",
+   "schema_version": "site-bundle-shell/1",
+   "token_usage_json": null,
+   "error_summary": null,
+   "created_at": "2026-09-09T14:50:52.864Z"
+  },
+  {
+   "stage": "simple-website-builder",
+   "run_id": "b3ca13e8-1d8f-42e8-9765-9fb3b806c56b",
+   "attempt": 1,
+   "outcome": "valid",
+   "model": "@cf/zai-org/glm-5.3-flash",
+   "provider": "workers-ai",
+   "schema_version": "site-bundle-pages/1",
+   "token_usage_json": null,
+   "error_summary": null,
+   "created_at": "2026-09-09T14:53:56.061Z"
+  },
+  {
+   "stage": "simple-visual-qa",
+   "run_id": "38f8fbeb-ee16-4a14-abb8-761c248b18b1",
+   "attempt": 1,
+   "outcome": "valid",
+   "model": "@cf/zai-org/glm-5.3-flash",
+   "provider": "workers-ai",
+   "schema_version": "simple-visual-qa/1",
+   "token_usage_json": null,
+   "error_summary": null,
+   "created_at": "2026-09-09T15:40:56.035Z"
+  },
+  {
+   "stage": "simple-site-repair",
+   "run_id": "98dde7e5-a352-4c14-874e-8278361f4b72",
+   "attempt": 1,
+   "outcome": "valid",
+   "model": "@cf/zai-org/glm-5.3-flash",
+   "provider": "workers-ai",
+   "schema_version": "site-repair-files/1",
+   "token_usage_json": null,
+   "error_summary": null,
+   "created_at": "2026-09-09T15:41:27.126Z"
+  },
+  {
+   "stage": "simple-visual-qa",
+   "run_id": "befebb11-3365-4cc4-9cc9-6ea93a08b44f",
+   "attempt": 1,
+   "outcome": "valid",
+   "model": "@cf/zai-org/glm-5.3-flash",
+   "provider": "workers-ai",
+   "schema_version": "simple-visual-qa/1",
+   "token_usage_json": null,
+   "error_summary": null,
+   "created_at": "2026-09-09T15:50:22.622Z"
+  },
+  {
+   "stage": "simple-site-repair",
+   "run_id": "f851874e-4297-4e96-873e-24746e8b9126",
+   "attempt": 1,
+   "outcome": "valid",
+   "model": "@cf/zai-org/glm-5.3-flash",
+   "provider": "workers-ai",
+   "schema_version": "site-repair-files/1",
+   "token_usage_json": null,
+   "error_summary": null,
+   "created_at": "2026-09-09T15:50:56.227Z"
+  },
+  {
+   "stage": "simple-visual-qa",
+   "run_id": "33fc0f5e-df43-429a-a6ee-2aa79939be16",
+   "attempt": 1,
+   "outcome": "valid",
+   "model": "@cf/zai-org/glm-5.3-flash",
+   "provider": "workers-ai",
+   "schema_version": "simple-visual-qa/1",
+   "token_usage_json": null,
+   "error_summary": null,
+   "created_at": "2026-09-09T15:59:28.171Z"
+  }
+ ],
+ "imageAttempts": [
+  {
+   "slot_id": "about-strategist",
+   "wave": 1,
+   "attempt_number": 1,
+   "status": "succeeded",
+   "provider_task_id": "6b0414d92f0f0624e0afa2777b128027",
+   "cost_usd": 0.05
+  },
+  {
+   "slot_id": "about-strategist",
+   "wave": 1,
+   "attempt_number": 1,
+   "status": "succeeded",
+   "provider_task_id": "66908591e7966173b0a5843803cba75e",
+   "cost_usd": 0.05
+  },
+  {
+   "slot_id": "about-strategist",
+   "wave": 1,
+   "attempt_number": 1,
+   "status": "succeeded",
+   "provider_task_id": "23d09036c2257058fbfcafceeb2eb1b3",
+   "cost_usd": 0.05
+  },
+  {
+   "slot_id": "contact-presentation",
+   "wave": 1,
+   "attempt_number": 1,
+   "status": "succeeded",
+   "provider_task_id": "dd04e210efc02333b28ddf1613f6d7cb",
+   "cost_usd": 0.05
+  },
+  {
+   "slot_id": "contact-presentation",
+   "wave": 1,
+   "attempt_number": 1,
+   "status": "succeeded",
+   "provider_task_id": "e0ac54e1dc84709b5e1032d0f7857e26",
+   "cost_usd": 0.05
+  },
+  {
+   "slot_id": "contact-presentation",
+   "wave": 1,
+   "attempt_number": 1,
+   "status": "succeeded",
+   "provider_task_id": "51fc911af6f6d1f600f84b8641ce9091",
+   "cost_usd": 0.05
+  },
+  {
+   "slot_id": "hero-team-collab",
+   "wave": 1,
+   "attempt_number": 1,
+   "status": "succeeded",
+   "provider_task_id": "9fdf6725f53fcffd062d3e151524f3f3",
+   "cost_usd": 0.05
+  },
+  {
+   "slot_id": "hero-team-collab",
+   "wave": 1,
+   "attempt_number": 1,
+   "status": "succeeded",
+   "provider_task_id": "7b4eddaec689abe0e9f68875dd21040a",
+   "cost_usd": 0.05
+  },
+  {
+   "slot_id": "hero-team-collab",
+   "wave": 1,
+   "attempt_number": 1,
+   "status": "succeeded",
+   "provider_task_id": "8f47d99bf559439977b2f2c4977d55c6",
+   "cost_usd": 0.05
+  },
+  {
+   "slot_id": "newsletter-owner",
+   "wave": 1,
+   "attempt_number": 1,
+   "status": "succeeded",
+   "provider_task_id": "ebe9c96381e7c9de65467a8ce6d19297",
+   "cost_usd": 0.05
+  },
+  {
+   "slot_id": "newsletter-owner",
+   "wave": 1,
+   "attempt_number": 1,
+   "status": "succeeded",
+   "provider_task_id": "5233ed631661b03dfbae28780da3529f",
+   "cost_usd": 0.05
+  },
+  {
+   "slot_id": "newsletter-owner",
+   "wave": 1,
+   "attempt_number": 1,
+   "status": "succeeded",
+   "provider_task_id": "ff625916d0df797ad1bca14b46348ac6",
+   "cost_usd": 0.05
+  },
+  {
+   "slot_id": "results-celebration",
+   "wave": 1,
+   "attempt_number": 1,
+   "status": "succeeded",
+   "provider_task_id": "eb07505f63b3817144fe8217f3bce253",
+   "cost_usd": 0.05
+  },
+  {
+   "slot_id": "results-celebration",
+   "wave": 1,
+   "attempt_number": 1,
+   "status": "succeeded",
+   "provider_task_id": "b620175c47f2d76f248693665cc97960",
+   "cost_usd": 0.05
+  },
+  {
+   "slot_id": "results-celebration",
+   "wave": 1,
+   "attempt_number": 1,
+   "status": "succeeded",
+   "provider_task_id": "6efc1f8bbd83551eca887036518f17d6",
+   "cost_usd": 0.05
+  },
+  {
+   "slot_id": "testimonial-office",
+   "wave": 1,
+   "attempt_number": 1,
+   "status": "succeeded",
+   "provider_task_id": "8390e0dd45809ea3806b3f439b70c2bd",
+   "cost_usd": 0.05
+  },
+  {
+   "slot_id": "testimonial-office",
+   "wave": 1,
+   "attempt_number": 1,
+   "status": "succeeded",
+   "provider_task_id": "d7a2815961808563cfc877d53fa22e35",
+   "cost_usd": 0.05
+  },
+  {
+   "slot_id": "testimonial-office",
+   "wave": 1,
+   "attempt_number": 1,
+   "status": "succeeded",
+   "provider_task_id": "d77507f544bda44129c900dd304a3c7e",
+   "cost_usd": 0.05
+  }
+ ]
+}
