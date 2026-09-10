@@ -53,12 +53,8 @@ export interface Env {
   // provider failover must keep serving this exact model.
   LLM_MODEL?: string;
 
-  // EXPERIMENT BRANCH ONLY (experiment/simplified-design-pipeline): internal
-  // A/B selector for the design pipeline. "simple_blueprint_v1" routes Builds
-  // through src/simple-design/ (Design Blueprint → Website Builder → QA →
-  // ONE Repair); "legacy_v2" keeps the canonical chain. Never exposed in
-  // onboarding; the business-facing Build Mode remains REFERENCE_BOUND.
-  DESIGN_PIPELINE_VERSION?: string;
+  // DESIGN_PIPELINE_VERSION was removed with the legacy design pipeline
+  // (cleanup 2026-09-10). Any residual value in a wrangler config is inert.
 
   // EXPERIMENT BRANCH ONLY: live benchmark driver switches (never set in the
   // production config). EXP_BENCHMARK_DRIVER="1" enables the driver route;

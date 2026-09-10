@@ -1,6 +1,6 @@
-// SIMPLE design pipeline orchestration (experiment/simplified-design-pipeline).
+// The V2 design pipeline (canonical since the 2026-09 legacy cleanup): the
+// SIMPLE chain is the ONLY design path.
 //
-// Replaces the legacy design chain for DESIGN_PIPELINE_VERSION=simple_blueprint_v1:
 //
 //   reference capture (REUSED legacy intake)
 //   -> DESIGN BLUEPRINT      (ONE multimodal schema-validated call + deterministic gate)
@@ -47,19 +47,10 @@ import { runSimpleSiteRepairStage } from "./site-repair";
 import { runDeterministicBundleQa } from "./bundle-qa";
 import { buildSimpleQaPackage, finalizeSimpleRelease, simpleReleaseVerdict, storeSimpleQaPackage } from "./qa-package";
 
-// ── Experiment selector (spec section 4) ────────────────────────────────────
-
-export type DesignPipelineVersion = "legacy_v2" | "simple_blueprint_v1";
-export const DESIGN_PIPELINE_VERSIONS: readonly DesignPipelineVersion[] = ["legacy_v2", "simple_blueprint_v1"];
-// Experiment-branch default: SIMPLE. Flip the wrangler var to "legacy_v2"
-// for A/B comparison runs. Never exposed in onboarding; the business-facing
-// Build Mode remains REFERENCE_BOUND only.
-export const DEFAULT_DESIGN_PIPELINE_VERSION: DesignPipelineVersion = "simple_blueprint_v1";
-
-export function resolveDesignPipelineVersion(env: Partial<Pick<Env, "DESIGN_PIPELINE_VERSION">> | undefined): DesignPipelineVersion {
-  const value = env?.DESIGN_PIPELINE_VERSION as DesignPipelineVersion | undefined;
-  return value && DESIGN_PIPELINE_VERSIONS.includes(value) ? value : DEFAULT_DESIGN_PIPELINE_VERSION;
-}
+// Pipeline provenance identifier. The legacy_v2 executable path was removed
+// (cleanup 2026-09-10): this constant is retained only as the artifact/
+// provenance version string. There is no runtime selector and no env var.
+export const DESIGN_PIPELINE_VERSION = "simple_blueprint_v1";
 
 // ── Seams / inputs / outcome ────────────────────────────────────────────────
 
