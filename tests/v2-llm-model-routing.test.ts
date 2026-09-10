@@ -142,7 +142,7 @@ describe("AI-stage provenance records the canonical model", () => {
     const created = await createInitialBuild(env, { siteGenerationId: started.siteGenerationId });
 
     const run = await runSchemaValidatedAiStage<{ ok: boolean }>(env, {
-      stage: "reference-analyzer",
+      stage: "simple-design-blueprint",
       schema: Type.Object({ ok: Type.Boolean() }),
       schemaVersion: "model-routing-test/1",
       userPrompt: "test",

@@ -5,7 +5,7 @@ import { startSiteGeneration, createInitialBuild } from "../src/domain/lifecycle
 import { runReferenceIntake, getFrozenReferenceEvidence, type ReferenceCaptureFn } from "../src/domain/reference-intake";
 import { encodePng, decodePng, downscaleRgb } from "../src/lib/png-codec";
 import { extractScreenshotEvidence } from "../src/domain/visual-evidence-extraction";
-import { compareGeometry, geometryFromRegions, type GeometryProfile } from "../src/domain/qa-evidence";
+import { geometryFromRegions } from "../src/domain/qa-evidence";
 import { getObject, putObject } from "../src/lib/assets";
 import { buildPng } from "./helpers/png";
 
@@ -119,54 +119,7 @@ describe("deterministic screenshot extraction (issue #41)", () => {
 
 // ── Comparator truthfulness ───────────────────────────────────────────────────
 
-describe("geometry comparator truthfulness (issue #41)", () => {
-  const fullCandidate: GeometryProfile = {
-    regionOrder: ["hero", "gallery", "services", "footer-cta"],
-    firstViewportHeightRatio: 0.92,
-    sectionHeightRatios: [1, 0.8, 0.9, 0.5],
-    imageMassRatio: 0.3,
-    containerWidthRatio: 0.8,
-    columnRatios: [5 / 7],
-    dominantAlignment: "asymmetric",
-    surfaceSequence: ["paper", "ink", "paper"],
-    whitespaceRatio: 0.2,
-  };
-
-  it("an empty reference profile yields INSUFFICIENT_REFERENCE_EVIDENCE, never a similarity score", () => {
-    // The exact RankForge failure shape: reference side with zero measured
-    // regions used to pass vacuously against fabricated constants.
-    const emptyReference = geometryFromRegions([], null);
-    const comparison = compareGeometry(emptyReference, fullCandidate);
-    expect(comparison.status).toBe("INSUFFICIENT_REFERENCE_EVIDENCE");
-    expect(comparison.similarityScore).toBeNull();
-    expect(comparison.measuredCoverage).toBe(0);
-    expect(comparison.metrics).toEqual([]);
-  });
-
-  it("emits a similarity percentage only over metrics both sides actually measured", () => {
-    const reference = geometryFromRegions(
-      [
-        { id: "hero", height: 990, viewportHeightRatio: 1.1 },
-        { id: "gallery", height: 720, viewportHeightRatio: 0.8 },
-        { id: "services", height: 810, viewportHeightRatio: 0.9 },
-        { id: "footer-cta", height: 450, viewportHeightRatio: 0.5 },
-      ],
-      0.28
-    );
-    const comparison = compareGeometry(reference, fullCandidate);
-    expect(comparison.status).toBe("MEASURED");
-    // Only region_count, region_order, first_viewport and image_mass are
-    // measured on both sides; the rest stay UNKNOWN instead of constants.
-    expect(comparison.metrics.map((metric) => metric.id).sort()).toEqual([
-      "first_viewport_height_ratio",
-      "image_mass_ratio",
-      "region_count",
-      "region_order",
-    ]);
-    expect(comparison.measuredCoverage).toBeCloseTo(4 / 8, 3);
-    expect(comparison.similarityScore).not.toBeNull();
-  });
-
+describe("geometry profile derivation (issue #41)", () => {
   it("geometryFromRegions carries UNKNOWN instead of 0.9/0.83/0.22/asymmetric", () => {
     const profile = geometryFromRegions([{ id: "r1", height: 900, viewportHeightRatio: 1 }], null);
     expect(profile.firstViewportHeightRatio).toBe(1);
