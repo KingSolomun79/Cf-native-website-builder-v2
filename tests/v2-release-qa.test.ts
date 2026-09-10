@@ -29,7 +29,7 @@ import { Value } from "@sinclair/typebox/value";
 import { assignReleaseReady, getReleaseRecord, ReleaseGateError } from "../src/domain/release";
 import { getBuildStageArtifact } from "../src/domain/stage-artifacts";
 import type { RawAiGenerate } from "../src/domain/ai-boundary";
-import type { PageId } from "../src/domain/site-generator";
+import type { PageId } from "../src/domain/site-contracts";
 
 // Primary-seam tests for standardized evidence, geometry comparison, QA-A/
 // QA-B and Release Ready (issue #13).

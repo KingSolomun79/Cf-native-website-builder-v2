@@ -213,30 +213,6 @@ describe("SIMPLE pipeline end-to-end (experiment/simplified-design-pipeline)", (
     expect(build?.state).toBe("RELEASE_READY");
   });
 
-  it("legacy_v2 env still routes the legacy chain (A/B selector works)", async () => {
-    const siteGenerationId = await startGeneration("references/simple/legacy-route.png");
-    // Run with the UNTOUCHED test env (legacy_v2) and the LEGACY scripted deps.
-    const { createPipelineScripts, persistPipelineScreenshot } = await import("./helpers/pipeline-scripts");
-    await persistPipelineScreenshot(env, "references/simple/legacy-route-ref.png");
-    const legacyStarted = await startSiteGeneration(env, {
-      payload: {
-        buildMode: "REFERENCE_BOUND",
-        facts: { businessName: "Pipeline Wiring Smoke Business", contactEmail: "ops@wazibizwebsites.example" },
-        reference: { screenshotR2Key: "references/simple/legacy-route-ref.png", url: "https://meridian-atelier.example.com/" },
-      },
-    });
-    const legacyOutcome = await runBuildPipeline(env, { siteGenerationId: legacyStarted.siteGenerationId, deps: createPipelineScripts() });
-    expect(legacyOutcome.terminal).toBe("RELEASE_READY");
-    // Legacy chain produced a legacy Visual Blueprint artifact, not a SIMPLE one.
-    const simpleBlueprint = await env.DB.prepare(
-      "SELECT COUNT(*) AS n FROM build_stage_artifacts WHERE build_id = ? AND kind = 'design_blueprint'"
-    )
-      .bind(legacyOutcome.buildId)
-      .first<{ n: number }>();
-    expect(simpleBlueprint?.n).toBe(0);
-    void siteGenerationId;
-  });
-
   it("the fixture blueprint itself satisfies the runtime schema gate", () => {
     const validated = validateDesignBlueprint(simpleBlueprintFixture());
     expect(validated.valid).toBe(true);

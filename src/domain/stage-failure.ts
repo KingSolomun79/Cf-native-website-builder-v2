@@ -40,8 +40,6 @@ import { NonRetryableError } from "cloudflare:workflows";
 import { StageExecutionCollisionError } from "./stage-execution";
 import { StageArtifactError } from "./stage-artifacts";
 import { ImageBudgetExceededError } from "./image-pipeline";
-import { SiteGenerationValidationError } from "./site-generator";
-import { VisualBlueprintError } from "./visual-blueprint";
 import { AiStageSchemaInvalidError } from "./ai-boundary";
 
 export type StageFailureClass =
@@ -90,13 +88,10 @@ export function classifyStageFailure(error: unknown): StageFailureClass {
   }
   // DETERMINISTIC_REVIEW_REQUIRED: the stage's bounded repair is spent and
   // the same immutable inputs deterministically re-produce the blocker.
-  // VisualBlueprintError is escalated IN-STEP by issue #60 before the
-  // boundary; SiteGenerationValidationError by the #62 pipeline markers.
-  if (
-    error instanceof SiteGenerationValidationError ||
-    error instanceof VisualBlueprintError ||
-    error instanceof AiStageSchemaInvalidError
-  ) {
+  // (The legacy VisualBlueprintError / SiteGenerationValidationError classes
+  // were removed with the legacy design chain; the SIMPLE pipeline's
+  // schema-invalid class carries the semantics.)
+  if (error instanceof AiStageSchemaInvalidError) {
     return "DETERMINISTIC_REVIEW_REQUIRED";
   }
   // Everything else — including StageExecutionInProgressError (single-flight

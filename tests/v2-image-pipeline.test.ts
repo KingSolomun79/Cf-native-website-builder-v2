@@ -20,7 +20,7 @@ import {
   type ImageGenerationProvider,
   type ImagePromptRecord,
 } from "../src/domain/image-pipeline";
-import type { ImageSlot } from "../src/domain/site-generator";
+import type { ImageSlot } from "../src/domain/site-contracts";
 import { encodePng } from "../src/lib/png-codec";
 
 // Primary-seam tests for budgeted two-wave image generation (issue #10).

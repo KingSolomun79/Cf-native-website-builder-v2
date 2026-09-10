@@ -15,7 +15,6 @@ import type { Env } from "../env.d";
 import type { PageId } from "./site-contracts";
 import type { QaCaptureFn, PageCapture } from "./qa-evidence";
 import { geometryFromRegions } from "./qa-evidence";
-import type { CraftCapture } from "./craft-preflight";
 import { playwrightAdapter, type RawLayout } from "../lib/browser-adapter";
 import { withBrowser } from "../lib/browser-lifecycle";
 import type { ViewportName } from "../lib/viewports";
@@ -159,33 +158,6 @@ export function regionsFromLayout(layout: RawLayout, viewportHeight: number): Ar
     height: section.bounds.height,
     viewportHeightRatio: Number((section.bounds.height / viewportHeight).toFixed(3)),
   }));
-}
-
-// One deterministic home-desktop capture for the Design Craft Preflight
-// (issue #49): raw layout (regions, images, headline, viewport) plus the
-// full-page screenshot the region crops are cut from.
-export async function createCraftCapture(env: Env, previewUrl: string): Promise<CraftCapture> {
-  const base = previewUrl.replace(/\/$/, "");
-  const session = await playwrightAdapter.launch(env);
-  return withBrowser(session, async (browser) => {
-    const page = await browser.newPage({
-      viewport: { name: "desktop", width: 1440, height: 900 },
-      reducedMotion: false,
-    });
-    try {
-      await page.goto(`${base}/`, { timeoutMs: 45_000, waitUntil: "networkidle" });
-      await page.waitForImages(10_000);
-      const layout: RawLayout = await page.extractLayout();
-      return {
-        layout,
-        fullPageScreenshot: await page.screenshot({ fullPage: true }),
-        viewportWidth: layout.viewportWidth ?? 1440,
-        viewportHeight: layout.viewportHeight ?? 900,
-      };
-    } finally {
-      await page.close();
-    }
-  });
 }
 
 export interface ProductionQaCaptureOptions {

@@ -29,7 +29,7 @@ import {
   runSimpleSiteRepairStage,
 } from "../src/simple-design/site-repair";
 import { runSimpleWebsiteBuilderStage } from "../src/simple-design/website-builder";
-import { lintTrustContexts, factVocabulary } from "../src/domain/site-generator";
+import { lintTrustContexts, factVocabulary } from "../src/domain/fact-lint";
 import { validateDesignBlueprint, type QaPackage, type SiteBundle } from "../src/simple-design/contracts";
 import { FINCH_KNOWN_GOOD_BLUEPRINT } from "./_generated-simple-finch";
 import { startSiteGeneration, createInitialBuild } from "../src/domain/lifecycle";

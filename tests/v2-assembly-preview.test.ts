@@ -10,7 +10,7 @@ import {
 } from "../src/domain/assembly";
 import { runTechnicalPreflight } from "../src/domain/technical-preflight";
 import { getObject, putObject } from "../src/lib/assets";
-import type { ImageSlot } from "../src/domain/site-generator";
+import type { ImageSlot } from "../src/domain/site-contracts";
 
 // Primary-seam tests for assembly, Technical Preflight and Preview
 // deployment (issue #12).

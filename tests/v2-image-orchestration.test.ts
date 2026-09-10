@@ -31,13 +31,13 @@ import {
   type ImageOrchestrationSeams,
 } from "../src/domain/image-orchestration";
 import { MAX_ATTEMPTS_PER_SLOT, type ImageGenerationProvider, type ImageProviderFetchResult, type ResolvedSlotTask } from "../src/domain/image-pipeline";
-import type { ImageSlot } from "../src/domain/site-generator";
+import type { ImageSlot } from "../src/domain/site-contracts";
 import type { RawAiGenerate } from "../src/domain/ai-boundary";
 import { runBuildPipeline, type BuildPipelineDeps } from "../src/domain/build-pipeline";
 import { WRANGLER_CONFIG } from "./_generated-wrangler-config";
 import { encodePng } from "../src/lib/png-codec";
 import { WebsiteBuildWorkflow } from "../src/workflows/website-build-workflow";
-import { createPipelineScripts, persistPipelineScreenshot, PIPELINE_SCRIPTS_BUSINESS } from "./helpers/pipeline-scripts";
+import { createSimpleScripts, persistSimpleScreenshot, SIMPLE_SCRIPTS_BUSINESS } from "./helpers/simple-scripts";
 
 const env = providedEnv as unknown as Env;
 
@@ -466,11 +466,11 @@ describe("durable image lifecycle (issue #58)", () => {
 // ── Pipeline + workflow integration ─────────────────────────────────────────
 
 async function startPipelineGeneration(screenshotKey: string): Promise<string> {
-  await persistPipelineScreenshot(env, screenshotKey);
+  await persistSimpleScreenshot(env, screenshotKey);
   const started = await startSiteGeneration(env, {
     payload: {
       buildMode: "REFERENCE_BOUND",
-      facts: { businessName: PIPELINE_SCRIPTS_BUSINESS, contactEmail: "ops@wazibizwebsites.example" },
+      facts: { businessName: SIMPLE_SCRIPTS_BUSINESS, contactEmail: "ops@wazibizwebsites.example" },
       reference: { screenshotR2Key: screenshotKey, url: "https://meridian-atelier.example.com/" },
     },
   });
@@ -512,7 +512,7 @@ function slowPipelineProvider(): ImageGenerationProvider {
 describe("durable image lifecycle integration (issue #57/#58)", () => {
   it("drives the full production pipeline to Release Ready through slow durable image polls", async () => {
     const siteGenerationId = await startPipelineGeneration("references/pipeline/orchestration-pipeline.png");
-    const scripted = createPipelineScripts({});
+    const scripted = createSimpleScripts({});
     const slowProvider = slowPipelineProvider();
 
     const outcome = await runBuildPipelineWithSeams(siteGenerationId, scripted, slowProvider);
@@ -546,7 +546,7 @@ describe("durable image lifecycle integration (issue #57/#58)", () => {
     };
 
     const workflow = Object.assign(Object.create(WebsiteBuildWorkflow.prototype), { env }) as WebsiteBuildWorkflow;
-    workflow.pipelineDeps = { ...createPipelineScripts({}), imageProvider: slowPipelineProvider() };
+    workflow.pipelineDeps = { ...createSimpleScripts({}), imageProvider: slowPipelineProvider() };
     const event = { payload: { siteGenerationId }, instanceId: "wf-orchestration" } as unknown as WorkflowEvent<{ siteGenerationId: string }>;
     const result = (await workflow.run(event, engine as unknown as WorkflowStep)) as { terminal?: string };
 
