@@ -42,6 +42,7 @@ import { StageArtifactError } from "./stage-artifacts";
 import { ImageBudgetExceededError } from "./image-pipeline";
 import { AiStageSchemaInvalidError } from "./ai-boundary";
 import { OriginalDesignNotEnabledError } from "./original-design-lock";
+import { SimpleWebsiteBuilderError } from "../simple-design/website-builder";
 
 export type StageFailureClass =
   | "TRANSIENT_RETRYABLE"
@@ -92,8 +93,12 @@ export function classifyStageFailure(error: unknown): StageFailureClass {
   // the same immutable inputs deterministically re-produce the blocker.
   // (The legacy VisualBlueprintError / SiteGenerationValidationError classes
   // were removed with the legacy design chain; the SIMPLE pipeline's
-  // schema-invalid class carries the semantics.)
-  if (error instanceof AiStageSchemaInvalidError) {
+  // schema-invalid class carries the semantics.) The Website Builder's
+  // CRITICAL image coverage failure belongs here too: ONE_CALL plus the
+  // sanctioned TWO_CALL fallback IS the Builder's whole budget — the pipeline
+  // handles it in-step; this backstop guarantees no engine retry can ever
+  // become a third Builder attempt.
+  if (error instanceof AiStageSchemaInvalidError || error instanceof SimpleWebsiteBuilderError) {
     return "DETERMINISTIC_REVIEW_REQUIRED";
   }
   // Everything else — including StageExecutionInProgressError (single-flight

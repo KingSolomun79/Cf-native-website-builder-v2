@@ -42,7 +42,7 @@ import {
   type SiteBundle,
 } from "./contracts";
 import { runSimpleDesignBlueprintStage, SimpleDesignBlueprintError } from "./design-blueprint";
-import { runSimpleWebsiteBuilderStage, type SimpleBuilderVisualInput } from "./website-builder";
+import { runSimpleWebsiteBuilderStage, SimpleWebsiteBuilderError, type SimpleBuilderVisualInput } from "./website-builder";
 import { runSimpleVisualQaStage } from "./visual-qa";
 import { runSimpleSiteRepairStage } from "./site-repair";
 import { runDeterministicBundleQa } from "./bundle-qa";
@@ -484,23 +484,48 @@ export async function runSimpleBuildPipeline(
       });
     };
 
-    const buildOutcome = await stepDo(`simple: website build (v${version.buildVersionNumber})`, async () => {
-      const built = await runSimpleWebsiteBuilderStage(env, {
-        siteGenerationId: input.siteGenerationId,
+    const buildOutcome = await stepDo(
+      `simple: website build (v${version.buildVersionNumber})`,
+      async (): Promise<{ kind: "ok"; strategy: SimplePipelineOutcome["builderStrategy"] } | { kind: "review"; reason: string }> => {
+        try {
+          const built = await runSimpleWebsiteBuilderStage(env, {
+            siteGenerationId: input.siteGenerationId,
+            buildId,
+            buildVersionId: version.buildVersionId,
+            buildVersionNumber: version.buildVersionNumber,
+            blueprint,
+            facts,
+            acceptedImages: acceptedImageDescriptors,
+            formServiceEndpoint,
+            siteFormId,
+            visualInputs,
+            ...(deps.visionGenerate ? { visionGenerate: deps.visionGenerate } : {}),
+            ...(deps.generate ? { generate: deps.generate } : {}),
+          });
+          return { kind: "ok" as const, strategy: built.strategy };
+        } catch (error) {
+          // The Builder's CRITICAL image coverage contract failed after
+          // ONE_CALL and the sanctioned TWO_CALL fallback: fail closed IN-STEP
+          // (the #62 §7 terminal-result pattern) — no engine retry, no third
+          // Builder attempt, no bundle handed to downstream QA.
+          if (error instanceof SimpleWebsiteBuilderError && error.code === "CRITICAL_IMAGE_COVERAGE") {
+            return { kind: "review" as const, reason: `WEBSITE_BUILDER_CRITICAL_IMAGE_COVERAGE: ${error.message}` };
+          }
+          throw error;
+        }
+      }
+    );
+    if (buildOutcome.kind === "review") {
+      await appendBuildWorkflowEvent(env, {
         buildId,
         buildVersionId: version.buildVersionId,
-        buildVersionNumber: version.buildVersionNumber,
-        blueprint,
-        facts,
-        acceptedImages: acceptedImageDescriptors,
-        formServiceEndpoint,
-        siteFormId,
-        visualInputs,
-        ...(deps.visionGenerate ? { visionGenerate: deps.visionGenerate } : {}),
-        ...(deps.generate ? { generate: deps.generate } : {}),
+        fromState: "BLUEPRINT",
+        toState: "HUMAN_REVIEW_REQUIRED",
+        stage: "simple_website_build",
+        detail: buildOutcome.reason.slice(0, 400),
       });
-      return { strategy: built.strategy };
-    });
+      return terminal("HUMAN_REVIEW_REQUIRED", [buildOutcome.reason], { designBlueprintR2Key: blueprintArtifactR2Key });
+    }
     builderStrategy = buildOutcome.strategy;
     await appendBuildWorkflowEvent(env, {
       buildId,

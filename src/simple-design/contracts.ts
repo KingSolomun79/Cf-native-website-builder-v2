@@ -912,13 +912,18 @@ export function materializeBlueprintPromptRecords(blueprint: DesignBlueprintV2):
 
 // Implementation-ready Accepted Image descriptors for the Website Builder and
 // the repair stage — the hero→slot relationship is assembled HERE, never
-// reconstructed by the builder (GO section 13).
+// reconstructed by the builder (GO section 13). `priority` travels with the
+// descriptor so the builder can derive its mandatory CRITICAL ledger from the
+// materialized plan; `required` (= priority === CRITICAL) is deterministic
+// convenience metadata only — Accepted Image persistence is unchanged.
 export interface MaterializedAcceptedImageDescriptor {
   slotId: string;
   altText: string;
   aspectRatio: string;
   page: RoutedPageId;
   section?: string;
+  priority: BlueprintImageSlot["priority"];
+  required: boolean;
 }
 
 export function materializeAcceptedImageDescriptors(blueprint: DesignBlueprintV2): MaterializedAcceptedImageDescriptor[] {
@@ -928,6 +933,8 @@ export function materializeAcceptedImageDescriptors(blueprint: DesignBlueprintV2
     aspectRatio: blueprint.imagery.pageHeroes[page].generationAspectRatio,
     page,
     section: "hero",
+    priority: "CRITICAL" as const,
+    required: true,
   }));
   const supporting = blueprint.imagery.supportingImageSlots.map((slot) => ({
     slotId: slot.id,
@@ -935,6 +942,8 @@ export function materializeAcceptedImageDescriptors(blueprint: DesignBlueprintV2
     aspectRatio: slot.generationAspectRatio,
     page: slot.page,
     ...(slot.section ? { section: slot.section } : {}),
+    priority: slot.priority,
+    required: slot.priority === "CRITICAL",
   }));
   return [...heroes, ...supporting];
 }

@@ -131,7 +131,7 @@ describe("Technical Preflight", () => {
     };
     const verdict = runTechnicalPreflight(
       { pages: broken, sharedCss: SHARED_CSS, sharedJs: "function ({" },
-      { formServiceEndpoint: FORM_ENDPOINT, expectedSiteFormId: "site:test-site", criticalSlotIds: ["home-hero"] }
+      { formServiceEndpoint: FORM_ENDPOINT, expectedSiteFormId: "site:test-site", criticalSlots: [{ slotId: "home-hero", page: "home" }] }
     );
     expect(verdict.passed).toBe(false);
     const ids = verdict.blockers.map((blocker) => blocker.id);
@@ -145,7 +145,7 @@ describe("Technical Preflight", () => {
   it("passes a complete well-formed candidate", () => {
     const verdict = runTechnicalPreflight(
       { pages: goodPages({ heroSrc: "assets/images/home-hero.webp", aboutSrc: "assets/images/about-main.webp" }), sharedCss: SHARED_CSS, sharedJs: SHARED_JS },
-      { formServiceEndpoint: FORM_ENDPOINT, expectedSiteFormId: "site:test-site", criticalSlotIds: ["home-hero"] }
+      { formServiceEndpoint: FORM_ENDPOINT, expectedSiteFormId: "site:test-site", criticalSlots: [{ slotId: "home-hero", page: "home" }] }
     );
     expect(verdict.passed).toBe(true);
     expect(verdict.blockers).toEqual([]);

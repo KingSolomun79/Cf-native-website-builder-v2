@@ -138,11 +138,15 @@ export interface SimpleScriptsOptions {
   allVisualQaFails?: boolean;
   /** Return a blueprint that passes schema but fails the quality gate. */
   blueprintFailsGate?: boolean;
+  /** The builder omits the CRITICAL about-hero on EVERY strategy (ONE_CALL
+   *  and the TWO_CALL pages call) — the Builder coverage fail-closed path. */
+  builderOmitsAboutHero?: boolean;
 }
 
 export function createSimpleScripts(options: SimpleScriptsOptions = {}): SimplePipelineDeps {
   let visualQaCalls = 0;
   let repairCalls = 0;
+  const aboutPage = () => (options.builderOmitsAboutHero ? aboutHtml().replace(/<img src="IMG:about-hero"[^>]*>/, "") : aboutHtml());
 
   const generate: RawAiGenerate = async (_system, user) => {
     const respond = (value: unknown) => ({
@@ -166,7 +170,7 @@ export function createSimpleScripts(options: SimpleScriptsOptions = {}): SimpleP
         version: "1",
         pages: {
           home: homeHtml(),
-          about: aboutHtml(),
+          about: aboutPage(),
           services: servicesHtml(),
           contact: contactHtml(endpoint, siteFormId),
         },
@@ -184,7 +188,7 @@ export function createSimpleScripts(options: SimpleScriptsOptions = {}): SimpleP
       return respond({
         pages: {
           home: homeHtml(),
-          about: aboutHtml(),
+          about: aboutPage(),
           services: servicesHtml(),
           contact: contactHtml(endpoint, siteFormId),
         },

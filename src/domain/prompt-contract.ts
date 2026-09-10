@@ -39,11 +39,14 @@ export const PROMPT_MANIFEST: Record<PromptStageKey, PromptManifestEntry> = {
     promptVersion: "v5",
     bodyFile: "simple/01-design-blueprint.md",
   },
-  // v2 (operator GO, 2026-09-09): hero-media hard requirement on every routed
+  // v3 (operator GO, 2026-09-10): CRITICAL image coverage is a Builder
+  // contract — every CRITICAL Accepted Image is mandatory on its declared
+  // page/section (deterministic ledger in the context; truth-safe usage
+  // guidance). v2 (2026-09-09): hero-media hard requirement on every routed
   // page + traceable Accepted Image identity + mobile hero mass floor.
   "simple-website-builder": {
     promptId: "simple-website-builder",
-    promptVersion: "v2",
+    promptVersion: "v3",
     bodyFile: "simple/02-website-builder.md",
   },
   // v2 (operator GO, 2026-09-09): visual QA verifies photographic hero

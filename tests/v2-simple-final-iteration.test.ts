@@ -358,16 +358,19 @@ describe("builder progressive-enhancement instruction (#4)", () => {
   it("the builder's frozen context states the base-visibility rule and names the banned pattern", async () => {
     const ctx = await scaffoldBuild();
     const seen: Array<{ system: string; user: string }> = [];
-    // schema-valid bundle (pages >= 200 chars each) returned by the injected seam
-    const longPage = (title: string) =>
-      `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${title}</title><meta name="description" content="${title} page with a full descriptive body for the fixture bundle."><meta property="og:title" content="${title}"><meta property="og:description" content="${title} description"></head><body><header><nav aria-label="Primary"><a href="/">Home</a><a href="/about">About</a><a href="/services">Services</a><a href="/contact">Contact</a></nav></header><main><h1>${title}</h1><section class="hero"><p>${title} hero copy for the fixture bundle, long enough to satisfy the schema floor and describe the section honestly.</p></section></main><footer><p>Business footer line for the fixture.</p></footer><script src="site.js" defer></script></body></html>`;
+    // schema-valid bundle (pages >= 200 chars each, every CRITICAL hero slot
+    // placed on its declared page) returned by the injected seam
+    const longPage = (pageId: "home" | "about" | "services" | "contact") => {
+      const title = pageId[0].toUpperCase() + pageId.slice(1);
+      return `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${title}</title><meta name="description" content="${title} page with a full descriptive body for the fixture bundle."><meta property="og:title" content="${title}"><meta property="og:description" content="${title} description"></head><body><header><nav aria-label="Primary"><a href="/">Home</a><a href="/about">About</a><a href="/services">Services</a><a href="/contact">Contact</a></nav></header><main><section class="hero"><img src="IMG:${pageId}-hero" data-image-id="${pageId}-hero" alt="${title} hero photograph"><h1>${title}</h1><p>${title} hero copy for the fixture bundle, long enough to satisfy the schema floor and describe the section honestly.</p></section></main><footer><p>Business footer line for the fixture.</p></footer><script src="site.js" defer></script></body></html>`;
+    };
     const builderBundle: SiteBundle = {
       version: "1",
       pages: {
-        home: longPage("Home"),
-        about: longPage("About"),
-        services: longPage("Services"),
-        contact: longPage("Contact"),
+        home: longPage("home"),
+        about: longPage("about"),
+        services: longPage("services"),
+        contact: longPage("contact"),
       },
       sharedCss:
         ":root { --accent: #7c3aed; --ink: #1a1523; --paper: #faf7f2; }\nbody { background: var(--paper); color: var(--ink); font-family: system-ui, sans-serif; }\n.hero { min-height: 60vh; display: grid; place-items: center; }\na:hover { text-decoration: underline; }\n:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }\n@media (max-width: 767px) { .hero { min-height: 40vh; } }\n@media (prefers-reduced-motion: reduce) { * { animation: none; transition: none; } }",

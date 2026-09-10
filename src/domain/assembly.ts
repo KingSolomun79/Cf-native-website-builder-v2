@@ -149,7 +149,9 @@ export async function buildAssembledCandidate(env: Env, input: AssemblyInput): P
     {
       formServiceEndpoint: input.formServiceEndpoint,
       expectedSiteFormId: input.expectedSiteFormId,
-      criticalSlotIds: input.imagePlanSlots.filter((slot) => slot.priority === "CRITICAL").map((slot) => slot.id),
+      criticalSlots: input.imagePlanSlots
+        .filter((slot) => slot.priority === "CRITICAL")
+        .map((slot) => ({ slotId: slot.id, page: slot.page, ...(slot.regionId ? { section: slot.regionId } : {}) })),
     }
   );
 

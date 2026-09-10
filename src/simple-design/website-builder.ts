@@ -5,12 +5,21 @@
 // visual ground truth; the Business Facts alone are the content authority.
 //
 // Strategy (spec section 35): prefer ONE structured call for the whole
-// site-bundle. If that single call cannot produce a schema-valid bundle (the
-// boundary already spent its ONE targeted structural repair), the allowed
-// fallback is TWO calls inside the SAME stage sharing the SAME frozen
-// context: (1) shared site.css + site.js, (2) all four HTML pages together.
-// Never four independent page agents. The strategy used is returned for the
-// experiment report.
+// site-bundle. If that single call cannot produce a VALID bundle (schema —
+// the boundary already spent its ONE targeted structural repair — or the
+// Builder's own CRITICAL image coverage contract), the allowed fallback is
+// TWO calls inside the SAME stage sharing the SAME frozen context: (1) shared
+// site.css + site.js, (2) all four HTML pages together. Never four
+// independent page agents, never a third attempt: a fallback bundle that
+// still violates CRITICAL coverage fails the stage closed. The strategy used
+// is returned for the experiment report.
+//
+// CRITICAL IMAGE COVERAGE (operator GO, 2026-09-10): every materialized
+// CRITICAL image slot is a mandatory Builder deliverable. The builder context
+// carries a deterministic ledger of those placements, and the bundle is
+// validated against the same shared invariant the Assembly Preflight enforces
+// BEFORE it is frozen as the stage artifact — a bundle known to violate the
+// Builder's own contract is never a successful Builder result.
 
 import type { Env } from "../env.d";
 import { Type } from "@sinclair/typebox";
@@ -25,14 +34,25 @@ import type { BusinessFacts } from "../domain/lifecycle-schema";
 import { generateSimpleStreamingCompletion, StreamingTransportExhaustedError } from "../lib/ai-streaming";
 import { simpleStreamingTransportEnabled } from "./vision";
 import {
+  ROUTED_PAGE_IDS,
   SITE_BUNDLE_SCHEMA_VERSION,
   SiteBundleSchema,
   type DesignBlueprintV2,
   type SiteBundle,
 } from "./contracts";
+import {
+  requiredCriticalImageSlots,
+  validateCriticalImageCoverage,
+  type CriticalCoverageFinding,
+  type ImageSlotPriority,
+} from "./critical-image-coverage";
 
 export class SimpleWebsiteBuilderError extends Error {
-  constructor(readonly code: "SCHEMA_INVALID", message: string) {
+  constructor(
+    readonly code: "SCHEMA_INVALID" | "CRITICAL_IMAGE_COVERAGE",
+    message: string,
+    readonly findings: CriticalCoverageFinding[] = []
+  ) {
     super(message);
     this.name = "SimpleWebsiteBuilderError";
   }
@@ -67,6 +87,10 @@ export interface AcceptedImageDescriptor {
   aspectRatio: string;
   page: string;
   section?: string;
+  /** Materialized-plan priority; CRITICAL slots are mandatory Builder output. */
+  priority: ImageSlotPriority;
+  /** Deterministic convenience: priority === "CRITICAL". */
+  required: boolean;
 }
 
 export interface SimpleBuilderVisualInput {
@@ -189,9 +213,49 @@ export async function runSimpleBuilderTransportDiagnostic(
   };
 }
 
+// ── CRITICAL image ledger (deterministic; derived from the materialized plan) ─
+
+// The builder must not hunt through the whole Blueprint JSON to discover
+// which images are mandatory: the ledger names every CRITICAL placement with
+// its exact slot id, page ownership, blueprint section/role and priority.
+// Entries come from the live materialized plan — never hard-coded slot names.
+export function buildCriticalImageLedger(acceptedImages: readonly AcceptedImageDescriptor[]): string {
+  const required = requiredCriticalImageSlots(acceptedImages);
+  if (required.length === 0) return "(no CRITICAL image slots in this plan — no mandatory placements)";
+  return required
+    .map(
+      (image) =>
+        `- ${image.slotId}\n  page: ${image.page}\n  section: ${image.section ?? "(as described in the blueprint entry)"}\n  priority: ${image.priority}\n  REQUIRED`
+    )
+    .join("\n");
+}
+
+// The same ledger grouped by routed page — lower model bookkeeping for the
+// pages call (GO section 9); design authority is unchanged.
+export function buildCriticalImageLedgerByPage(acceptedImages: readonly AcceptedImageDescriptor[]): string {
+  const required = requiredCriticalImageSlots(acceptedImages);
+  return ROUTED_PAGE_IDS.map((page) => {
+    const entries = required.filter((image) => image.page === page);
+    const lines =
+      entries.length === 0
+        ? "(none)"
+        : entries.map((image) => `- ${image.slotId} — section: ${image.section ?? "(blueprint entry)"} — priority: ${image.priority} — REQUIRED`).join("\n");
+    return `${page.toUpperCase()} REQUIRED IMAGES:\n${lines}`;
+  }).join("\n\n");
+}
+
+export const CRITICAL_IMAGE_INVARIANT =
+  "Every Accepted Image marked CRITICAL is mandatory. It must appear at least once on its declared page in the Blueprint role/section associated with that slot. A site bundle that omits a CRITICAL image is invalid.";
+
+export const CRITICAL_IMAGE_TRUTH_GUIDANCE =
+  "Do not omit CRITICAL photography merely because Business Facts do not support the reference section's original claims. Preserve the visual composition without inventing facts. For example, photography may remain as a visual band, process/approach image, atmosphere image or contextual composition while unsupported testimonials/statistics/names remain absent. Never invent testimonial identities, quotes, clients, statistics, awards or claims — TRUTH stays authoritative, but truth constraints never require discarding the planned photography.";
+
 function buildSharedContext(input: RunSimpleWebsiteBuilderInput): string {
   const accepted = input.acceptedImages
-    .map((image) => `- ${image.slotId} [${image.page}${image.section ? `/${image.section}` : ""}] ${image.aspectRatio} — alt: ${image.altText}`)
+    .map(
+      (image) =>
+        `- ${image.slotId} [${image.page}${image.section ? `/${image.section}` : ""}] ${image.aspectRatio} — priority: ${image.priority}${image.required ? " (MANDATORY)" : ""} — alt: ${image.altText}`
+    )
     .join("\n");
   return `DESIGN BLUEPRINT (design authority — realize it faithfully):
 ${JSON.stringify(input.blueprint)}
@@ -201,6 +265,11 @@ ${JSON.stringify(input.facts)}
 
 ACCEPTED IMAGES (the ONLY images you may reference, as <img src="IMG:{slotId}" data-image-id="{slotId}" alt="...">):
 ${input.acceptedImages.length > 0 ? accepted : "(none yet — build WITHOUT images; do not invent slot ids)"}
+
+MANDATORY CRITICAL IMAGE PLACEMENTS (the Builder's own release contract — every entry below MUST be used on its page, in its section, by its exact slot id; a bundle that omits any entry is INVALID and is rejected before assembly):
+${buildCriticalImageLedger(input.acceptedImages)}
+
+CRITICAL IMAGE INVARIANT (hard rule): ${CRITICAL_IMAGE_INVARIANT} HIGH-priority images are strongly preferred per the blueprint design but are not mandatory; NORMAL images are optional. ${CRITICAL_IMAGE_TRUTH_GUIDANCE}
 
 FORM CONTRACT (contact page only):
 - form action: ${input.formServiceEndpoint}
@@ -218,19 +287,22 @@ PROGRESSIVE ENHANCEMENT (hard rule): every section's content must be fully visib
 function oneCallUserPrompt(input: RunSimpleWebsiteBuilderInput): string {
   return `${buildSharedContext(input)}
 
-TASK: Build the COMPLETE website in one response — all four full HTML pages, the full shared stylesheet implementing the blueprint's entire design system (tokens, type scale, layout, responsive breakpoints, hover states, reduced motion), and the small dependency-free shared script. Use the attached Reference screenshots as visual ground truth for the design language (never as content). Production-grade, no placeholders.`;
+TASK: Build the COMPLETE website in one response — all four full HTML pages, the full shared stylesheet implementing the blueprint's entire design system (tokens, type scale, layout, responsive breakpoints, hover states, reduced motion), and the small dependency-free shared script. Every MANDATORY CRITICAL IMAGE PLACEMENT above must be realized on its page. Use the attached Reference screenshots as visual ground truth for the design language (never as content). Production-grade, no placeholders.`;
 }
 
 function shellCallUserPrompt(input: RunSimpleWebsiteBuilderInput): string {
   return `${buildSharedContext(input)}
 
-TASK (1 of 2 — this call): Produce ONLY the shared foundation: the full "site.css" implementing the blueprint's entire design system (tokens as custom properties, type scale, layout for every planned section, responsive breakpoints, hover states, :focus-visible, prefers-reduced-motion) and the full "site.js" (navigation, reveals, header states — small, defensive, dependency-free). Use the attached Reference screenshots as visual ground truth (never as content).`;
+TASK (1 of 2 — this call): Produce ONLY the shared foundation: the full "site.css" implementing the blueprint's entire design system (tokens as custom properties, type scale, layout for every planned section — including the sections that carry the MANDATORY CRITICAL IMAGE PLACEMENTS — responsive breakpoints, hover states, :focus-visible, prefers-reduced-motion) and the full "site.js" (navigation, reveals, header states — small, defensive, dependency-free). Use the attached Reference screenshots as visual ground truth (never as content).`;
 }
 
 function pagesCallUserPrompt(input: RunSimpleWebsiteBuilderInput, css?: string, js?: string): string {
   return `${buildSharedContext(input)}
 ${css ? `\nFROZEN site.css (already produced in this stage — the pages MUST use its vocabulary, selectors and custom properties; do not restyle):\n${css}\n` : ""}
-TASK (2 of 2 — this call): Produce the four COMPLETE HTML pages (home, about, services, contact) realizing the blueprint section-by-section on top of that shared stylesheet and script. Full documents, production-grade, no placeholders.`;
+MANDATORY CRITICAL IMAGES BY PAGE (same contract as the ledger above, grouped per page — every listed slot MUST appear on that page):
+${buildCriticalImageLedgerByPage(input.acceptedImages)}
+
+TASK (2 of 2 — this call): Produce the four COMPLETE HTML pages (home, about, services, contact) realizing the blueprint section-by-section on top of that shared stylesheet and script, with every MANDATORY CRITICAL IMAGE placed on its page. Full documents, production-grade, no placeholders.`;
 }
 
 // EXPERIMENT TRANSPORT ITERATION: with SIMPLE_STREAMING_TRANSPORT enabled,
@@ -254,6 +326,19 @@ function builderDefaultGenerate(env: Env, input: RunSimpleWebsiteBuilderInput): 
     };
   }
   return undefined;
+}
+
+// The Builder's own CRITICAL coverage check — the SAME shared invariant the
+// Assembly Preflight enforces later, evaluated on the raw bundle (IMG:
+// placeholders) before anything is frozen. The placeholder form maps 1:1 to
+// the bundled asset path assembly produces, so a bundle passing here cannot
+// fail the preflight on coverage alone.
+export function validateBuilderCriticalCoverage(bundle: SiteBundle, acceptedImages: readonly AcceptedImageDescriptor[]): CriticalCoverageFinding[] {
+  return validateCriticalImageCoverage(bundle.pages, acceptedImages, "placeholder");
+}
+
+function coverageSummary(findings: CriticalCoverageFinding[]): string {
+  return findings.map((finding) => `${finding.id}: ${finding.detail}`).join("; ").slice(0, 600);
 }
 
 export async function runSimpleWebsiteBuilderStage(
@@ -282,6 +367,7 @@ export async function runSimpleWebsiteBuilderStage(
   // ONE structured call for the whole bundle (multimodal when the vision seam
   // exists). Transport budget: the bundle is the largest output in the
   // pipeline, so the max_tokens floor is raised.
+  let oneCallCoverageFindings: CriticalCoverageFinding[] = [];
   try {
     const run = await runSchemaValidatedAiStage<unknown>(env, {
       stage: "simple-website-builder",
@@ -297,14 +383,22 @@ export async function runSimpleWebsiteBuilderStage(
       generate: builderDefaultGenerate(env, input),
     });
     const bundle = run.value as SiteBundle;
-    const stored = await storeBuildStageArtifactIdempotent(env, {
-      ...stageArtifactBase,
-      kind: "site_bundle",
-      schemaVersion: SITE_BUNDLE_SCHEMA_VERSION,
-      value: bundle,
-      provenance: run.provenance,
-    });
-    return { bundle, artifactR2Key: stored.artifactR2Key, provenance: run.provenance, strategy: "ONE_CALL" };
+    // Coverage validation gates persistence: only a bundle honoring the
+    // Builder's CRITICAL image contract becomes the frozen stage artifact.
+    oneCallCoverageFindings = validateBuilderCriticalCoverage(bundle, input.acceptedImages);
+    if (oneCallCoverageFindings.length === 0) {
+      const stored = await storeBuildStageArtifactIdempotent(env, {
+        ...stageArtifactBase,
+        kind: "site_bundle",
+        schemaVersion: SITE_BUNDLE_SCHEMA_VERSION,
+        value: bundle,
+        provenance: run.provenance,
+      });
+      return { bundle, artifactR2Key: stored.artifactR2Key, provenance: run.provenance, strategy: "ONE_CALL" };
+    }
+    // Schema-valid but CRITICAL-coverage-invalid: an invalid realization for
+    // the purposes of the already sanctioned TWO-CALL fallback (GO section 8).
+    // Same stage, same frozen context — no new semantic stage.
   } catch (error) {
     // Section 26: fallback eligibility is explicit — the TWO-CALL fallback is
     // allowed for schema failure AND for a TERMINAL output-size/provider
@@ -353,8 +447,21 @@ export async function runSimpleWebsiteBuilderStage(
     pages: pages.pages,
     sharedCss: shell.sharedCss,
     sharedJs: shell.sharedJs,
-    notes: "Built via the allowed TWO-CALL SINGLE-STAGE fallback (spec section 35): shared shell, then all four pages together.",
+    notes: `Built via the allowed TWO-CALL SINGLE-STAGE fallback (spec section 35): shared shell, then all four pages together.${
+      oneCallCoverageFindings.length > 0 ? ` ONE_CALL was schema-valid but violated CRITICAL image coverage (${coverageSummary(oneCallCoverageFindings)}).` : ""
+    }`,
   };
+  // FAIL CLOSED: the sanctioned fallback is the Builder's last attempt. A
+  // bundle that still violates CRITICAL coverage is not a valid Builder
+  // result — it is never persisted and never reaches downstream QA as one.
+  const fallbackCoverageFindings = validateBuilderCriticalCoverage(bundle, input.acceptedImages);
+  if (fallbackCoverageFindings.length > 0) {
+    throw new SimpleWebsiteBuilderError(
+      "CRITICAL_IMAGE_COVERAGE",
+      `Website Builder violated its CRITICAL image coverage contract after ONE_CALL and the TWO_CALL_SINGLE_STAGE fallback — no third attempt (${coverageSummary(fallbackCoverageFindings)})`,
+      fallbackCoverageFindings
+    );
+  }
   const stored = await storeBuildStageArtifactIdempotent(env, {
     ...stageArtifactBase,
     kind: "site_bundle",
