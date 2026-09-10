@@ -58,6 +58,10 @@ Pipeline behavior throughout matched the accepted benchmark exactly: bounded ret
 - `SIMPLE_MAIN_VERIFIED`: **INCONCLUSIVE-ON-TERMINAL** — checks 9/10 require a truth-clean terminal version; v21's final bounded repair is provider-blocked. Completion when the provider recovers is ONE command: `node .tmp-reconcile-verify/run-simple-full.mjs --resume` (resumes v21's repair → assembly → QA → terminal), then re-verify truth/technical on the terminal package.
 - Per GO: legacy deletion NOT started.
 
+### UPDATE 2026-09-10 — the ONE controlled completion attempt (operator GO step 0)
+
+Executed exactly one `--resume` attempt on the v21 lineage. Result: the SAME provider-side incident — repair streamed ~5 min, then `StreamingTransportExhaustedError: 8005 Internal server error ×3` at 320s (identical signature; no KIE spend, no code changes). Per the operator's gate: **CLEANUP BLOCKED BY TERMINAL PROVIDER VERIFICATION** — the legacy design-pipeline deletion has NOT started, and the cleanup branch remains empty at `f61fcc5`. When the provider incident clears, the same one command completes the terminal verification; only then may the approved cleanup proceed.
+
 ## Phase D–F — legacy cleanup readiness
 
 Inventory: `v2-docs/LEGACY-CLEANUP-INVENTORY.md` (import-graph-verified classifications; ~5.2k src LOC + ~12.1k test LOC + ~443 KB prompt bodies removable; seam-cut order; operator-decision items: ORIGINAL_DESIGN/proof-gate cluster, benchmark driver retirement, `wrangler.test.jsonc` flip). Cleanup branch `cleanup/remove-legacy-design-pipeline` created at `f506271` (local, empty — no deletion implemented).
