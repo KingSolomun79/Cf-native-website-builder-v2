@@ -31,9 +31,12 @@ export type PromptStageKey =
   | "simple-site-repair";
 
 export const PROMPT_MANIFEST: Record<PromptStageKey, PromptManifestEntry> = {
+  // v5 (operator GO, 2026-09-10): the design-blueprint/2 contract — required
+  // per-page hero spec + required page-hero image briefs; hero slot ids, page
+  // ownership and priorities are deterministic, never model bookkeeping.
   "simple-design-blueprint": {
     promptId: "simple-design-blueprint",
-    promptVersion: "v4",
+    promptVersion: "v5",
     bodyFile: "simple/01-design-blueprint.md",
   },
   // v2 (operator GO, 2026-09-09): hero-media hard requirement on every routed

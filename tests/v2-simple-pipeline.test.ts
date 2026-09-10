@@ -14,7 +14,7 @@ import { runBuildPipeline } from "../src/domain/build-pipeline";
 import { getObject } from "../src/lib/assets";
 import { buildVersionRoot } from "../src/domain/artifact-keys";
 import { createSimpleScripts, persistSimpleScreenshot, SIMPLE_SCRIPTS_BUSINESS, simpleBlueprintFixture } from "./helpers/simple-scripts";
-import { validateDesignBlueprint } from "../src/simple-design/contracts";
+import { validateDesignBlueprintV2 } from "../src/simple-design/contracts";
 
 const env = providedEnv as unknown as Env;
 
@@ -214,7 +214,7 @@ describe("SIMPLE pipeline end-to-end (experiment/simplified-design-pipeline)", (
   });
 
   it("the fixture blueprint itself satisfies the runtime schema gate", () => {
-    const validated = validateDesignBlueprint(simpleBlueprintFixture());
+    const validated = validateDesignBlueprintV2(simpleBlueprintFixture());
     expect(validated.valid).toBe(true);
   });
 });

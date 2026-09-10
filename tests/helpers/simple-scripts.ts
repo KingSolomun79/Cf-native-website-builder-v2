@@ -14,6 +14,7 @@ import type { ReferenceCaptureFn } from "../../src/domain/reference-intake";
 import type { SimplePipelineDeps } from "../../src/simple-design/pipeline";
 import { putObject } from "../../src/lib/assets";
 import { FINCH_KNOWN_GOOD_BLUEPRINT } from "../_generated-simple-finch";
+import { FINCH_V2_KNOWN_GOOD_BLUEPRINT } from "../_generated-simple-finch-v2";
 import { buildDecodableSolidPng } from "./png";
 
 export const SIMPLE_SCRIPTS_BUSINESS = "RankForge Kenya";
@@ -25,7 +26,14 @@ export async function persistSimpleScreenshot(env: Env, key: string): Promise<vo
   await putObject(env, key, await buildDecodableSolidPng(1440, 3200));
 }
 
-export function simpleBlueprintFixture(): typeof FINCH_KNOWN_GOOD_BLUEPRINT {
+// design-blueprint/2 known-good fixture (the pipeline's blueprint contract
+// since the 2026-09-10 operator GO). The v1 fixture remains available via
+// finchV1BlueprintFixture for the retained v1 contract tests.
+export function simpleBlueprintFixture(): typeof FINCH_V2_KNOWN_GOOD_BLUEPRINT {
+  return JSON.parse(JSON.stringify(FINCH_V2_KNOWN_GOOD_BLUEPRINT));
+}
+
+export function finchV1BlueprintFixture(): typeof FINCH_KNOWN_GOOD_BLUEPRINT {
   return JSON.parse(JSON.stringify(FINCH_KNOWN_GOOD_BLUEPRINT));
 }
 
@@ -119,7 +127,7 @@ function servicesHtml(): string {
 function contactHtml(endpoint: string, siteFormId: string): string {
   return shell(
     `Contact — RankForge Kenya`,
-    `<section class="hero contact-hero"><div><img src="IMG:contact-atmosphere" data-image-id="contact-atmosphere" alt="Evening at the camp fire"><h1>Contact</h1><p>Begin the conversation.</p></div></section><section class="section"><div class="section-inner split"><div><form method="post" action="${endpoint}"><input type="hidden" name="siteFormId" value="${siteFormId}"><label for="name">Name</label><input id="name" name="name" required><label for="email">Email</label><input id="email" name="email" type="email" required><label for="message">Message</label><textarea id="message" name="message" required></textarea><button class="cta" type="submit">Send enquiry</button></form></div><div><h2>Reach us</h2><p>ops@wazibizwebsites.example</p></div></div></section>`
+    `<section class="hero contact-hero"><div><img src="IMG:contact-hero" data-image-id="contact-hero" alt="Evening at the camp fire"><h1>Contact</h1><p>Begin the conversation.</p></div></section><section class="section"><div class="section-inner split"><div><form method="post" action="${endpoint}"><input type="hidden" name="siteFormId" value="${siteFormId}"><label for="name">Name</label><input id="name" name="name" required><label for="email">Email</label><input id="email" name="email" type="email" required><label for="message">Message</label><textarea id="message" name="message" required></textarea><button class="cta" type="submit">Send enquiry</button></form></div><div><h2>Reach us</h2><p>ops@wazibizwebsites.example</p></div></div></section>`
   );
 }
 

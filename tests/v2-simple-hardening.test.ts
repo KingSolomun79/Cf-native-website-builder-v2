@@ -34,15 +34,18 @@ import {
   RepairedFilesSchema,
   type RepairedFile,
 } from "../src/simple-design/site-repair";
-import { validateDesignBlueprint, type SiteBundle } from "../src/simple-design/contracts";
-import { FINCH_KNOWN_GOOD_BLUEPRINT } from "./_generated-simple-finch";
+import { validateDesignBlueprintV2, type SiteBundle } from "../src/simple-design/contracts";
+import { FINCH_V2_KNOWN_GOOD_BLUEPRINT } from "./_generated-simple-finch-v2";
 
 // ── shared fixtures (same shapes as v2-simple-bundle-qa.test.ts) ────────────
 
-const blueprint = validateDesignBlueprint(FINCH_KNOWN_GOOD_BLUEPRINT);
-if (!blueprint.valid) throw new Error("Finch fixture must validate");
+const blueprint = validateDesignBlueprintV2(FINCH_V2_KNOWN_GOOD_BLUEPRINT);
+if (!blueprint.valid) throw new Error("Finch v2 fixture must validate");
 const bp = blueprint.value;
-const SLOT_IDS = new Set(bp.imagery.imageSlots.map((slot) => slot.id));
+const SLOT_IDS = new Set([
+  ...(["home", "about", "services", "contact"] as const).map((page) => `${page}-hero`),
+  ...bp.imagery.supportingImageSlots.map((slot) => slot.id),
+]);
 
 const endpoint = "https://test.example.com/api/v2/forms/submit";
 const siteFormId = "site:abc123";

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { factVocabulary, lintTrustContexts, TRUST_CONTEXT_PATTERN } from "../src/domain/fact-lint";
-import { blueprintSlotsToPromptRecords } from "../src/simple-design/contracts";
+import { materializeBlueprintPromptRecords } from "../src/simple-design/contracts";
 import { simpleBlueprintFixture } from "./helpers/simple-scripts";
 import {
   evaluateQaARelease,
@@ -193,7 +193,7 @@ describe("generated imagery cannot carry fabricated identity (issue #48)", () =>
     // negativePrompt travels verbatim into the record the durable image
     // driver submits, so every generated image is bounded by it.
     const blueprint = simpleBlueprintFixture();
-    const records = blueprintSlotsToPromptRecords(blueprint);
+    const records = materializeBlueprintPromptRecords(blueprint);
     expect(records.length).toBeGreaterThan(0);
     for (const record of records) {
       expect(record.promptText + " " + record.avoidance).toMatch(/no readable text|no text/i);

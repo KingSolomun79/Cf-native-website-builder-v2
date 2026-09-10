@@ -49,16 +49,24 @@ import { createProductionQaCapture } from "../domain/qa-capture";
 import { runSimpleWebsiteBuilderStage, runSimpleBuilderTransportDiagnostic } from "../simple-design/website-builder";
 import { runSimpleDesignBlueprintStage } from "../simple-design/design-blueprint";
 import { renderDesignBlueprintMarkdown } from "../simple-design/render-blueprint";
+import { renderDesignBlueprintV2Markdown } from "../simple-design/render-blueprint-v2";
 import { runDeterministicBundleQa } from "../simple-design/bundle-qa";
 import { runSimpleVisualQaStage } from "../simple-design/visual-qa";
 import {
   blueprintSlotsToImageSlots,
   blueprintSlotsToPromptRecords,
+  blueprintPromptRecordsAny,
+  evaluateBlueprintQualityGateAny,
+  materializeAcceptedImageDescriptors,
+  materializeBlueprintImageSlots,
+  materializeBlueprintPromptRecords,
+  storedBlueprintToV2,
   DESIGN_BLUEPRINT_NATIVE_JSON_SCHEMA,
   DESIGN_BLUEPRINT_SCHEMA_VERSION,
   evaluateBlueprintQualityGate,
   validateDesignBlueprint,
   type DesignBlueprint,
+  type DesignBlueprintV2,
   type SiteBundle,
 } from "../simple-design/contracts";
 import { parseModelJson } from "../domain/ai-boundary";
@@ -75,7 +83,7 @@ interface DriverBody {
   key?: string;
   base64?: string;
   facts?: BusinessFacts;
-  blueprint?: DesignBlueprint;
+  blueprint?: DesignBlueprint | DesignBlueprintV2;
   fixtureImages?: DriverFixtureImage[];
   referenceUrl?: string;
   referenceScreenshotKey?: string;
@@ -362,6 +370,7 @@ async function storeFixtureImages(
 
 async function runFinchBuilder(env: Env, body: DriverBody) {
   if (!body.facts || !body.blueprint) throw new Error("facts and blueprint required");
+  const blueprintV2 = storedBlueprintToV2(body.blueprint);
   const referenceScreenshotKey = body.referenceScreenshotKey ?? "references/simple/exp-finch-ref.png";
   const ctx = await scaffold(env, body.facts, { screenshotR2Key: referenceScreenshotKey });
   const acceptedKeys = await storeFixtureImages(env, ctx, body.fixtureImages ?? []);
@@ -373,15 +382,9 @@ async function runFinchBuilder(env: Env, body: DriverBody) {
     buildId: ctx.buildId,
     buildVersionId: ctx.buildVersionId,
     buildVersionNumber: ctx.buildVersionNumber,
-    blueprint: body.blueprint,
+    blueprint: blueprintV2,
     facts: body.facts,
-    acceptedImages: body.blueprint.imagery.imageSlots.map((slot) => ({
-      slotId: slot.id,
-      altText: slot.altText,
-      aspectRatio: slot.generationAspectRatio,
-      page: slot.page,
-      ...(slot.section ? { section: slot.section } : {}),
-    })),
+    acceptedImages: materializeAcceptedImageDescriptors(blueprintV2),
     formServiceEndpoint,
     siteFormId,
     visualInputs: [
@@ -389,7 +392,7 @@ async function runFinchBuilder(env: Env, body: DriverBody) {
     ],
   };
   const built = await runSimpleWebsiteBuilderStage(env, stageInput);
-  const result = await assembleAndJudge(env, ctx, built.bundle, body, acceptedKeys);
+  const result = await assembleAndJudge(env, ctx, built.bundle, { ...body, blueprint: blueprintV2 }, acceptedKeys);
   return { ...result, builderStrategy: built.strategy };
 }
 
@@ -449,6 +452,7 @@ function sanitizeDiagnosticBundle(bundle: SiteBundle): { bundle: SiteBundle; nor
 // small-call decomposition (see website-builder.ts). Not a pipeline strategy.
 async function runBuilderDiagnostic(env: Env, body: DriverBody) {
   if (!body.facts || !body.blueprint) throw new Error("facts and blueprint required");
+  const blueprintV2 = storedBlueprintToV2(body.blueprint);
   const referenceScreenshotKey = body.referenceScreenshotKey ?? "references/simple/exp-finch-ref.png";
   const ctx = await scaffold(env, body.facts, { screenshotR2Key: referenceScreenshotKey });
   const acceptedKeys = await storeFixtureImages(env, ctx, body.fixtureImages ?? []);
@@ -460,15 +464,9 @@ async function runBuilderDiagnostic(env: Env, body: DriverBody) {
     buildId: ctx.buildId,
     buildVersionId: ctx.buildVersionId,
     buildVersionNumber: ctx.buildVersionNumber,
-    blueprint: body.blueprint,
+    blueprint: blueprintV2,
     facts: body.facts,
-    acceptedImages: body.blueprint.imagery.imageSlots.map((slot) => ({
-      slotId: slot.id,
-      altText: slot.altText,
-      aspectRatio: slot.generationAspectRatio,
-      page: slot.page,
-      ...(slot.section ? { section: slot.section } : {}),
-    })),
+    acceptedImages: materializeAcceptedImageDescriptors(blueprintV2),
     formServiceEndpoint,
     siteFormId,
     visualInputs: [
@@ -487,7 +485,7 @@ async function runBuilderDiagnostic(env: Env, body: DriverBody) {
     value: cleanBundle,
   });
   try {
-    const result = await assembleAndJudge(env, ctx, cleanBundle, body, acceptedKeys);
+    const result = await assembleAndJudge(env, ctx, cleanBundle, { ...body, blueprint: blueprintV2 }, acceptedKeys);
     return { ...result, builderStrategy: "TRANSPORT_DIAGNOSTIC", calls: diagnostic.calls, normalizations };
   } catch (error) {
     if (error instanceof AssemblyPreflightError) {
@@ -561,7 +559,7 @@ async function assembleAndJudge(
   acceptedKeys: Map<string, string>,
   opts?: { skipFreeze?: boolean }
 ) {
-  const blueprint = body.blueprint!;
+  const blueprint = storedBlueprintToV2(body.blueprint!);
   const facts = body.facts!;
   const formServiceEndpoint = `${env.PUBLIC_APP_URL}/api/v2/forms/submit`;
   const siteFormId = `site:${ctx.siteId}`;
@@ -585,7 +583,7 @@ async function assembleAndJudge(
     pages: bundle.pages,
     sharedCss: bundle.sharedCss,
     sharedJs: bundle.sharedJs,
-    imagePlanSlots: blueprintSlotsToImageSlots(blueprint),
+    imagePlanSlots: materializeBlueprintImageSlots(blueprint),
     acceptedImages,
     formServiceEndpoint,
     expectedSiteFormId: siteFormId,
@@ -603,7 +601,7 @@ async function assembleAndJudge(
       sharedCss: bundle.sharedCss,
       sharedJs: bundle.sharedJs,
       candidate,
-      imagePlanSlots: blueprintSlotsToImageSlots(blueprint),
+      imagePlanSlots: materializeBlueprintImageSlots(blueprint),
       acceptedImages,
       formServiceEndpoint,
       expectedSiteFormId: siteFormId,
@@ -633,7 +631,7 @@ async function assembleAndJudge(
     facts,
     formServiceEndpoint,
     siteFormId,
-    slotIds: new Set(blueprint.imagery.imageSlots.map((slot) => slot.id)),
+    slotIds: new Set(materializeBlueprintImageSlots(blueprint).map((slot) => slot.id)),
     resolvedSlotIds: new Set(acceptedKeys.keys()),
     renderEvidence: evidence
       ? {
@@ -735,7 +733,7 @@ async function runBlueprint(env: Env, body: DriverBody) {  if (!body.siteGenerat
     ...(frozen.evidence.referenceUrl ? { referenceUrl: frozen.evidence.referenceUrl } : {}),
     visualInputs: frozen.evidence.visualInputs ?? [],
   });
-  const markdown = renderDesignBlueprintMarkdown(produced.blueprint);
+  const markdown = renderDesignBlueprintV2Markdown(produced.blueprint);
   return {
     siteGenerationId: body.siteGenerationId,
     buildId: body.buildId,
@@ -1021,11 +1019,11 @@ function driverSleep(_name: string, ms: number): Promise<void> {
 async function runSimpleKie(env: Env, body: DriverBody) {
   if (!body.siteGenerationId || !body.buildId) throw new Error("siteGenerationId and buildId required");
   const version = await latestVersion(env, body.buildId);
-  const stored = await getBuildStageArtifact<DesignBlueprint>(env, version.id, "design_blueprint");
+  const stored = await getBuildStageArtifact<DesignBlueprint | DesignBlueprintV2>(env, version.id, "design_blueprint");
   if (!stored) throw new Error(`no stored design_blueprint for Build Version ${version.id} — run the blueprint stage first`);
-  const blueprint = stored.value;
+  const blueprint = storedBlueprintToV2(stored.value);
 
-  const slots = blueprintSlotsToImageSlots(blueprint);
+  const slots = materializeBlueprintImageSlots(blueprint);
   const acceptedBefore = await getAcceptedImageMap(env, version.id);
   const unresolved = slots.filter((slot) => !acceptedBefore.has(slot.id));
 
@@ -1043,7 +1041,7 @@ async function runSimpleKie(env: Env, body: DriverBody) {
         slots: unresolved,
         provider: new KieV2ImageProvider(env),
         expandToTarget: false,
-        promptRecords: blueprintSlotsToPromptRecords(blueprint),
+        promptRecords: materializeBlueprintPromptRecords(blueprint),
       },
       { stepDo: async <T>(_name: string, fn: () => Promise<T>) => fn(), sleep: driverSleep }
     );
@@ -1069,9 +1067,8 @@ async function runSimpleKie(env: Env, body: DriverBody) {
     // adapter renders its provider request from — hashes are byte-identical
     // to what the provider received (GO §13 evidence trail).
     slotProvenance: await Promise.all(
-      blueprint.imagery.imageSlots.map(async (blueprintSlot) => {
-        const slot = slots.find((candidate) => candidate.id === blueprintSlot.id)!;
-        const record = blueprintSlotsToPromptRecords(blueprint).find((candidate) => candidate.slotId === blueprintSlot.id)!;
+      slots.map(async (slot) => {
+        const record = materializeBlueprintPromptRecords(blueprint).find((candidate) => candidate.slotId === slot.id)!;
         const plan = planKieImageRequest(
           {
             slotId: slot.id,
@@ -1083,7 +1080,7 @@ async function runSimpleKie(env: Env, body: DriverBody) {
           env.KIE_MODEL
         );
         return {
-          slotId: blueprintSlot.id,
+          slotId: slot.id,
           model: plan.model,
           profile: plan.profile,
           compositionAspectRatio: plan.compositionAspectRatio,
@@ -1183,9 +1180,9 @@ async function runSimpleRerenderQa(env: Env, body: DriverBody) {
   }
   const stored = await step("load-site-bundle", () => getBuildStageArtifact<SiteBundle>(env, body.buildVersionId!, "site_bundle"));
   if (!stored) throw new Error(`no stored site_bundle for Build Version ${body.buildVersionId}`);
-  const bpStored = await step("load-blueprint", () => getBuildStageArtifact<DesignBlueprint>(env, body.buildVersionId!, "design_blueprint"));
+  const bpStored = await step("load-blueprint", () => getBuildStageArtifact<DesignBlueprint | DesignBlueprintV2>(env, body.buildVersionId!, "design_blueprint"));
   if (!bpStored) throw new Error(`no stored design_blueprint for Build Version ${body.buildVersionId}`);
-  const blueprint = bpStored.value;
+  const blueprint = storedBlueprintToV2(bpStored.value);
   const facts = await step("load-facts", async () => (await getEffectiveBusinessFacts(env, body.buildId!)).facts);
   const versionRow = await step("load-version", () =>
     env.DB.prepare("SELECT version_number FROM build_versions WHERE id = ?1")
@@ -1273,7 +1270,7 @@ async function runSimpleFullRun(env: Env, body: DriverBody) {  if (!body.siteGen
     if (body.copyBlueprintFromBuildVersionId) {
       const sourceBlueprint = await getBuildStageArtifact<DesignBlueprint>(env, body.copyBlueprintFromBuildVersionId, "design_blueprint");
       if (!sourceBlueprint) throw new Error(`no design_blueprint on source version ${body.copyBlueprintFromBuildVersionId}`);
-      const gate = evaluateBlueprintQualityGate(sourceBlueprint.value);
+      const gate = evaluateBlueprintQualityGateAny(sourceBlueprint.value);
       if (!gate.passed) throw new Error(`source blueprint fails the hero-media quality gate: ${gate.failures.join("; ")}`);
       await storeBuildStageArtifactIdempotent(env, {
         buildId,

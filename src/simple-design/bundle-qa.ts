@@ -8,7 +8,7 @@
 
 import type { BusinessFacts } from "../domain/lifecycle-schema";
 import { factVocabulary, lintTrustContexts, UNSUPPORTED_FACT_PATTERNS } from "../domain/fact-lint";
-import { blueprintHeroSlotId, type DesignBlueprint, type SiteBundle } from "./contracts";
+import { heroSlotIdForPage, type DesignBlueprintV2, type SiteBundle } from "./contracts";
 import type { TechnicalGateResults } from "./release-mapping";
 import type { SimpleTechnicalFinding, SimpleTruthFinding } from "./contracts";
 
@@ -28,7 +28,7 @@ function stripTags(html: string): string {
 
 export interface BundleQaInput {
   bundle: SiteBundle;
-  blueprint: DesignBlueprint;
+  blueprint: DesignBlueprintV2;
   facts: BusinessFacts;
   formServiceEndpoint: string;
   siteFormId: string;
@@ -147,7 +147,7 @@ export function runDeterministicBundleQa(input: BundleQaInput): BundleQaResult {
     // carry a hero-element marker (class/id containing "hero") AND reference
     // the blueprint's hero slot (IMG:{slotId} src or data-image-id) INSIDE
     // that hero region. No geometry scoring — presence only.
-    const heroFinding = findInnerPageHeroMediaFinding(pageId, html, blueprint);
+    const heroFinding = findInnerPageHeroMediaFinding(pageId, html, heroSlotIdForPage(pageId));
     if (heroFinding) technical("INNER_PAGE_HERO_MEDIA_MISSING", "blocker", heroFinding);
   }
 
@@ -270,9 +270,10 @@ export const SIMPLE_PAGE_FILES = FILE_FOR_PAGE;
 export function findInnerPageHeroMediaFinding(
   pageId: PageId,
   html: string,
-  blueprint: DesignBlueprint
+  heroSlotId: string | null
 ): string | null {
-  const heroSlotId = blueprintHeroSlotId(blueprint, pageId);
+  // design-blueprint/2: the hero slot id is deterministic domain construction
+  // (heroSlotIdForPage), passed in by the caller — never reconstructed here.
   if (!heroSlotId) {
     return `${pageId}: blueprint declares no hero image slot for this page — every routed page needs a photographic hero`;
   }

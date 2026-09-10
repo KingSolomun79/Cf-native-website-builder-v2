@@ -7,14 +7,17 @@ import { runDeterministicBundleQa, type BundleQaInput } from "../src/simple-desi
 import { buildSimpleQaPackage, simpleReleaseVerdict } from "../src/simple-design/qa-package";
 import { simplePackageToQaA, simplePackageToQaB } from "../src/simple-design/release-mapping";
 import { evaluateQaARelease, evaluateQaBRelease } from "../src/domain/qa-stages";
-import { validateDesignBlueprint, type QaPackage, type SiteBundle } from "../src/simple-design/contracts";
-import { FINCH_KNOWN_GOOD_BLUEPRINT } from "./_generated-simple-finch";
+import { validateDesignBlueprintV2, type QaPackage, type SiteBundle } from "../src/simple-design/contracts";
+import { FINCH_V2_KNOWN_GOOD_BLUEPRINT } from "./_generated-simple-finch-v2";
 
-const blueprint = validateDesignBlueprint(FINCH_KNOWN_GOOD_BLUEPRINT);
-if (!blueprint.valid) throw new Error("Finch fixture must validate");
+const blueprint = validateDesignBlueprintV2(FINCH_V2_KNOWN_GOOD_BLUEPRINT);
+if (!blueprint.valid) throw new Error("Finch v2 fixture must validate");
 const bp = blueprint.value;
 
-const SLOT_IDS = new Set(bp.imagery.imageSlots.map((slot) => slot.id));
+const SLOT_IDS = new Set([
+  ...(["home", "about", "services", "contact"] as const).map((page) => `${page}-hero`),
+  ...bp.imagery.supportingImageSlots.map((slot) => slot.id),
+]);
 
 const endpoint = "https://test.example.com/api/v2/forms/submit";
 const siteFormId = "site:abc123";
@@ -34,7 +37,7 @@ function page(title: string, extra = ""): string {
 function contactPage(formAction = endpoint, hidden = siteFormId): string {
   return page(
     "Contact",
-    `<link rel="stylesheet" href="site.css"><section class="hero contact-hero"><img src="IMG:contact-atmosphere" data-image-id="contact-atmosphere" alt="contact hero image"></section><form method="post" action="${formAction}"><input type="hidden" name="siteFormId" value="${hidden}"><label for="name">Name</label><input id="name" name="name"><label for="email">Email</label><input id="email" name="email"><label for="message">Message</label><textarea id="message" name="message"></textarea><button type="submit">Send</button></form>`
+    `<link rel="stylesheet" href="site.css"><section class="hero contact-hero"><img src="IMG:contact-hero" data-image-id="contact-hero" alt="contact hero image"></section><form method="post" action="${formAction}"><input type="hidden" name="siteFormId" value="${hidden}"><label for="name">Name</label><input id="name" name="name"><label for="email">Email</label><input id="email" name="email"><label for="message">Message</label><textarea id="message" name="message"></textarea><button type="submit">Send</button></form>`
   );
 }
 

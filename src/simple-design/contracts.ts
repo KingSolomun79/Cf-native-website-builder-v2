@@ -26,6 +26,11 @@ import type { ImagePromptRecord } from "../domain/image-pipeline";
 import type { ImageSlot } from "../domain/site-contracts";
 
 export const DESIGN_BLUEPRINT_SCHEMA_VERSION = "design-blueprint/1";
+// design-blueprint/2 (operator GO, 2026-09-10): four-page heroes become
+// STRUCTURAL schema invariants. The model decides hero design only — hero
+// presence, hero slot ids, page ownership and priority are deterministic
+// domain construction. v1 artifacts stay immutable historical evidence.
+export const DESIGN_BLUEPRINT_V2_SCHEMA_VERSION = "design-blueprint/2";
 export const SITE_BUNDLE_SCHEMA_VERSION = "site-bundle/1";
 export const SIMPLE_VISUAL_QA_SCHEMA_VERSION = "simple-visual-qa/1";
 export const QA_PACKAGE_SCHEMA_VERSION = "qa-package/1";
@@ -605,16 +610,23 @@ export interface QaPackage {
 // ── Blueprint image slots → existing KIE machinery (spec section 21) ───────
 
 // Orientation follows the ratio the PROVIDER will actually be asked for —
-// resolved from the blueprint's composition/generation pair by the same
-// bridge the KIE adapter uses. Judging a correct provider image against the
-// legacy generation-ratio class burned both attempts of 4:3-composition /
+// resolved from the composition/generation pair by the same bridge the KIE
+// adapter uses. Judging a correct provider image against the legacy
+// generation-ratio class burned both attempts of 4:3-composition /
 // 1:1-generation slots in the four-page-hero regression (live finding
 // 2026-09-09); orientation and request ratio must never disagree.
-function orientationForSlot(slot: BlueprintImageSlot): ImageSlot["orientation"] {
-  const legacyRatio =
-    slot.generationAspectRatio === "9:16" ? "9:16" : slot.generationAspectRatio === "1:1" ? "1:1" : "16:9";
-  const resolved = resolveProviderAspectRatio(slot.compositionAspectRatio, slot.generationAspectRatio, legacyRatio);
+function resolveOrientation(compositionAspectRatio: string, generationAspectRatio: string): ImageSlot["orientation"] {
+  const legacyRatio = generationAspectRatio === "9:16" ? "9:16" : generationAspectRatio === "1:1" ? "1:1" : "16:9";
+  const resolved = resolveProviderAspectRatio(compositionAspectRatio, generationAspectRatio, legacyRatio);
   return aspectRatioClass(resolved.providerAspectRatio);
+}
+
+function orientationForSlot(slot: BlueprintImageSlot): ImageSlot["orientation"] {
+  return resolveOrientation(slot.compositionAspectRatio, slot.generationAspectRatio);
+}
+
+function orientationForBrief(brief: BlueprintHeroImageBrief): ImageSlot["orientation"] {
+  return resolveOrientation(brief.compositionAspectRatio, brief.generationAspectRatio);
 }
 
 // Deterministic, zero-LLM bridge: the Design Blueprint's own slot fields map
@@ -650,4 +662,425 @@ export function blueprintSlotsToPromptRecords(blueprint: DesignBlueprint): Image
     lighting: (slot.lighting || "natural light").slice(0, 500),
     avoidance: slot.negativePrompt.slice(0, 1000),
   }));
+}
+
+// ── design-blueprint/2 (operator GO, 2026-09-10) ────────────────────────────
+//
+// The four mandatory page heroes leave the model's discretion ENTIRELY:
+//   AI owns  — hero visual concept, composition, typography, layout, image
+//              subject, crop direction, responsive treatment, character.
+//   code owns — page identity, hero presence, hero slot id, page/slot
+//               relationship, hero section identity, hero priority.
+// The model can no longer emit foreign-key-style hero bookkeeping
+// (mediaSlotId / ids / page / priority for heroes), so the referential
+// lottery design-blueprint/1 suffered is structurally impossible.
+
+export const ROUTED_PAGE_IDS = ["home", "about", "services", "contact"] as const;
+export type RoutedPageId = (typeof ROUTED_PAGE_IDS)[number];
+
+// Reserved hero slot ids — deterministic domain construction, never
+// model-chosen. Supporting image slots may not collide with these.
+export const RESERVED_HERO_SLOT_IDS: Record<RoutedPageId, string> = {
+  home: "home-hero",
+  about: "about-hero",
+  services: "services-hero",
+  contact: "contact-hero",
+};
+
+export function heroSlotIdForPage(page: RoutedPageId): string {
+  return RESERVED_HERO_SLOT_IDS[page];
+}
+
+// HERO SECTION SPEC — design decisions the model actually makes. Deliberately
+// NO mediaSlotId / page / section id / priority: deterministic.
+export const BlueprintHeroSpecSchema = Type.Object(
+  {
+    purpose: trimmed(1200),
+    layout: trimmed(2000),
+    visualMass: Type.Optional(trimmed(400)),
+    surface: Type.Optional(trimmed(600)),
+    typography: Type.Optional(trimmed(800)),
+    mediaTreatment: Type.Optional(trimmed(800)),
+    cta: Type.Optional(trimmed(800)),
+    responsive: Type.Optional(trimmed(1200)),
+  },
+  { additionalProperties: false }
+);
+export type BlueprintHeroSpec = Static<typeof BlueprintHeroSpecSchema>;
+
+// HERO IMAGE BRIEF — semantic/design decisions only (the v1 slot schema minus
+// id/page/section/priority). The brief may describe ANY Reference-faithful
+// hero treatment; the product invariant is hero presence, not a template.
+export const BlueprintHeroImageBriefSchema = Type.Object(
+  {
+    compositionAspectRatio: Type.String({
+      minLength: 2,
+      maxLength: 16,
+      pattern: "^[0-9]{1,4}(?:\\.[0-9]{1,2})?:[0-9]{1,4}(?:\\.[0-9]{1,2})?$",
+    }),
+    generationAspectRatio: Type.Union([
+      Type.Literal("16:9"),
+      Type.Literal("4:3"),
+      Type.Literal("3:2"),
+      Type.Literal("1:1"),
+      Type.Literal("9:16"),
+    ]),
+    cropStrategy: Type.Optional(Type.String({ minLength: 2, maxLength: 200 })),
+    visualMass: Type.Optional(Type.String({ minLength: 1, maxLength: 400 })),
+    subjectDirection: Type.String({ minLength: 5, maxLength: 800 }),
+    compositionDirection: Type.Optional(Type.String({ minLength: 1, maxLength: 800 })),
+    lighting: Type.Optional(Type.String({ minLength: 1, maxLength: 400 })),
+    palette: Type.Optional(Type.String({ minLength: 1, maxLength: 400 })),
+    cropBehavior: Type.Optional(Type.String({ minLength: 1, maxLength: 400 })),
+    kiePrompt: Type.String({ minLength: 40, maxLength: 900 }),
+    negativePrompt: Type.String({ minLength: 2, maxLength: 900 }),
+    altText: Type.String({ minLength: 5, maxLength: 500 }),
+  },
+  { additionalProperties: false }
+);
+export type BlueprintHeroImageBrief = Static<typeof BlueprintHeroImageBriefSchema>;
+
+// v2 page sections carry NO mediaSlotId — the hero relationship is not the
+// model's to state. One section moved out of each array into the required
+// `hero` object, so the structural counts drop by one versus v1.
+export const BlueprintSectionSpecV2Schema = Type.Object(
+  {
+    name: Type.String({ minLength: 1, maxLength: 160 }),
+    purpose: Type.String({ minLength: 1, maxLength: 1200 }),
+    layout: Type.String({ minLength: 1, maxLength: 2000 }),
+    visualMass: Type.Optional(Type.String({ minLength: 1, maxLength: 400 })),
+    surface: Type.Optional(Type.String({ minLength: 1, maxLength: 600 })),
+    typography: Type.Optional(Type.String({ minLength: 1, maxLength: 800 })),
+    media: Type.Optional(Type.String({ minLength: 1, maxLength: 800 })),
+    cta: Type.Optional(Type.String({ minLength: 1, maxLength: 800 })),
+    responsive: Type.Optional(Type.String({ minLength: 1, maxLength: 1200 })),
+  },
+  { additionalProperties: false }
+);
+export type BlueprintSectionSpecV2 = Static<typeof BlueprintSectionSpecV2Schema>;
+
+const BlueprintPageSpecV2Schema = (minSections: number, maxSections: number) =>
+  Type.Object(
+    {
+      hero: BlueprintHeroSpecSchema,
+      sections: Type.Array(BlueprintSectionSpecV2Schema, { minItems: minSections, maxItems: maxSections }),
+    },
+    { additionalProperties: false }
+  );
+
+export const DesignBlueprintV2Schema = Type.Object(
+  {
+    version: Type.Literal("2"),
+    businessFactsRef: Type.String({ minLength: 3, maxLength: 400 }),
+    projectFrame: DesignBlueprintSchema.properties.projectFrame,
+    designDna: DesignBlueprintSchema.properties.designDna,
+    tokens: DesignBlueprintSchema.properties.tokens,
+    globalChrome: DesignBlueprintSchema.properties.globalChrome,
+    motion: DesignBlueprintSchema.properties.motion,
+    pages: Type.Object(
+      {
+        home: BlueprintPageSpecV2Schema(3, 11),
+        about: BlueprintPageSpecV2Schema(1, 7),
+        services: BlueprintPageSpecV2Schema(1, 7),
+        contact: BlueprintPageSpecV2Schema(1, 7),
+      },
+      { additionalProperties: false }
+    ),
+    signatureElements: DesignBlueprintSchema.properties.signatureElements,
+    antiPatterns: DesignBlueprintSchema.properties.antiPatterns,
+    imagery: Type.Object(
+      {
+        grade: trimmed(800),
+        // REQUIRED for all four routed pages — hero image presence is a
+        // schema/domain invariant, not a prompt aspiration.
+        pageHeroes: Type.Object(
+          {
+            home: BlueprintHeroImageBriefSchema,
+            about: BlueprintHeroImageBriefSchema,
+            services: BlueprintHeroImageBriefSchema,
+            contact: BlueprintHeroImageBriefSchema,
+          },
+          { additionalProperties: false }
+        ),
+        // Optional supporting imagery keeps the flexible v1 slot concept with
+        // model-generated stable ids (minus the reserved hero ids).
+        supportingImageSlots: Type.Array(BlueprintImageSlotSchema, { minItems: 0, maxItems: 12 }),
+      },
+      { additionalProperties: false }
+    ),
+    responsive: DesignBlueprintSchema.properties.responsive,
+    accessibility: DesignBlueprintSchema.properties.accessibility,
+    acceptanceChecklist: DesignBlueprintSchema.properties.acceptanceChecklist,
+  },
+  { additionalProperties: false }
+);
+export type DesignBlueprintV2 = Static<typeof DesignBlueprintV2Schema>;
+
+// Workers AI native structured output for v2 (same wrapper shape as v1).
+export const DESIGN_BLUEPRINT_V2_NATIVE_JSON_SCHEMA = {
+  name: "design-blueprint",
+  description: "A complete design-blueprint/2 website design document.",
+  schema: JSON.parse(JSON.stringify(DesignBlueprintV2Schema)) as Record<string, unknown>,
+} as const;
+
+export function validateDesignBlueprintV2(value: unknown): { valid: true; value: DesignBlueprintV2 } | { valid: false; errors: string } {
+  const candidate = value as unknown;
+  if (!Value.Check(DesignBlueprintV2Schema, candidate)) {
+    const issues: string[] = [];
+    for (const error of Value.Errors(DesignBlueprintV2Schema, candidate)) {
+      issues.push(`${error.path}: ${error.message}`);
+      if (issues.length >= 12) break;
+    }
+    return { valid: false, errors: issues.join("; ") };
+  }
+  const blueprint = candidate as DesignBlueprintV2;
+  const measureIssues: string[] = [];
+  for (const row of blueprint.tokens.typography.scale) {
+    if (row.maxWidthCh === undefined) continue;
+    const floor = measureFloor(row.element);
+    if (row.maxWidthCh < floor.minCh) {
+      measureIssues.push(`tokens.typography.scale '${row.element}': maxWidthCh ${row.maxWidthCh} is below the ${floor.label} floor of ${floor.minCh}ch`);
+    }
+  }
+  if (measureIssues.length > 0) {
+    return { valid: false, errors: measureIssues.slice(0, 12).join("; ") };
+  }
+  return { valid: true, value: blueprint };
+}
+
+// ── design-blueprint/2 materialization ──────────────────────────────────────
+
+// Deterministic domain construction (not semantic repair): the semantic hero
+// briefs become concrete image slots with system-assigned identity, exactly
+// the representation the existing KIE orchestrator and Website Builder
+// already consume. Heroes first, then supporting slots appended unchanged.
+export function materializeBlueprintImageSlots(blueprint: DesignBlueprintV2): ImageSlot[] {
+  const heroes = ROUTED_PAGE_IDS.map((page) => {
+    const brief = blueprint.imagery.pageHeroes[page];
+    return {
+      id: heroSlotIdForPage(page),
+      page,
+      regionId: "hero",
+      semanticRole: `${brief.subjectDirection}${brief.compositionDirection ? ` — ${brief.compositionDirection}` : ""}`,
+      blueprintRole: `simple-${page}-hero`,
+      priority: "CRITICAL" as const,
+      orientation: orientationForBrief(brief),
+      compositionAspectRatio: brief.compositionAspectRatio,
+      generationAspectRatio: brief.generationAspectRatio,
+      negativeSpaceForText: true,
+    };
+  });
+  const supporting = blueprint.imagery.supportingImageSlots.map((slot) => ({
+    id: slot.id,
+    page: slot.page,
+    ...(slot.section ? { regionId: slot.section } : {}),
+    semanticRole: `${slot.subjectDirection}${slot.compositionDirection ? ` — ${slot.compositionDirection}` : ""}`,
+    blueprintRole: `simple-${slot.section || slot.page}`,
+    priority: slot.priority,
+    orientation: orientationForSlot(slot),
+    compositionAspectRatio: slot.compositionAspectRatio,
+    generationAspectRatio: slot.generationAspectRatio,
+    negativeSpaceForText: /text overlay|negative space|dark enough for|space for (a )?(headline|text)/i.test(
+      `${slot.compositionDirection ?? ""} ${slot.kiePrompt}`
+    ),
+  }));
+  return [...heroes, ...supporting];
+}
+
+export function materializeBlueprintPromptRecords(blueprint: DesignBlueprintV2): ImagePromptRecord[] {
+  const heroes = ROUTED_PAGE_IDS.map((page) => {
+    const brief = blueprint.imagery.pageHeroes[page];
+    return {
+      slotId: heroSlotIdForPage(page),
+      promptText: brief.kiePrompt,
+      altText: brief.altText,
+      shotType: (brief.visualMass || brief.compositionDirection || brief.subjectDirection).slice(0, 120),
+      lighting: (brief.lighting || "natural light").slice(0, 500),
+      avoidance: brief.negativePrompt.slice(0, 1000),
+    };
+  });
+  const supporting = blueprint.imagery.supportingImageSlots.map((slot) => ({
+    slotId: slot.id,
+    promptText: slot.kiePrompt,
+    altText: slot.altText,
+    shotType: (slot.visualMass || slot.compositionDirection || slot.subjectDirection).slice(0, 120),
+    lighting: (slot.lighting || "natural light").slice(0, 500),
+    avoidance: slot.negativePrompt.slice(0, 1000),
+  }));
+  return [...heroes, ...supporting];
+}
+
+// Implementation-ready Accepted Image descriptors for the Website Builder and
+// the repair stage — the hero→slot relationship is assembled HERE, never
+// reconstructed by the builder (GO section 13).
+export interface MaterializedAcceptedImageDescriptor {
+  slotId: string;
+  altText: string;
+  aspectRatio: string;
+  page: RoutedPageId;
+  section?: string;
+}
+
+export function materializeAcceptedImageDescriptors(blueprint: DesignBlueprintV2): MaterializedAcceptedImageDescriptor[] {
+  const heroes = ROUTED_PAGE_IDS.map((page) => ({
+    slotId: heroSlotIdForPage(page),
+    altText: blueprint.imagery.pageHeroes[page].altText,
+    aspectRatio: blueprint.imagery.pageHeroes[page].generationAspectRatio,
+    page,
+    section: "hero",
+  }));
+  const supporting = blueprint.imagery.supportingImageSlots.map((slot) => ({
+    slotId: slot.id,
+    altText: slot.altText,
+    aspectRatio: slot.generationAspectRatio,
+    page: slot.page,
+    ...(slot.section ? { section: slot.section } : {}),
+  }));
+  return [...heroes, ...supporting];
+}
+
+// design-blueprint/2 quality gate: the schema now structurally requires all
+// four hero specs and all four hero image briefs, so the gate is a small
+// null-safe belt over the materialized plan — no duplicated validator, and no
+// hero-link referential checks (there is nothing left to link).
+export function evaluateBlueprintQualityGateV2(blueprint: DesignBlueprintV2): { passed: boolean; failures: string[] } {
+  const failures: string[] = [];
+  const dna = blueprint?.designDna ?? [];
+  if (dna.length < 5 || dna.length > 8) {
+    failures.push(`designDna must have 5-8 rules (got ${dna.length})`);
+  }
+  for (const page of ROUTED_PAGE_IDS) {
+    const spec = blueprint?.pages?.[page];
+    if (!spec?.hero || !spec?.sections?.length) {
+      failures.push(`page spec '${page}' missing hero spec or empty sections`);
+    }
+    const brief = blueprint?.imagery?.pageHeroes?.[page];
+    if (!brief?.subjectDirection || !brief?.kiePrompt) {
+      failures.push(`page '${page}' hero image brief missing subject direction or KIE prompt`);
+    }
+  }
+  const signatures = blueprint?.signatureElements ?? [];
+  if (signatures.length < 3 || signatures.length > 5) {
+    failures.push(`signatureElements must have 3-5 entries (got ${signatures.length})`);
+  }
+  const responsive = blueprint?.responsive;
+  if (!responsive?.desktop || !responsive?.tablet || !responsive?.mobile) {
+    failures.push("responsive spec must cover desktop, tablet and mobile");
+  }
+  if (!blueprint?.antiPatterns?.length) failures.push("antiPatterns missing");
+  const checklist = blueprint?.acceptanceChecklist ?? [];
+  if (checklist.length < 10 || checklist.length > 20) {
+    failures.push(`acceptanceChecklist must have 10-20 entries (got ${checklist.length})`);
+  }
+
+  // Materialized plan invariants: reserved hero ids, CRITICAL priority, hero
+  // section, page ownership, global id uniqueness, reserved-id collisions.
+  const slots = materializeBlueprintImageSlots(blueprint ?? ({ imagery: { pageHeroes: {}, supportingImageSlots: [] } } as unknown as DesignBlueprintV2));
+  const slotIds = new Set<string>();
+  for (const slot of slots) {
+    if (slotIds.has(slot.id)) failures.push(`duplicate materialized image slot id '${slot.id}'`);
+    slotIds.add(slot.id);
+  }
+  for (const page of ROUTED_PAGE_IDS) {
+    const heroSlotId = heroSlotIdForPage(page);
+    const slot = slots.find((candidate) => candidate.id === heroSlotId);
+    if (!slot) {
+      failures.push(`materialized hero slot '${heroSlotId}' missing`);
+      continue;
+    }
+    if (slot.page !== page) failures.push(`materialized hero slot '${heroSlotId}' must belong to page '${page}' (got '${slot.page}')`);
+    if (slot.regionId !== "hero") failures.push(`materialized hero slot '${heroSlotId}' must target the hero section (got '${slot.regionId}')`);
+    if (slot.priority !== "CRITICAL") failures.push(`materialized hero slot '${heroSlotId}' must be CRITICAL priority`);
+  }
+  for (const slot of blueprint?.imagery?.supportingImageSlots ?? []) {
+    if (Object.values(RESERVED_HERO_SLOT_IDS).includes(slot.id)) {
+      failures.push(`supporting image slot '${slot.id}' collides with a reserved page-hero id`);
+    }
+    if (!slot.kiePrompt || slot.kiePrompt.length < 40) failures.push(`image slot '${slot.id}' has no usable kiePrompt`);
+  }
+  return { passed: failures.length === 0, failures };
+}
+
+// ── version dispatch + v1 historical compatibility ──────────────────────────
+
+function isBlueprintV2(value: unknown): value is DesignBlueprintV2 {
+  return typeof value === "object" && value !== null && "imagery" in value && (value as { imagery?: { pageHeroes?: unknown } }).imagery?.pageHeroes !== undefined;
+}
+
+/** Version-dispatching gate for paths that legitimately read EITHER stored
+ *  artifact generation (driver tooling, frozen-version re-checks). */
+export function evaluateBlueprintQualityGateAny(blueprint: DesignBlueprint | DesignBlueprintV2): { passed: boolean; failures: string[] } {
+  return isBlueprintV2(blueprint) ? evaluateBlueprintQualityGateV2(blueprint) : evaluateBlueprintQualityGate(blueprint);
+}
+
+/** Version-dispatching image-slot bridge for diagnostic/driver paths that may
+ *  read either artifact generation. */
+export function blueprintImageSlotsAny(blueprint: DesignBlueprint | DesignBlueprintV2): ImageSlot[] {
+  return isBlueprintV2(blueprint) ? materializeBlueprintImageSlots(blueprint) : blueprintSlotsToImageSlots(blueprint);
+}
+
+/** Version-dispatching prompt-record bridge (same contract as above). */
+export function blueprintPromptRecordsAny(blueprint: DesignBlueprint | DesignBlueprintV2): ImagePromptRecord[] {
+  return isBlueprintV2(blueprint) ? materializeBlueprintPromptRecords(blueprint) : blueprintSlotsToPromptRecords(blueprint);
+}
+
+// Frozen-artifact compatibility path (GO section 17): a Build Version whose
+// design_blueprint was stored as design-blueprint/1 before the v2 upgrade
+// resumes through HERE — read-only adaptation, the stored artifact is never
+// rewritten. The v1 canonicalizer runs first so historical artifacts with the
+// known mediaSlotId lottery defect are read safely (GO section 10's retained
+// purpose). Adaptation cannot invent content: a v1 artifact without a valid
+// per-page hero link is refused loudly.
+export function storedBlueprintToV2(stored: DesignBlueprint | DesignBlueprintV2): DesignBlueprintV2 {
+  if (isBlueprintV2(stored)) return stored;
+  const { blueprint: canonical } = canonicalizeBlueprintHeroMediaLinks(stored);
+  const gate = evaluateBlueprintQualityGate(canonical);
+  if (!gate.passed) {
+    throw new Error(
+      `stored design-blueprint/1 artifact is not safely readable (gate: ${gate.failures.slice(0, 3).join("; ")}) — a new Build Version is required`
+    );
+  }
+  const linkedHeroSlotIds = new Set<string>();
+  const pageHeroes = {} as Record<RoutedPageId, BlueprintHeroImageBrief>;
+  const pages = {} as DesignBlueprintV2["pages"];
+  for (const page of ROUTED_PAGE_IDS) {
+    const firstSection = canonical.pages[page].sections[0];
+    if (!firstSection || !/hero/i.test(firstSection.name)) {
+      throw new Error(`stored design-blueprint/1 artifact page '${page}' has no hero-first section — a new Build Version is required`);
+    }
+    const heroSlotId = blueprintHeroSlotId(canonical, page);
+    if (!heroSlotId) {
+      throw new Error(`stored design-blueprint/1 artifact page '${page}' has no resolvable hero slot — a new Build Version is required`);
+    }
+    linkedHeroSlotIds.add(heroSlotId);
+    const heroSlot = canonical.imagery.imageSlots.find((slot) => slot.id === heroSlotId)!;
+    const { id: _id, page: _page, section: _section, priority: _priority, ...brief } = heroSlot;
+    pageHeroes[page] = brief;
+    pages[page] = {
+      hero: {
+        purpose: firstSection.purpose,
+        layout: firstSection.layout,
+        ...(firstSection.visualMass ? { visualMass: firstSection.visualMass } : {}),
+        ...(firstSection.surface ? { surface: firstSection.surface } : {}),
+        ...(firstSection.typography ? { typography: firstSection.typography } : {}),
+        ...(firstSection.media ? { mediaTreatment: firstSection.media } : {}),
+        ...(firstSection.cta ? { cta: firstSection.cta } : {}),
+        ...(firstSection.responsive ? { responsive: firstSection.responsive } : {}),
+      },
+      sections: canonical.pages[page].sections.slice(1).map((section) => {
+        const { mediaSlotId: _dropped, ...rest } = section;
+        return rest;
+      }),
+    };
+  }
+  return {
+    ...(canonical as unknown as Omit<DesignBlueprintV2, "version" | "pages" | "imagery">),
+    version: "2",
+    pages,
+    imagery: {
+      grade: canonical.imagery.grade,
+      pageHeroes,
+      supportingImageSlots: canonical.imagery.imageSlots.filter((slot) => !linkedHeroSlotIds.has(slot.id)),
+    },
+  };
 }

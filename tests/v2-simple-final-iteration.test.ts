@@ -30,16 +30,17 @@ import {
 } from "../src/simple-design/site-repair";
 import { runSimpleWebsiteBuilderStage } from "../src/simple-design/website-builder";
 import { lintTrustContexts, factVocabulary } from "../src/domain/fact-lint";
-import { validateDesignBlueprint, type QaPackage, type SiteBundle } from "../src/simple-design/contracts";
-import { FINCH_KNOWN_GOOD_BLUEPRINT } from "./_generated-simple-finch";
+import { validateDesignBlueprintV2,
+  materializeAcceptedImageDescriptors, type QaPackage, type SiteBundle } from "../src/simple-design/contracts";
+import { FINCH_V2_KNOWN_GOOD_BLUEPRINT } from "./_generated-simple-finch-v2";
 import { startSiteGeneration, createInitialBuild } from "../src/domain/lifecycle";
 
 const env = providedEnv as unknown as Env;
 
 // ── shared fixtures ──────────────────────────────────────────────────────────
 
-const blueprint = validateDesignBlueprint(FINCH_KNOWN_GOOD_BLUEPRINT);
-if (!blueprint.valid) throw new Error("Finch fixture must validate");
+const blueprint = validateDesignBlueprintV2(FINCH_V2_KNOWN_GOOD_BLUEPRINT);
+if (!blueprint.valid) throw new Error("Finch v2 fixture must validate");
 const bp = blueprint.value;
 
 const endpoint = "https://test.example.com/api/v2/forms/submit";
@@ -379,12 +380,7 @@ describe("builder progressive-enhancement instruction (#4)", () => {
       buildVersionNumber: 1,
       blueprint: bp,
       facts: FACTS,
-      acceptedImages: bp.imagery.imageSlots.map((slot) => ({
-        slotId: slot.id,
-        altText: slot.altText,
-        aspectRatio: slot.generationAspectRatio,
-        page: slot.page,
-      })),
+      acceptedImages: materializeAcceptedImageDescriptors(bp),
       formServiceEndpoint: endpoint,
       siteFormId,
       visualInputs: [],

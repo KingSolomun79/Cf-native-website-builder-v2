@@ -19,7 +19,7 @@ import { Type } from "@sinclair/typebox";
 import type { BusinessFacts } from "../domain/lifecycle-schema";
 import {
   SITE_BUNDLE_SCHEMA_VERSION,
-  type DesignBlueprint,
+  type DesignBlueprintV2,
   type QaPackage,
   type SiteBundle,
 } from "./contracts";
@@ -110,7 +110,7 @@ export interface RunSimpleSiteRepairInput {
   buildVersionId: string;
   buildVersionNumber: number;
   bundle: SiteBundle;
-  blueprint: DesignBlueprint;
+  blueprint: DesignBlueprintV2;
   facts: BusinessFacts;
   qaPackage: QaPackage;
   acceptedImages: Array<{ slotId: string; altText: string; aspectRatio: string }>;

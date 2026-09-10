@@ -27,7 +27,7 @@ import { simpleStreamingTransportEnabled } from "./vision";
 import {
   SITE_BUNDLE_SCHEMA_VERSION,
   SiteBundleSchema,
-  type DesignBlueprint,
+  type DesignBlueprintV2,
   type SiteBundle,
 } from "./contracts";
 
@@ -82,7 +82,7 @@ export interface RunSimpleWebsiteBuilderInput {
   buildId: string;
   buildVersionId: string;
   buildVersionNumber: number;
-  blueprint: DesignBlueprint;
+  blueprint: DesignBlueprintV2;
   facts: BusinessFacts;
   acceptedImages: AcceptedImageDescriptor[];
   formServiceEndpoint: string;

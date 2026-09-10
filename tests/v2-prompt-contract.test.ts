@@ -95,7 +95,7 @@ describe("canonical prompt contract", () => {
   it("derives runtime prompt identity from the manifest, not filename suffixes", () => {
     const composed = composeStagePrompt("simple-design-blueprint");
     expect(composed.promptId).toBe("simple-design-blueprint");
-    expect(composed.promptVersion).toBe("v4");
+    expect(composed.promptVersion).toBe("v5");
     expect(composed.promptVersion).not.toContain(PROMPT_MANIFEST["simple-design-blueprint"].bodyFile.split("-").pop()!.split(".")[0]);
     expect(composed.promptDomainContractVersion).toBe("v1");
 
@@ -135,7 +135,7 @@ describe("schema-validated AI stage boundary", () => {
 
     expect(result.value.traits).toHaveLength(2);
     expect(result.provenance.promptId).toBe("simple-design-blueprint");
-    expect(result.provenance.promptVersion).toBe("v4");
+    expect(result.provenance.promptVersion).toBe("v5");
     expect(result.provenance.promptDomainContractVersion).toBe("v1");
     expect(result.provenance.model).toBe("test-model-x");
     expect(result.provenance.schemaVersion).toBe("design-blueprint/1");
@@ -165,7 +165,7 @@ describe("schema-validated AI stage boundary", () => {
     expect((rows.results ?? []).length).toBe(1);
     const row = rows.results![0];
     expect(row.prompt_id).toBe("simple-design-blueprint");
-    expect(row.prompt_version).toBe("v4");
+    expect(row.prompt_version).toBe("v5");
     expect(row.schema_version).toBe("design-blueprint/1");
     expect(row.outcome).toBe("valid");
     expect(JSON.parse(row.input_artifact_ids_json)).toEqual(["references/evidence/frozen-1.json"]);
@@ -176,7 +176,7 @@ describe("schema-validated AI stage boundary", () => {
     expect(stored).not.toBeNull();
     const artifact = JSON.parse(await stored!.text()) as { value: Sample; provenance: { promptVersion: string } };
     expect(artifact.value.summary).toContain("Editorial");
-    expect(artifact.provenance.promptVersion).toBe("v4");
+    expect(artifact.provenance.promptVersion).toBe("v5");
 
     // The artifact key is written immutably: a second immutable write refuses.
     await expect(putImmutableObject(env, result.artifactR2Key, "tamper")).rejects.toThrow(
