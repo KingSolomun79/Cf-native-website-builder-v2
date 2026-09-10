@@ -347,11 +347,11 @@ export async function runBuildPipeline(
       fromState: "INTAKE_READY",
       toState: "HUMAN_REVIEW_REQUIRED",
       stage: "intake",
-      detail: `Build Mode '${generation?.build_mode ?? "unknown"}' has no production pipeline yet (ORIGINAL_DESIGN is locked behind the REFERENCE_BOUND proof gate)`,
+      detail: `Build Mode '${generation?.build_mode ?? "unknown"}' is recognized but NOT ENABLED (ORIGINAL_DESIGN's SIMPLE implementation is deferred; REFERENCE_BOUND is the only enabled design path)`,
     });
     return {
       terminal: "HUMAN_REVIEW_REQUIRED",
-      reasons: [`Build Mode '${generation?.build_mode ?? "unknown"}' has no production pipeline`],
+      reasons: [`Build Mode '${generation?.build_mode ?? "unknown"}' is recognized but NOT ENABLED`],
       siteGenerationId: input.siteGenerationId,
       siteId,
       buildId,

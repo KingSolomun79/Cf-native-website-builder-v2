@@ -12,8 +12,6 @@
 // design. The mode itself is locked behind the REFERENCE_BOUND proof gate
 // (enforced in createInitialBuild).
 
-import { Type, type Static } from "@sinclair/typebox";
-import { Value } from "@sinclair/typebox/value";
 import type { Env } from "../env.d";
 import { runSchemaValidatedAiStage, type RawAiGenerate } from "./ai-boundary";
 import { appendBuildWorkflowEvent } from "./lifecycle";
@@ -24,6 +22,9 @@ import {
   type VisualBlueprint,
 } from "./visual-blueprint";
 import type { BusinessFacts } from "./lifecycle-schema";
+import { parseCreativeDirection, type CreativeDirection } from "./creative-direction";
+
+export type { CreativeDirection };
 
 export const ORIGINAL_DESIGN_BLUEPRINT_SCHEMA_VERSION = "visual-blueprint/1";
 
@@ -38,22 +39,6 @@ export class OriginalDesignError extends Error {
     this.code = code;
   }
 }
-
-// Explicit creative direction carried by the operator for this Site
-// Generation (PRD section 7: "explicit creative direction" is an input, not
-// an industry preset).
-export const CreativeDirectionSchema = Type.Object(
-  {
-    direction: Type.String({ minLength: 1, maxLength: 4000 }),
-    audience: Type.Optional(Type.String({ minLength: 1, maxLength: 2000 })),
-    conversionGoal: Type.Optional(Type.String({ minLength: 1, maxLength: 2000 })),
-    serviceEnvironment: Type.Optional(Type.String({ minLength: 1, maxLength: 2000 })),
-    /** Non-binding inspiration vocabulary; never a selector. */
-    inspirationNotes: Type.Optional(Type.String({ minLength: 1, maxLength: 2000 })),
-  },
-  { additionalProperties: false }
-);
-export type CreativeDirection = Static<typeof CreativeDirectionSchema>;
 
 // Design Archetypes must remain inspiration vocabulary: the produced
 // Blueprint may not embed deterministic industry-to-archetype selection.
@@ -110,7 +95,7 @@ export async function runOriginalDesignBlueprintStage(
   env: Env,
   input: RunOriginalDesignBlueprintInput
 ): Promise<StoredStageArtifact & { blueprint: VisualBlueprint }> {
-  if (input.creativeDirection && !Value.Check(CreativeDirectionSchema, input.creativeDirection)) {
+  if (input.creativeDirection && !parseCreativeDirection(input.creativeDirection)) {
     throw new OriginalDesignError("BLUEPRINT_INCONSISTENT", "Creative direction failed its schema");
   }
 
@@ -157,6 +142,4 @@ export async function runOriginalDesignBlueprintStage(
   return { ...stored, blueprint: run.value };
 }
 
-export function parseCreativeDirection(raw: unknown): CreativeDirection | null {
-  return Value.Check(CreativeDirectionSchema, raw) ? (raw as CreativeDirection) : null;
-}
+

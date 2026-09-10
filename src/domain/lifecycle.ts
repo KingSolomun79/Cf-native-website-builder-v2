@@ -13,6 +13,7 @@
 
 import type { Env } from "../env.d";
 import { generateId, nowIso } from "../lib/crypto";
+import { assertOriginalDesignAvailable } from "./original-design-lock";
 import { getObject } from "../lib/assets";
 import {
   ONBOARDING_SUBMISSION_SCHEMA_VERSION,
@@ -292,12 +293,12 @@ export async function createInitialBuild(
     );
   }
 
-  // ORIGINAL_DESIGN work is locked behind the REFERENCE_BOUND proof gate
-  // (issue #23): at least 3 of 5 fixed Benchmark Sites must satisfy
-  // Benchmark Pass before any ORIGINAL_DESIGN Build may start.
+  // ORIGINAL_DESIGN is a recognized Build Mode whose runtime is explicitly
+  // NOT ENABLED (deferred SIMPLE implementation; deterministic lock replacing
+  // the retired 3-of-5 legacy benchmark proof gate). No fallback to
+  // REFERENCE_BOUND, no legacy generator, no automatic enablement.
   if (generation.build_mode === "ORIGINAL_DESIGN") {
-    const { assertOriginalDesignUnlocked } = await import("./proof-gate");
-    await assertOriginalDesignUnlocked(env);
+    assertOriginalDesignAvailable();
   }
 
   const createdAt = nowIso();
