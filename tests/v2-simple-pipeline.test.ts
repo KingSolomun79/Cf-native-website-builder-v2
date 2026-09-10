@@ -18,10 +18,8 @@ import { validateDesignBlueprint } from "../src/simple-design/contracts";
 
 const env = providedEnv as unknown as Env;
 
-// SIMPLE suites opt in explicitly: wrangler.test.jsonc pins legacy_v2 so the
-// ~60 legacy suites keep testing the legacy chain; this env spread flips the
-// experiment selector for the simple branch only.
-const simpleEnv = { ...env, DESIGN_PIPELINE_VERSION: "simple_blueprint_v1" } as unknown as Env;
+// SIMPLE is the only pipeline (legacy cleanup 2026-09-10); the test env needs
+// no pipeline override any more.
 
 async function startGeneration(screenshotKey: string): Promise<string> {
   await persistSimpleScreenshot(env, screenshotKey);
@@ -40,6 +38,8 @@ async function startGeneration(screenshotKey: string): Promise<string> {
   return started.siteGenerationId;
 }
 
+// Positive regression guard: a SIMPLE run must record ZERO rows for any
+// retired legacy design stage. If a legacy path ever resurrects, this fails.
 const LEGACY_AI_STAGES = [
   "reference-analyzer",
   "visual-blueprint-generator",
@@ -57,7 +57,7 @@ const LEGACY_AI_STAGES = [
 describe("SIMPLE pipeline end-to-end (experiment/simplified-design-pipeline)", () => {
   it("first-pass success: blueprint → images → build → QA → RELEASE_READY with NO repair", async () => {
     const siteGenerationId = await startGeneration("references/simple/happy.png");
-    const outcome = await runBuildPipeline(simpleEnv, { siteGenerationId, deps: createSimpleScripts() });
+    const outcome = await runBuildPipeline(env, { siteGenerationId, deps: createSimpleScripts() });
 
     expect(outcome.terminal).toBe("RELEASE_READY");
     expect(outcome.reasons).toEqual([]);
@@ -117,7 +117,7 @@ describe("SIMPLE pipeline end-to-end (experiment/simplified-design-pipeline)", (
 
   it("ONE repair: failed first QA → new immutable Build Version v2 → final QA RELEASE_READY", async () => {
     const siteGenerationId = await startGeneration("references/simple/repair.png");
-    const outcome = await runBuildPipeline(simpleEnv, {
+    const outcome = await runBuildPipeline(env, {
       siteGenerationId,
       deps: createSimpleScripts({ firstVisualQaFails: true }),
     });
@@ -157,7 +157,7 @@ describe("SIMPLE pipeline end-to-end (experiment/simplified-design-pipeline)", (
 
   it("final QA still failing after the ONE repair → HUMAN_REVIEW_REQUIRED, no second repair", async () => {
     const siteGenerationId = await startGeneration("references/simple/still-failing.png");
-    const outcome = await runBuildPipeline(simpleEnv, {
+    const outcome = await runBuildPipeline(env, {
       siteGenerationId,
       deps: createSimpleScripts({ allVisualQaFails: true }),
     });
@@ -181,7 +181,7 @@ describe("SIMPLE pipeline end-to-end (experiment/simplified-design-pipeline)", (
 
   it("blueprint that fails the deterministic quality gate escalates to HUMAN_REVIEW_REQUIRED without generating images or a site", async () => {
     const siteGenerationId = await startGeneration("references/simple/gate-fail.png");
-    const outcome = await runBuildPipeline(simpleEnv, {
+    const outcome = await runBuildPipeline(env, {
       siteGenerationId,
       deps: createSimpleScripts({ blueprintFailsGate: true }),
     });
@@ -202,7 +202,7 @@ describe("SIMPLE pipeline end-to-end (experiment/simplified-design-pipeline)", (
 
   it("does not auto-publish: preview deployment only, no published deployment rows", async () => {
     const siteGenerationId = await startGeneration("references/simple/no-publish.png");
-    const outcome = await runBuildPipeline(simpleEnv, { siteGenerationId, deps: createSimpleScripts() });
+    const outcome = await runBuildPipeline(env, { siteGenerationId, deps: createSimpleScripts() });
     expect(outcome.terminal).toBe("RELEASE_READY");
 
     const roles = await env.DB.prepare("SELECT DISTINCT role FROM build_deployments WHERE build_id = ?")

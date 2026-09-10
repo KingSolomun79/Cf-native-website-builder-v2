@@ -95,9 +95,9 @@ export interface ReferenceCaptureOutput {
   /** Issue #68: the coordinate space of the frozen region coordinates.
    *  The production capture freezes PAGE_SPACE (adapter layout bounds are
    *  measured as viewport rect + scrollY in one evaluation). Optional so
-   *  pre-#68 fixture capture functions remain valid; evidence frozen without
-   *  a declaration normalizes through the legacy inference in
-   *  reference-geometry.ts. */
+   *  pre-#68 capture functions remain valid; the declaration is observational
+   *  provenance (the legacy geometry authority was removed with the legacy
+   *  design chain — current consumers are space-independent). */
   coordinateSpace?: "PAGE_SPACE" | "VIEWPORT_SPACE";
   /** Issue #65/#68: scrollY at DOM measurement time — observational
    *  provenance recorded alongside the frozen coordinates, never a
@@ -428,8 +428,9 @@ export async function runReferenceIntake(
   // Issue #68 coordinate-space declaration: the production capture freezes
   // PAGE_SPACE coordinates and screenshot-only extraction bands ARE
   // screenshot rows (page space). A capture output without an explicit
-  // declaration (pre-#68 fixture adapters) freezes undeclared so the
-  // geometry authority's legacy inference keeps normalizing it.
+  // declaration (pre-#68 capture adapters) freezes undeclared; the field is
+  // observational provenance (the legacy geometry authority was removed with
+  // the legacy design chain — current consumers are space-independent).
   const declaredCoordinateSpace = captureOutput ? captureOutput.coordinateSpace : ("PAGE_SPACE" as const);
   const evidence: ReferenceEvidence = {
     version: REFERENCE_EVIDENCE_VERSION,

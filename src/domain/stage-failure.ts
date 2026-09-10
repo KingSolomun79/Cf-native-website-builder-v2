@@ -41,6 +41,7 @@ import { StageExecutionCollisionError } from "./stage-execution";
 import { StageArtifactError } from "./stage-artifacts";
 import { ImageBudgetExceededError } from "./image-pipeline";
 import { AiStageSchemaInvalidError } from "./ai-boundary";
+import { OriginalDesignNotEnabledError } from "./original-design-lock";
 
 export type StageFailureClass =
   | "TRANSIENT_RETRYABLE"
@@ -82,6 +83,7 @@ export function classifyStageFailure(error: unknown): StageFailureClass {
   if (
     error instanceof StageExecutionCollisionError ||
     error instanceof ImageBudgetExceededError ||
+    error instanceof OriginalDesignNotEnabledError ||
     (error instanceof StageArtifactError && error.code === "REPAIR_ARTIFACT_MISMATCH")
   ) {
     return "TERMINAL_INVARIANT";

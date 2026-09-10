@@ -37,12 +37,12 @@ export const ReferenceEvidenceSchema = Type.Object(
   // frozen Y coordinate (regions, measuredElement boxes) lives in.
   //   PAGE_SPACE    — coordinates are already the screenshot's page space;
   //                   geometry must apply the identity transform.
-  //   VIEWPORT_SPACE — coordinates are getBoundingClientRect values; geometry
-  //                   normalizes by adding captureScrollY.
+  //   VIEWPORT_SPACE — coordinates are getBoundingClientRect values; page-space
+  //                   derivation would add captureScrollY.
   // New captures always freeze PAGE_SPACE. Evidence captured before #68 lacks
-  // the field and is normalized through the deterministic legacy inference in
-  // reference-geometry.ts (bounds + ordering evaluated; only a uniquely valid
-  // transform is accepted, otherwise the mapping fails closed).
+  // the field and stays undeclared: the field is observational provenance
+  // (the legacy geometry authority that normalized it was removed with the
+  // legacy design chain; current consumers are space-independent).
   coordinateSpace: Type.Optional(Type.Union([Type.Literal("PAGE_SPACE"), Type.Literal("VIEWPORT_SPACE")])),
   // Issue #65/#68: the page's scrollY at the moment the DOM bounds were
   // measured — OBSERVATIONAL PROVENANCE ONLY. It is never a normalization

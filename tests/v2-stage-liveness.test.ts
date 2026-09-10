@@ -30,6 +30,7 @@ import { classifyStageFailure, isTransientPlatformResetError } from "../src/doma
 import { StageArtifactError } from "../src/domain/stage-artifacts";
 import { ImageBudgetExceededError } from "../src/domain/image-pipeline";
 import { AiStageSchemaInvalidError } from "../src/domain/ai-boundary";
+import { OriginalDesignNotEnabledError } from "../src/domain/original-design-lock";
 import { VisionGatewayError } from "../src/lib/ai-gateway";
 
 describe("stageInProgressRetryAfterMs", () => {
@@ -126,6 +127,10 @@ describe("stage-failure classification (issue #62 §5, legacy stages removed)", 
     expect(classifyStageFailure(new AiStageSchemaInvalidError("simple-website-builder", "run-1", []))).toEqual(
       "DETERMINISTIC_REVIEW_REQUIRED"
     );
+  });
+
+  it("classifies the ORIGINAL_DESIGN deferred-mode lock as TERMINAL_INVARIANT — no retry burn on a deterministic refusal", () => {
+    expect(classifyStageFailure(new OriginalDesignNotEnabledError())).toEqual("TERMINAL_INVARIANT");
   });
 
   it("classifies integrity/spend violations as TERMINAL_INVARIANT", () => {
