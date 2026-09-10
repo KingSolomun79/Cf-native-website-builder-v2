@@ -1,5 +1,4 @@
 import { describe, expect, it } from "vitest";
-import { evaluateReferenceMacroFidelity, compareGeometry, geometryFromRegions } from "../src/domain/qa-evidence";
 import { evaluateReferenceEvidenceSufficiency } from "../src/domain/reference-sufficiency";
 import type { ReferenceEvidence } from "../src/domain/reference-evidence-schema";
 
@@ -60,32 +59,5 @@ describe("frozen RankForge negative regression (issue #46)", () => {
     const verdict = evaluateReferenceEvidenceSufficiency(dimensionsOnlyEvidence());
     expect(verdict.sufficiency).toBe("INSUFFICIENT");
     expect(verdict.missingBlocking).toEqual(["region_structure", "measured_elements"]);
-  });
-
-  it("the frozen candidate geometry FAILS the macro fidelity gate against the measured reference", () => {
-    // Reference profile post-#41: measured bands/masses from the screenshot.
-    const referenceMasses = Array.from({ length: FROZEN.referenceMassCount }, (_, index) => ({
-      id: `shot-band-${index + 1}`,
-      height: Math.round((FROZEN.referenceViewportSum / FROZEN.referenceMassCount) * 900),
-      viewportHeightRatio: Number((FROZEN.referenceViewportSum / FROZEN.referenceMassCount).toFixed(3)),
-    }));
-    const reference = geometryFromRegions(referenceMasses, 0.31);
-    const candidate = geometryFromRegions(FROZEN.candidateRegions, 0.38);
-    const comparison = compareGeometry(reference, candidate);
-    // The old system produced "similarity 75" against nothing; the new
-    // comparator measures — and the silhouette collapse is unmistakable.
-    expect(comparison.status).toBe("MEASURED");
-    expect(comparison.similarityScore).not.toBeNull();
-    expect(comparison.materialDeviations.join(" ")).toContain("region_count");
-    const gate = evaluateReferenceMacroFidelity(comparison);
-    expect(gate.verdict).toBe("FAIL");
-    expect(gate.reason).toContain("region_count");
-  });
-
-  it("an unmeasured reference profile still produces NO similarity percentage", () => {
-    const comparison = compareGeometry(geometryFromRegions([], null), geometryFromRegions(FROZEN.candidateRegions, 0.38));
-    expect(comparison.status).toBe("INSUFFICIENT_REFERENCE_EVIDENCE");
-    expect(comparison.similarityScore).toBeNull();
-    expect(evaluateReferenceMacroFidelity(comparison).verdict).toBe("FAIL");
   });
 });

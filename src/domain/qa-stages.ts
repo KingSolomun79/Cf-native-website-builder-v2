@@ -22,7 +22,6 @@ import { Type, type Static } from "@sinclair/typebox";
 import type { Env } from "../env.d";
 import { runSchemaValidatedAiStage, type RawAiGenerate } from "./ai-boundary";
 import { getObject } from "../lib/assets";
-import type { GeometryComparison } from "./qa-evidence";
 
 export const QA_A_SCHEMA_VERSION = "qa-a/1";
 export const QA_B_SCHEMA_VERSION = "qa-b/1";
@@ -249,35 +248,6 @@ export function evaluateQaBRelease(report: QaBReport | QaBConfirmationReport): R
 
 // ── AI stages ───────────────────────────────────────────────────────────────
 
-export function buildQaAUserPrompt(input: {
-  businessName: string;
-  geometryComparison: GeometryComparison;
-  evidenceSummary: string;
-  signatureTraitIds: string[];
-  canonicalRegions: Array<{ order: number; id: string; purpose: string }>;
-  firstViewportRegionIds: string[];
-  adaptationContractQaExceptions: string[];
-}): string {
-  return `Evaluate this Release Candidate against the Reference and the Visual Blueprint. Judge rendered visual fidelity and content quality, verify every hard composition gate, and list exact findings with severity (P0/P1/P2/P3) and evidence references. Treat declared Adaptation Contract QA exceptions as intentional; a high score may never compensate a failed hard gate.
-
-BUSINESS TRUTH (binding, issue #48): set fabrication=true whenever the candidate presents unsupported identity or trust entities — invented client/partner names or logos, awards, certifications, press features, ratings or testimonial identities not present in the Business Facts — whether in text, badges or imagery. The same rule binds confirmation: a fabricated identity may never pass while unresolved, regardless of how many visual defects around it are fixed.
-
-HARD GATE IDS (production retest 2026-09-05): report hardGates with EXACTLY these ids, each exactly once, no synonyms: ${JSON.stringify(QA_A_HARD_GATE_IDS)}.
-
-CANONICAL REGION AUTHORITY (issue #37 semantics): the CANONICAL BLUEPRINT REGION TOPOLOGY below is the binding comparison target for PAGE_SILHOUETTE_REGION_ORDER and FIRST_VIEWPORT_MATERIALLY_CORRECT — judge the generated canonical region sequence, identity and first-viewport composition against THIS topology. The raw Reference Evidence segmentation is observational; raw evidence measurements remain the authority for measured fidelity (proportions, mass, viewport ratios) but never define a second region topology the generated page must match. Harmless internal wrappers inside one canonical region are not region-order violations; a missing, renamed, reordered or substituted canonical region is.
-
-BUSINESS: ${input.businessName}
-SIGNATURE TRAITS THAT MUST BE PRESERVED: ${JSON.stringify(input.signatureTraitIds)}
-CANONICAL BLUEPRINT REGION TOPOLOGY (ordered, binding): ${JSON.stringify(input.canonicalRegions)}
-BLUEPRINT FIRST-VIEWPORT REGION IDS (ordered prefix, binding): ${JSON.stringify(input.firstViewportRegionIds)}
-GEOMETRY COMPARATOR EVIDENCE (structural, not pixels): ${JSON.stringify(input.geometryComparison.metrics)}
-EVIDENCE SUMMARY: ${input.evidenceSummary}
-ADAPTATION CONTRACT QA EXCEPTIONS: ${JSON.stringify(input.adaptationContractQaExceptions)}`;
-}
-
-// Production multimodal QA-A call: attaches the reference visual package
-// AND the candidate's home-desktop capture to one comparative vision call
-// (issue #44 — restores the retained prompt's squint-test behavior).
 export function createProductionQaVisionGenerate(
   env: Env,
   referenceVisualInputs: NonNullable<import("./reference-evidence-schema").ReferenceEvidence["visualInputs"]>,
@@ -318,99 +288,4 @@ export function createProductionQaVisionGenerate(
     );
     return { content: result.content, provider: result.provider, model: result.model };
   };
-}
-
-export async function runQaAStage(
-  env: Env,
-  input: {
-    buildId: string;
-    siteGenerationId: string;
-    buildVersionId: string;
-    buildVersionNumber: number;
-    context: Parameters<typeof buildQaAUserPrompt>[0];
-    evidenceR2Key: string;
-    generate?: RawAiGenerate;
-    /** Multimodal QA-A (issue #44): reference visual inputs + the candidate's
-     *  home-desktop capture artifact key, attached through the vision path. */
-    referenceVisualInputs?: NonNullable<import("./reference-evidence-schema").ReferenceEvidence["visualInputs"]>;
-    candidateHomeCaptureR2Key?: string;
-    visionGenerate?: RawAiGenerate;
-  }
-): Promise<{ report: QaAReport; provenance: import("./ai-boundary").AiProvenance }> {
-  const visualInputs = input.referenceVisualInputs ?? [];
-  const generate =
-    input.visionGenerate ??
-    (visualInputs.length > 0
-      ? createProductionQaVisionGenerate(env, visualInputs, input.candidateHomeCaptureR2Key)
-      : input.generate);
-  const run = await runSchemaValidatedAiStage<QaAReport>(env, {
-    stage: "qa-a-visual-content",
-    schema: QaAReportSchema,
-    schemaVersion: QA_A_SCHEMA_VERSION,
-    userPrompt: buildQaAUserPrompt(input.context),
-    buildId: input.buildId,
-    siteGenerationId: input.siteGenerationId,
-    buildVersionId: input.buildVersionId,
-    buildVersionNumber: input.buildVersionNumber,
-    inputArtifactIds: [
-      input.evidenceR2Key,
-      ...visualInputs.map((input) => input.artifact),
-      ...(input.candidateHomeCaptureR2Key ? [input.candidateHomeCaptureR2Key] : []),
-    ],
-    temperature: 0.2,
-    generate,
-  });
-  // Hard-gate enumeration integrity (issue #44): the model may not invent,
-  // omit or duplicate hard gates. Anything but the canonical set, exactly
-  // once, is a QA stage failure — never silent acceptance.
-  const reported = run.value.hardGates.map((gate) => gate.id).sort();
-  const canonical = [...QA_A_HARD_GATE_IDS].sort();
-  if (reported.length !== canonical.length || reported.some((id, index) => id !== canonical[index])) {
-    throw new Error(
-      `QA-A hard-gate enumeration invalid: reported [${reported.join(", ")}] but the canonical set is [${canonical.join(", ")}]`
-    );
-  }
-  return { report: run.value, provenance: run.provenance };
-}
-
-export function buildQaBUserPrompt(input: {
-  formServiceEndpoint: string;
-  evidenceSummary: string;
-  preflightPassed: boolean;
-  imageManifestSummary: string;
-}): string {
-  return `Perform the browser/technical review of this Release Candidate Preview. Verify all four pages load, internal navigation, mobile menu, responsive mechanics, overflow, keyboard/focus accessibility, the central Form Service contract (${input.formServiceEndpoint}), runtime/console/network cleanliness, image manifest resolution with no temporary provider URLs, metadata/canonical/OG, truthful JSON-LD, crawlability and Implementation Contract integrity. Technical Preflight already ${input.preflightPassed ? "passed" : "FAILED"}. List exact findings with severity and evidence references.
-
-MANDATORY GATE IDS: report gates with EXACTLY these ids, each exactly once, no synonyms: ${JSON.stringify(QA_B_MANDATORY_GATE_IDS)}.
-
-EVIDENCE SUMMARY: ${input.evidenceSummary}
-IMAGE MANIFEST: ${input.imageManifestSummary}`;
-}
-
-export async function runQaBStage(
-  env: Env,
-  input: {
-    buildId: string;
-    siteGenerationId: string;
-    buildVersionId: string;
-    buildVersionNumber: number;
-    context: Parameters<typeof buildQaBUserPrompt>[0];
-    evidenceR2Key: string;
-    generate?: RawAiGenerate;
-  }
-): Promise<{ report: QaBReport; provenance: import("./ai-boundary").AiProvenance }> {
-  const run = await runSchemaValidatedAiStage<QaBReport>(env, {
-    stage: "qa-b-browser-technical",
-    schema: QaBReportSchema,
-    schemaVersion: QA_B_SCHEMA_VERSION,
-    userPrompt: buildQaBUserPrompt(input.context),
-    buildId: input.buildId,
-    siteGenerationId: input.siteGenerationId,
-    buildVersionId: input.buildVersionId,
-    buildVersionNumber: input.buildVersionNumber,
-    inputArtifactIds: [input.evidenceR2Key],
-    temperature: 0.2,
-    generate: input.generate,
-  });
-  return { report: run.value, provenance: run.provenance };
 }
