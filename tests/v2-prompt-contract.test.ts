@@ -59,9 +59,9 @@ type Sample = Static<typeof SampleSchema>;
 
 function stageOptions(context: { buildId: string; siteGenerationId: string; buildVersionId: string }) {
   return {
-    stage: "reference-analyzer" as const,
+    stage: "simple-design-blueprint" as const,
     schema: SampleSchema,
-    schemaVersion: "reference-analysis/1",
+    schemaVersion: "design-blueprint/1",
     userPrompt: "Analyze the frozen Reference Evidence payload: {...}",
     buildId: context.buildId,
     siteGenerationId: context.siteGenerationId,
@@ -93,11 +93,10 @@ const VALID_SAMPLE = JSON.stringify({
 
 describe("canonical prompt contract", () => {
   it("derives runtime prompt identity from the manifest, not filename suffixes", () => {
-    const composed = composeStagePrompt("reference-analyzer");
-    expect(composed.promptId).toBe("reference-analyzer");
-    // Manifest version v3 — the retained body filename is 01-reference-analyzer-v2.md.
-    expect(composed.promptVersion).toBe("v3");
-    expect(composed.promptVersion).not.toContain(PROMPT_MANIFEST["reference-analyzer"].bodyFile.split("-").pop()!.split(".")[0]);
+    const composed = composeStagePrompt("simple-design-blueprint");
+    expect(composed.promptId).toBe("simple-design-blueprint");
+    expect(composed.promptVersion).toBe("v4");
+    expect(composed.promptVersion).not.toContain(PROMPT_MANIFEST["simple-design-blueprint"].bodyFile.split("-").pop()!.split(".")[0]);
     expect(composed.promptDomainContractVersion).toBe("v1");
 
     // Every manifest stage resolves and maps to an existing retained body.
@@ -110,9 +109,9 @@ describe("canonical prompt contract", () => {
   });
 
   it("prepends the domain contract to the retained stage body", () => {
-    const composed = composeStagePrompt("website-generator");
+    const composed = composeStagePrompt("simple-website-builder");
     const contract = PROMPT_BODY_FILES[DOMAIN_CONTRACT_FILE];
-    const body = PROMPT_BODY_FILES[PROMPT_MANIFEST["website-generator"].bodyFile];
+    const body = PROMPT_BODY_FILES[PROMPT_MANIFEST["simple-website-builder"].bodyFile];
     expect(composed.systemPrompt.startsWith(contract.trim().slice(0, 200))).toBe(true);
     expect(composed.systemPrompt).toContain(body.trim().slice(0, 200));
     // The domain contract section comes BEFORE the retained body.
@@ -135,11 +134,11 @@ describe("schema-validated AI stage boundary", () => {
     const result = await runSchemaValidatedAiStage<Sample>(env, { ...stageOptions(context), generate });
 
     expect(result.value.traits).toHaveLength(2);
-    expect(result.provenance.promptId).toBe("reference-analyzer");
-    expect(result.provenance.promptVersion).toBe("v3");
+    expect(result.provenance.promptId).toBe("simple-design-blueprint");
+    expect(result.provenance.promptVersion).toBe("v4");
     expect(result.provenance.promptDomainContractVersion).toBe("v1");
     expect(result.provenance.model).toBe("test-model-x");
-    expect(result.provenance.schemaVersion).toBe("reference-analysis/1");
+    expect(result.provenance.schemaVersion).toBe("design-blueprint/1");
     expect(result.provenance.attempt).toBe(1);
     expect(result.provenance.inputArtifactIds).toEqual(["references/evidence/frozen-1.json"]);
     expect(result.attempts).toEqual([{ attempt: 1, outcome: "valid", errorSummary: null }]);
@@ -165,9 +164,9 @@ describe("schema-validated AI stage boundary", () => {
       }>();
     expect((rows.results ?? []).length).toBe(1);
     const row = rows.results![0];
-    expect(row.prompt_id).toBe("reference-analyzer");
-    expect(row.prompt_version).toBe("v3");
-    expect(row.schema_version).toBe("reference-analysis/1");
+    expect(row.prompt_id).toBe("simple-design-blueprint");
+    expect(row.prompt_version).toBe("v4");
+    expect(row.schema_version).toBe("design-blueprint/1");
     expect(row.outcome).toBe("valid");
     expect(JSON.parse(row.input_artifact_ids_json)).toEqual(["references/evidence/frozen-1.json"]);
     expect(row.artifact_r2_key).toBe(result.artifactR2Key);
@@ -177,7 +176,7 @@ describe("schema-validated AI stage boundary", () => {
     expect(stored).not.toBeNull();
     const artifact = JSON.parse(await stored!.text()) as { value: Sample; provenance: { promptVersion: string } };
     expect(artifact.value.summary).toContain("Editorial");
-    expect(artifact.provenance.promptVersion).toBe("v3");
+    expect(artifact.provenance.promptVersion).toBe("v4");
 
     // The artifact key is written immutably: a second immutable write refuses.
     await expect(putImmutableObject(env, result.artifactR2Key, "tamper")).rejects.toThrow(
@@ -222,7 +221,7 @@ describe("schema-validated AI stage boundary", () => {
     const rows = await env.DB.prepare(
       "SELECT outcome, artifact_r2_key, error_summary FROM ai_stage_runs WHERE stage = ? ORDER BY created_at DESC, attempt LIMIT 2"
     )
-      .bind("reference-analyzer")
+      .bind("simple-design-blueprint")
       .all<{ outcome: string; artifact_r2_key: string | null; error_summary: string | null }>();
     const latest = rows.results ?? [];
     expect(latest.map((row) => row.outcome)).toEqual(["invalid", "invalid"]);

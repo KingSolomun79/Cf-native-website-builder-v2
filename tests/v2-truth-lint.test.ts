@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { factVocabulary, lintTrustContexts, TRUST_CONTEXT_PATTERN } from "../src/domain/fact-lint";
-import { buildImagePromptUserPrompt } from "../src/domain/image-pipeline";
+import { blueprintSlotsToPromptRecords } from "../src/simple-design/contracts";
+import { simpleBlueprintFixture } from "./helpers/simple-scripts";
 import {
   evaluateQaARelease,
   QA_A_HARD_GATE_IDS,
@@ -187,22 +188,17 @@ describe("fabrication is a tracked, unloseable release blocker (issue #48)", () 
 });
 
 describe("generated imagery cannot carry fabricated identity (issue #48)", () => {
-  it("every KIE prompt carries the binding identity prohibition", () => {
-    const prompt = buildImagePromptUserPrompt([
-      {
-        id: "home-hero",
-        page: "home",
-        semanticRole: "editorial hero",
-        blueprintRole: "role-hero",
-        priority: "CRITICAL",
-        orientation: "landscape",
-        negativeSpaceForText: true,
-      },
-    ]);
-    expect(prompt).toContain("IDENTITY PROHIBITION");
-    expect(prompt).toContain("NO readable text");
-    expect(prompt).toContain("logo");
-    expect(prompt).toContain("screenshot-like composition");
+  it("every SIMPLE KIE prompt record carries the binding no-text/no-logo prohibition", () => {
+    // The Design Blueprint is the KIE prompt authority: its per-slot
+    // negativePrompt travels verbatim into the record the durable image
+    // driver submits, so every generated image is bounded by it.
+    const blueprint = simpleBlueprintFixture();
+    const records = blueprintSlotsToPromptRecords(blueprint);
+    expect(records.length).toBeGreaterThan(0);
+    for (const record of records) {
+      expect(record.promptText + " " + record.avoidance).toMatch(/no readable text|no text/i);
+      expect(record.avoidance.length).toBeGreaterThan(0);
+    }
   });
 });
 

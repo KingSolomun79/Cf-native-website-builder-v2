@@ -39,9 +39,6 @@ import { appendBuildWorkflowEvent } from "./lifecycle";
 import { buildVersionAssetKey } from "./artifact-keys";
 import { runSchemaValidatedAiStage, type RawAiGenerate } from "./ai-boundary";
 import {
-  buildImagePromptUserPrompt,
-  IMAGE_PROMPT_RECORDS_SCHEMA_VERSION,
-  ImagePromptRecordsSchema,
   expandSlotsToTarget,
   waveForSlot,
   orderSlotsByPriority,
@@ -54,7 +51,6 @@ import {
   type ImageGenerationResult,
   type ImagePromptRecord,
   type ImageSpendReport,
-  type RunImageGenerationInput,
   type SlotGenerationOutcome,
 } from "./image-pipeline";
 import type { ImageSlot } from "./site-contracts";
@@ -119,43 +115,39 @@ interface AttemptContext {
   provider: ImageGenerationProvider;
 }
 
+export interface ImageOrchestrationInput {
+  siteGenerationId: string;
+  buildId: string;
+  buildVersionId: string;
+  buildVersionNumber: number;
+  slots: ImageSlot[];
+  provider: ImageGenerationProvider;
+  expandToTarget?: boolean;
+  /** REQUIRED: the Design Blueprint is the KIE prompt authority. Pre-derived
+   *  records must cover every slot id (validated at the prompt step). */
+  promptRecords: ImagePromptRecord[];
+}
+
 export async function runImageGenerationDurable(
   env: Env,
-  input: RunImageGenerationInput,
+  input: ImageOrchestrationInput,
   seams: ImageOrchestrationSeams
 ): Promise<ImageGenerationResult> {
   const slots = input.expandToTarget === false ? input.slots : expandSlotsToTarget(input.slots);
 
-  // The LLM prompt-records stage is its own short durable step. Serializable
-  // array result — step outputs must survive engine serialization.
-  // SIMPLE pipeline exception (experiment branch): when pre-derived prompt
-  // records are supplied (the Design Blueprint is the prompt authority, spec
-  // section 21), the kie-image-prompt-generator LLM stage is skipped. Every
-  // slot must be covered; otherwise the legacy stage runs unchanged.
-  const records = input.promptRecords
-    ? await seams.stepDo(`pipeline: image prompts (v${input.buildVersionNumber})`, async () => {
-        const provided = new Map(input.promptRecords!.map((record) => [record.slotId, record]));
-        const missing = slots.filter((slot) => !provided.has(slot.id));
-        if (missing.length > 0) {
-          throw new Error(`pre-derived image prompt records missing for slots: ${missing.map((slot) => slot.id).join(", ")}`);
-        }
-        return slots.map((slot) => provided.get(slot.id)!);
-      })
-    : await seams.stepDo(`pipeline: image prompts (v${input.buildVersionNumber})`, async () => {
-    const promptRun = await runSchemaValidatedAiStage<ImagePromptRecordsShape>(env, {
-      stage: "kie-image-prompt-generator",
-      schema: ImagePromptRecordsSchema,
-      schemaVersion: IMAGE_PROMPT_RECORDS_SCHEMA_VERSION,
-      userPrompt: buildImagePromptUserPrompt(slots),
-      buildId: input.buildId,
-      siteGenerationId: input.siteGenerationId,
-      buildVersionId: input.buildVersionId,
-      buildVersionNumber: input.buildVersionNumber,
-      temperature: 0.4,
-      generate: input.generate,
-    });
-    return promptRun.value.records;
+  // The Design Blueprint is the prompt authority: pre-derived prompt records
+  // are REQUIRED and must cover every slot. Serializable array result — step
+  // outputs must survive engine serialization. (The legacy
+  // kie-image-prompt-generator LLM stage was removed with the legacy chain.)
+  const records = await seams.stepDo(`pipeline: image prompts (v${input.buildVersionNumber})`, async () => {
+    const provided = new Map(input.promptRecords.map((record) => [record.slotId, record]));
+    const missing = slots.filter((slot) => !provided.has(slot.id));
+    if (missing.length > 0) {
+      throw new Error(`pre-derived image prompt records missing for slots: ${missing.map((slot) => slot.id).join(", ")}`);
+    }
+    return slots.map((slot) => provided.get(slot.id)!);
   });
+
   const promptRecords = new Map(records.map((record) => [record.slotId, record]));
 
   const wave1 = await runDurableWave(env, input, seams, promptRecords, slots, 1);
@@ -171,7 +163,7 @@ interface ImagePromptRecordsShape {
 
 async function runDurableWave(
   env: Env,
-  input: RunImageGenerationInput,
+  input: ImageOrchestrationInput,
   seams: ImageOrchestrationSeams,
   promptRecords: Map<string, ImagePromptRecord>,
   slots: ImageSlot[],
@@ -214,7 +206,7 @@ async function runDurableWave(
 
 async function runDurableSlot(
   env: Env,
-  input: RunImageGenerationInput,
+  input: ImageOrchestrationInput,
   seams: ImageOrchestrationSeams,
   wave: 1 | 2,
   slot: ImageSlot,
@@ -254,7 +246,7 @@ async function runDurableSlot(
 
 async function runDurableAttempt(
   env: Env,
-  input: RunImageGenerationInput,
+  input: ImageOrchestrationInput,
   seams: ImageOrchestrationSeams,
   wave: 1 | 2,
   slot: ImageSlot,

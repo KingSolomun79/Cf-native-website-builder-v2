@@ -3,7 +3,6 @@ import { env as providedEnv } from "cloudflare:test";
 import type { Env } from "../src/env.d";
 import { startSiteGeneration, createInitialBuild } from "../src/domain/lifecycle";
 import {
-  runImageGeneration,
   runImageWave,
   getImageSpendReport,
   getAcceptedImageMap,
@@ -146,20 +145,16 @@ describe("budgeted two-wave generation", () => {
     const { buildId, buildVersionId } = await newBuild();
     const { provider, created } = providerStub({ costUsd: 0.2 });
 
-    const result = await runImageGeneration(env, {
-      siteGenerationId: "sg",
-      buildId,
-      buildVersionId,
-      buildVersionNumber: 1,
-      slots: SLOTS,
-      expandToTarget: false,
-      provider,
-      generate: async (_system, user) => ({
-        content: JSON.stringify({ records: [...promptRecordsFor(SLOTS).values()] }),
-        provider: "test",
-        model: "test-model-i",
-      }),
+    // The Design Blueprint is the prompt authority: records are pre-derived
+    // (the legacy kie-image-prompt-generator LLM stage was removed).
+    const promptRecords = promptRecordsFor(SLOTS);
+    const wave1 = await runImageWave(env, {
+      buildId, buildVersionId, buildVersionNumber: 1, wave: 1, slots: SLOTS, promptRecords, provider, expandToTarget: false,
     });
+    const wave2 = await runImageWave(env, {
+      buildId, buildVersionId, buildVersionNumber: 1, wave: 2, slots: SLOTS, promptRecords, provider,
+    });
+    const result = { outcomes: [...wave1, ...wave2], report: await getImageSpendReport(env, buildId, SLOTS) };
 
     // 5 slots at $0.20 = $1.00 — inside the generation budget and hard gate.
     expect(result.report.spentUsd).toBeCloseTo(1.0, 4);

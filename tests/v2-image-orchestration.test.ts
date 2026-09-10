@@ -32,7 +32,6 @@ import {
 } from "../src/domain/image-orchestration";
 import { MAX_ATTEMPTS_PER_SLOT, type ImageGenerationProvider, type ImageProviderFetchResult, type ResolvedSlotTask } from "../src/domain/image-pipeline";
 import type { ImageSlot } from "../src/domain/site-contracts";
-import type { RawAiGenerate } from "../src/domain/ai-boundary";
 import { runBuildPipeline, type BuildPipelineDeps } from "../src/domain/build-pipeline";
 import { WRANGLER_CONFIG } from "./_generated-wrangler-config";
 import { encodePng } from "../src/lib/png-codec";
@@ -53,8 +52,8 @@ function slot(overrides: Partial<ImageSlot> & { id: string }): ImageSlot {
   };
 }
 
-function promptRecordsFor(slots: ImageSlot[]): RawAiGenerate {
-  const records = slots.map((entry) => ({
+function promptRecordsFor(slots: ImageSlot[]): ImagePromptRecord[] {
+  return slots.map((entry) => ({
     slotId: entry.id,
     promptText: `Editorial documentary photograph realizing ${entry.semanticRole} with natural window light and generous negative space for the ${entry.orientation} frame.`,
     altText: `${entry.semanticRole} photograph`,
@@ -62,11 +61,6 @@ function promptRecordsFor(slots: ImageSlot[]): RawAiGenerate {
     lighting: "natural window light",
     avoidance: "no text overlays, no logos, no watermarks",
   }));
-  return async () => ({
-    content: JSON.stringify({ records }),
-    provider: "test",
-    model: "test-model-images",
-  });
 }
 
 /** Scripted provider: each created task reports its state sequence one probe
@@ -197,7 +191,7 @@ describe("durable image lifecycle (issue #58)", () => {
     await expect(
       runImageGenerationDurable(
         env,
-        { siteGenerationId: "sg", buildId, buildVersionId, buildVersionNumber: 1, slots: [slot({ id: "home-hero" })], provider, generate: promptRecordsFor([slot({ id: "home-hero" })]), expandToTarget: false },
+        { siteGenerationId: "sg", buildId, buildVersionId, buildVersionNumber: 1, slots: [slot({ id: "home-hero" })], provider, promptRecords: promptRecordsFor([slot({ id: "home-hero" })]), expandToTarget: false },
         harness.seams()
       )
     ).rejects.toThrow("simulated instance crash");
@@ -224,7 +218,7 @@ describe("durable image lifecycle (issue #58)", () => {
     const input = { siteGenerationId: "sg", buildId, buildVersionId, buildVersionNumber: 1, slots: [slot({ id: "home-hero" })], expandToTarget: false };
 
     await expect(
-      runImageGenerationDurable(env, { ...input, provider, generate: promptRecordsFor(input.slots) }, crashed.seams())
+      runImageGenerationDurable(env, { ...input, provider, promptRecords: promptRecordsFor(input.slots) }, crashed.seams())
     ).rejects.toThrow("simulated instance crash");
     expect(provider.created).toEqual(["home-hero:task-1"]);
 
@@ -233,7 +227,7 @@ describe("durable image lifecycle (issue #58)", () => {
     const resumed = new SeamHarness();
     const result = await runImageGenerationDurable(
       env,
-      { ...input, provider, generate: promptRecordsFor(input.slots) },
+      { ...input, provider, promptRecords: promptRecordsFor(input.slots) },
       resumed.seams()
     );
     expect(provider.created).toEqual(["home-hero:task-1"]);
@@ -255,7 +249,7 @@ describe("durable image lifecycle (issue #58)", () => {
 
     const result = await runImageGenerationDurable(
       env,
-      { siteGenerationId: "sg", buildId, buildVersionId, buildVersionNumber: 1, slots: [slot({ id: "home-hero" })], provider, generate: promptRecordsFor([slot({ id: "home-hero" })]), expandToTarget: false },
+      { siteGenerationId: "sg", buildId, buildVersionId, buildVersionNumber: 1, slots: [slot({ id: "home-hero" })], provider, promptRecords: promptRecordsFor([slot({ id: "home-hero" })]), expandToTarget: false },
       harness.seams()
     );
 
@@ -278,7 +272,7 @@ describe("durable image lifecycle (issue #58)", () => {
 
     const result = await runImageGenerationDurable(
       tightEnv,
-      { siteGenerationId: "sg", buildId, buildVersionId, buildVersionNumber: 1, slots: [slot({ id: "home-hero" })], provider, generate: promptRecordsFor([slot({ id: "home-hero" })]), expandToTarget: false },
+      { siteGenerationId: "sg", buildId, buildVersionId, buildVersionNumber: 1, slots: [slot({ id: "home-hero" })], provider, promptRecords: promptRecordsFor([slot({ id: "home-hero" })]), expandToTarget: false },
       harness.seams()
     );
 
@@ -315,7 +309,7 @@ describe("durable image lifecycle (issue #58)", () => {
 
     const result = await runImageGenerationDurable(
       tightEnv,
-      { siteGenerationId: "sg", buildId, buildVersionId, buildVersionNumber: 1, slots, provider, generate: promptRecordsFor(slots), expandToTarget: false },
+      { siteGenerationId: "sg", buildId, buildVersionId, buildVersionNumber: 1, slots, provider, promptRecords: promptRecordsFor(slots), expandToTarget: false },
       harness.seams()
     );
 
@@ -350,7 +344,7 @@ describe("durable image lifecycle (issue #58)", () => {
     await expect(
       runImageGenerationDurable(
         env,
-        { siteGenerationId: "sg", buildId: hard.buildId, buildVersionId: hard.buildVersionId, buildVersionNumber: 1, slots: [slot({ id: "home-hero" })], provider: expensive, generate: promptRecordsFor([slot({ id: "home-hero" })]), expandToTarget: false },
+        { siteGenerationId: "sg", buildId: hard.buildId, buildVersionId: hard.buildVersionId, buildVersionNumber: 1, slots: [slot({ id: "home-hero" })], provider: expensive, promptRecords: promptRecordsFor([slot({ id: "home-hero" })]), expandToTarget: false },
         hardHarness.seams()
       )
     ).rejects.toThrow("Hard KIE spend gate");
@@ -367,7 +361,7 @@ describe("durable image lifecycle (issue #58)", () => {
     const criticalSlot = slot({ id: "home-hero", priority: "CRITICAL" });
     const result = await runImageGenerationDurable(
       env,
-      { siteGenerationId: "sg", buildId: reserve.buildId, buildVersionId: reserve.buildVersionId, buildVersionNumber: 1, slots: [criticalSlot], provider, generate: promptRecordsFor([criticalSlot]), expandToTarget: false },
+      { siteGenerationId: "sg", buildId: reserve.buildId, buildVersionId: reserve.buildVersionId, buildVersionNumber: 1, slots: [criticalSlot], provider, promptRecords: promptRecordsFor([criticalSlot]), expandToTarget: false },
       harness.seams()
     );
     expect(result.outcomes[0].status).toBe("rejected_budget");
@@ -387,7 +381,7 @@ describe("durable image lifecycle (issue #58)", () => {
 
     const result = await runImageGenerationDurable(
       env,
-      { siteGenerationId: "sg", buildId, buildVersionId, buildVersionNumber: 1, slots: [portrait], provider, generate: promptRecordsFor([portrait]), expandToTarget: false },
+      { siteGenerationId: "sg", buildId, buildVersionId, buildVersionNumber: 1, slots: [portrait], provider, promptRecords: promptRecordsFor([portrait]), expandToTarget: false },
       harness.seams()
     );
 
@@ -419,7 +413,7 @@ describe("durable image lifecycle (issue #58)", () => {
     };
 
     const input = { siteGenerationId: "sg", buildId, buildVersionId, buildVersionNumber: 1, slots: [slot({ id: "home-hero" })], expandToTarget: false } as const;
-    const ownerDrive = runImageGenerationDurable(env, { ...input, provider: slowProvider, generate: promptRecordsFor(input.slots) }, new SeamHarness().seams());
+    const ownerDrive = runImageGenerationDurable(env, { ...input, provider: slowProvider, promptRecords: promptRecordsFor(input.slots) }, new SeamHarness().seams());
 
     // Wait until the owner holds the claim inside its remote call.
     let claimed = false;
@@ -435,7 +429,7 @@ describe("durable image lifecycle (issue #58)", () => {
     // An overlapping execution for the SAME deterministic submission must
     // yield (never co-submit): the transient yield is exactly what the step
     // retry policy waits out.
-    const contenderDrive = runImageGenerationDurable(env, { ...input, provider: slowProvider, generate: promptRecordsFor(input.slots) }, new SeamHarness().seams());
+    const contenderDrive = runImageGenerationDurable(env, { ...input, provider: slowProvider, promptRecords: promptRecordsFor(input.slots) }, new SeamHarness().seams());
     await expect(contenderDrive).rejects.toThrow("STAGE_EXECUTION_IN_PROGRESS");
 
     releaseOwner!();
