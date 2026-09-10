@@ -1,6 +1,6 @@
 # LEGACY CLEANUP INVENTORY — obsolete COMPLEX V2 design pipeline
 
-Date: 2026-09-09 · Branch for execution: `cleanup/remove-legacy-design-pipeline` (created from verified main `7b63c54`, NOT implemented)
+Date: 2026-09-09 · **STATUS: APPROVED AND IMPLEMENTED 2026-09-10 on `cleanup/remove-legacy-design-pipeline`** (commits C1–C10 from `f2e79d9`; original-decision deltas: lib/png.ts kept — shared png-codec importer; benchmark.ts/proof-gate.ts removed with the ORIGINAL_DESIGN deferred lock;ORIGINAL_DESIGN mode preserved-as-deferred via ORIGINAL_DESIGN_NOT_ENABLED). Branch for execution was created from verified main `7b63c54`.
 Baseline: SIMPLE main verified (`simple_blueprint_v1` default; prod `wrangler.jsonc:130`, exp `wrangler.exp.jsonc:91`).
 Method: full import-graph extraction over `src/`, `tests/`, `scripts/` with type-only vs value-import verification (value imports put modules in the esbuild/Worker bundle; `import type` is erased), plus routes/workflows/prompts/tests classification. Nothing classified by filename alone.
 

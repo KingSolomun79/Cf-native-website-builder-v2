@@ -23,18 +23,35 @@ Canonical source order:
 
 Older code/docs are brownfield context only where the migration audit explicitly retains them.
 
+## ⚠️ PRODUCTION DEPLOYMENT BLOCKER
+
+**Current production `wrangler.jsonc` still carries `KIE_MODEL: "z-image"`.**
+The canonical SIMPLE pipeline requires `KIE_MODEL: "nano-banana-2-lite"`.
+**Deploying the current production configuration with the SIMPLE pipeline is
+FORBIDDEN** until the production-rollout change updates and verifies the
+model configuration. Production rollout has a separate GO.
+
 ## Product modes
 
+`REFERENCE_BOUND` (enabled) recreates visual architecture from an external Reference while replacing content, branding, imagery and Business Facts.
+
+`ORIGINAL_DESIGN` (recognized, **NOT ENABLED**) will create a distinctive design from Business, audience, brand, offer, conversion and creative-direction inputs without a Reference. Its SIMPLE implementation is deferred: the legacy generator chain was removed (2026-09-10) and the mode is held by an explicit deterministic lock (`src/domain/original-design-lock.ts`, error `ORIGINAL_DESIGN_NOT_ENABLED`) — it never falls back to REFERENCE_BOUND. Its preserved input contract lives in `src/domain/creative-direction.ts`.
+
+## Design pipeline (canonical — SIMPLE)
+
 ```text
-REFERENCE_BOUND
-  -> prove on fixed five-site benchmark
-  -> minimum 3/5 Benchmark Pass
-  -> then ORIGINAL_DESIGN
+Reference Capture
+  -> Design Blueprint        (ONE multimodal schema-validated call + deterministic quality gate)
+  -> Nano Banana Images      (KIE durable lifecycle, USD 3.00/site hard gate)
+  -> Website Builder         (the ONE visual owner)
+  -> Technical + Truth + Visual QA
+  -> optional ONE Repair
+  -> Release Ready
+  -> Human Approval
+  -> Publish
 ```
 
-`REFERENCE_BOUND` recreates visual architecture from an external Reference while replacing content, branding, imagery and Business Facts.
-
-`ORIGINAL_DESIGN` creates a distinctive design from Business, audience, brand, offer, conversion and creative-direction inputs without a Reference.
+There is no runtime design-pipeline selector and no legacy design path: `src/simple-design/` plus shared infrastructure IS the V2 build pipeline. `DESIGN_PIPELINE_VERSION=simple_blueprint_v1` survives only as a provenance string. (The former COMPLEX chain — Reference Analysis, Visual Blueprint, Implementation Contract, craft/realization repair, Fix Coordinator — was removed; see `v2-docs/FINAL-DECISION-RECORD.md` and `v2-docs/LEGACY-CLEANUP-INVENTORY.md`.)
 
 ## Domain model
 
