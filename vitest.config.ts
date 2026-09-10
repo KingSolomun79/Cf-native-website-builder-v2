@@ -148,6 +148,7 @@ export default defineWorkersConfig({
       // Experiment branch (experiment/simplified-design-pipeline): SIMPLE
       // design pipeline suites.
       "tests/v2-simple-blueprint.test.ts",
+      "tests/v2-simple-hero-canonicalization.test.ts",
       "tests/v2-simple-bundle-qa.test.ts",
       "tests/v2-simple-pipeline.test.ts",
       "tests/v2-simple-finch-fixture.test.ts",

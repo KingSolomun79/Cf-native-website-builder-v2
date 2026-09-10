@@ -424,6 +424,71 @@ export function blueprintHeroSlotId(blueprint: DesignBlueprint, page: "home" | "
   return slot && slot.page === page ? mediaSlotId : null;
 }
 
+// ── Deterministic hero-link canonicalization (operator GO, 2026-09-10) ──────
+
+// The model has to state the hero→slot relationship twice (the slot plan AND
+// the section's mediaSlotId). That duplicated bookkeeping is a referential
+// lottery, not a design decision — so when the section link is missing or
+// wrong but the target is UNIQUELY derivable from the blueprint's own
+// image-slot plan, deterministic code resolves it. This is referential
+// normalization ONLY: never section order, names, layout, imagery content,
+// priorities or any other design semantics.
+export interface HeroMediaLinkCanonicalizationEntry {
+  page: "home" | "about" | "services" | "contact";
+  supplied: string | null;
+  resolved: string;
+  reason: "UNIQUE_PAGE_HERO_SLOT";
+}
+
+export interface HeroMediaLinkCanonicalization {
+  applied: boolean;
+  links: HeroMediaLinkCanonicalizationEntry[];
+}
+
+// Qualifying hero image slot for a routed page — the exact predicate the
+// quality gate enforces: same page, hero section, CRITICAL/HIGH priority.
+function isQualifyingHeroSlot(slot: BlueprintImageSlot, page: "home" | "about" | "services" | "contact"): boolean {
+  return slot.page === page && /hero/i.test(slot.section ?? "") && slot.priority !== "NORMAL";
+}
+
+export function canonicalizeBlueprintHeroMediaLinks(blueprint: DesignBlueprint): {
+  blueprint: DesignBlueprint;
+  canonicalization: HeroMediaLinkCanonicalization;
+} {
+  const links: HeroMediaLinkCanonicalizationEntry[] = [];
+  const slots = blueprint?.imagery?.imageSlots ?? [];
+  for (const page of ["home", "about", "services", "contact"] as const) {
+    const firstSection = blueprint?.pages?.[page]?.sections?.[0];
+    // Canonicalization presupposes the sections the gate requires: a missing
+    // page spec or a non-hero first section is a semantic defect the gate
+    // reports — never something link repair may paper over.
+    if (!firstSection || !/hero/i.test(firstSection.name)) continue;
+    const supplied = firstSection.mediaSlotId || null;
+    if (supplied) {
+      const target = slots.find((candidate) => candidate.id === supplied);
+      if (target && isQualifyingHeroSlot(target, page)) continue; // valid link — byte-for-value unchanged
+    }
+    // Missing or non-resolving link: repairable ONLY when the page's own slot
+    // plan names exactly one qualifying hero slot. Zero (nothing to link) or
+    // several (semantically ambiguous) stay untouched for the gate to fail
+    // closed — canonicalization never guesses and never invents.
+    const qualifying = new Map<string, BlueprintImageSlot>();
+    for (const slot of slots) {
+      if (isQualifyingHeroSlot(slot, page)) qualifying.set(slot.id, slot);
+    }
+    if (qualifying.size !== 1) continue;
+    links.push({ page, supplied, resolved: qualifying.keys().next().value!, reason: "UNIQUE_PAGE_HERO_SLOT" });
+  }
+  if (links.length === 0) {
+    return { blueprint, canonicalization: { applied: false, links: [] } };
+  }
+  const canonical = JSON.parse(JSON.stringify(blueprint)) as DesignBlueprint;
+  for (const link of links) {
+    canonical.pages[link.page].sections[0].mediaSlotId = link.resolved;
+  }
+  return { blueprint: canonical, canonicalization: { applied: true, links } };
+}
+
 // ── site-bundle/1 ───────────────────────────────────────────────────────────
 
 export const SiteBundleSchema = Type.Object(

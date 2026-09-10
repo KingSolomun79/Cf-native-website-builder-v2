@@ -27,9 +27,12 @@ import {
   DESIGN_BLUEPRINT_NATIVE_JSON_SCHEMA,
   DESIGN_BLUEPRINT_SCHEMA_VERSION,
   DesignBlueprintSchema,
+  canonicalizeBlueprintHeroMediaLinks,
   evaluateBlueprintQualityGate,
   validateDesignBlueprint,
   type DesignBlueprint,
+  type HeroMediaLinkCanonicalization,
+  type HeroMediaLinkCanonicalizationEntry,
 } from "./contracts";
 import { renderDesignBlueprintMarkdown } from "./render-blueprint";
 import { bytesToBase64, createSimpleVisionGenerate, mimeForKey } from "./vision";
@@ -70,6 +73,7 @@ export interface SimpleDesignBlueprintResult {
   markdownR2Key: string;
   provenance: AiProvenance | null;
   attempts: AiStageAttemptRecord[];
+  heroMediaLinkCanonicalization: HeroMediaLinkCanonicalization;
 }
 
 function buildBlueprintUserPrompt(input: RunSimpleDesignBlueprintInput): string {
@@ -100,6 +104,7 @@ export async function runSimpleDesignBlueprintStage(
       markdownR2Key: markdownKey(input.buildId, input.buildVersionNumber),
       provenance: existing.provenance,
       attempts: [],
+      heroMediaLinkCanonicalization: storedHeroLinkCanonicalization(existing.provenance),
     };
   }
 
@@ -159,9 +164,18 @@ export async function runSimpleDesignBlueprintStage(
   if (!validated.valid) {
     throw new SimpleDesignBlueprintError("SCHEMA_INVALID", `design blueprint failed schema validation: ${validated.errors}`);
   }
-  const blueprint = validated.value;
 
-  const gate = evaluateBlueprintQualityGate(blueprint);
+  // Deterministic hero-link canonicalization (operator GO, 2026-09-10): runs
+  // AFTER schema validation (never canonicalizes schema-invalid data) and
+  // BEFORE the quality gate, which validates the CANONICAL artifact. Only the
+  // duplicated hero mediaSlotId reference is repaired, and only when the
+  // target is uniquely derivable from the blueprint's own image-slot plan.
+  // The model's raw output stays preserved in the ai-stage run artifact
+  // (ai_stage_runs.artifact_r2_key) — canonicalization never overwrites the
+  // model evidence.
+  const { blueprint: canonicalBlueprint, canonicalization } = canonicalizeBlueprintHeroMediaLinks(validated.value);
+
+  const gate = evaluateBlueprintQualityGate(canonicalBlueprint);
   if (!gate.passed) {
     throw new SimpleDesignBlueprintError(
       "QUALITY_GATE_FAILED",
@@ -175,24 +189,40 @@ export async function runSimpleDesignBlueprintStage(
     siteGenerationId: input.siteGenerationId,
     kind: "design_blueprint",
     schemaVersion: DESIGN_BLUEPRINT_SCHEMA_VERSION,
-    value: blueprint,
-    provenance: run.provenance,
+    value: canonicalBlueprint,
+    provenance: canonicalization.applied ? { ...run.provenance, heroMediaLinkCanonicalization: canonicalization } : run.provenance,
   });
 
   const markdownKeyFinal = markdownKey(input.buildId, input.buildVersionNumber);
-  await putImmutableObjectTolerant(env, markdownKeyFinal, renderDesignBlueprintMarkdown(blueprint), {
+  await putImmutableObjectTolerant(env, markdownKeyFinal, renderDesignBlueprintMarkdown(canonicalBlueprint), {
     httpMetadata: { contentType: "text/markdown" },
   });
 
   return {
-    blueprint,
+    blueprint: canonicalBlueprint,
     artifactR2Key: stored.artifactR2Key,
     markdownR2Key: markdownKeyFinal,
     provenance: run.provenance,
     attempts: run.attempts,
+    heroMediaLinkCanonicalization: canonicalization,
   };
 }
 
 function markdownKey(buildId: string, buildVersionNumber: number): string {
   return `${buildVersionRoot(buildId, buildVersionNumber)}/design-blueprint/DESIGN-BLUEPRINT.md`;
+}
+
+// Re-narrow the loose provenance record back to the canonicalization type on
+// the frozen-artifact reuse path; unknown entries are dropped, never guessed.
+const ROUTED_PAGES = new Set(["home", "about", "services", "contact"]);
+function storedHeroLinkCanonicalization(provenance: AiProvenance | null): HeroMediaLinkCanonicalization {
+  const recorded = provenance?.heroMediaLinkCanonicalization;
+  if (!recorded?.applied || !Array.isArray(recorded.links)) return { applied: false, links: [] };
+  const links: HeroMediaLinkCanonicalizationEntry[] = [];
+  for (const link of recorded.links) {
+    if (typeof link === "object" && link !== null && ROUTED_PAGES.has(link.page) && typeof link.resolved === "string" && link.reason === "UNIQUE_PAGE_HERO_SLOT") {
+      links.push({ page: link.page as HeroMediaLinkCanonicalizationEntry["page"], supplied: link.supplied ?? null, resolved: link.resolved, reason: "UNIQUE_PAGE_HERO_SLOT" });
+    }
+  }
+  return links.length > 0 ? { applied: true, links } : { applied: false, links: [] };
 }

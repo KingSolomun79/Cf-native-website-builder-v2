@@ -37,6 +37,7 @@ import {
   blueprintSlotsToImageSlots,
   blueprintSlotsToPromptRecords,
   type DesignBlueprint,
+  type HeroMediaLinkCanonicalization,
   type QaPackage,
   type SiteBundle,
 } from "./contracts";
@@ -221,7 +222,7 @@ export async function runSimpleBuildPipeline(
 
     // ── DESIGN BLUEPRINT (the ONE design-authority artifact) ───────────────
     const blueprintResult = await stepDo("simple: design blueprint", (): Promise<
-      | { kind: "ok"; blueprint: DesignBlueprint; artifactR2Key: string }
+      | { kind: "ok"; blueprint: DesignBlueprint; artifactR2Key: string; canonicalization: HeroMediaLinkCanonicalization }
       | { kind: "review"; reason: string }
       | { kind: "failed"; reason: string }
     > => {
@@ -244,7 +245,7 @@ export async function runSimpleBuildPipeline(
             ...(deps.visionGenerate ? { generate: deps.visionGenerate } : {}),
             ...(deps.generate ? { generate: deps.generate } : {}),
           });
-          return { kind: "ok" as const, blueprint: produced.blueprint, artifactR2Key: produced.artifactR2Key };
+          return { kind: "ok" as const, blueprint: produced.blueprint, artifactR2Key: produced.artifactR2Key, canonicalization: produced.heroMediaLinkCanonicalization };
         } catch (error) {
           if (error instanceof SimpleDesignBlueprintError) {
             // Spec section 30: one schema correction (already spent inside the
@@ -273,13 +274,19 @@ export async function runSimpleBuildPipeline(
     }
     const blueprint = blueprintResult.blueprint;
     const blueprintArtifactR2Key: string = blueprintResult.artifactR2Key;
+    const canonicalizationDetail = blueprintResult.canonicalization.applied
+      ? `; hero-link canonicalization applied: ${blueprintResult.canonicalization.links
+          .map((link) => `${link.page}: ${link.supplied ?? "missing"} -> ${link.resolved} (UNIQUE_PAGE_HERO_SLOT)`)
+          .join(", ")
+          .slice(0, 300)}`
+      : "";
     await appendBuildWorkflowEvent(env, {
       buildId,
       buildVersionId: version.buildVersionId,
       fromState: "REFERENCE_EVIDENCE",
       toState: "BLUEPRINT",
       stage: "simple_design_blueprint",
-      detail: `Design Blueprint produced (${blueprint.designDna.length} DNA rules, ${blueprint.imagery.imageSlots.length} image slots, ${blueprint.acceptanceChecklist.length} acceptance conditions)`,
+      detail: `Design Blueprint produced (${blueprint.designDna.length} DNA rules, ${blueprint.imagery.imageSlots.length} image slots, ${blueprint.acceptanceChecklist.length} acceptance conditions)${canonicalizationDetail}`,
     });
 
     // ── IMAGES (REUSED durable KIE machinery; blueprint is prompt authority)

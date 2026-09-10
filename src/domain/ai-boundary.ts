@@ -41,6 +41,14 @@ export interface AiProvenance {
    *  no raw prompt content. */
   repairTriggerFindingIds?: string[];
   repairScopeSummary?: string;
+  /** Blueprint hero-link canonicalization (operator GO, 2026-09-10):
+   *  which duplicated hero mediaSlotId references deterministic code resolved
+   *  from the blueprint's own image-slot plan. Provenance only — the raw
+   *  model output stays untouched in the ai-stage run artifact. */
+  heroMediaLinkCanonicalization?: {
+    applied: boolean;
+    links: Array<{ page: string; supplied: string | null; resolved: string; reason: string }>;
+  };
 }
 
 export interface RawAiGenerateResult {
