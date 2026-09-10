@@ -21,7 +21,7 @@ import { getObject, putImmutableObjectTolerant } from "../lib/assets";
 import { appendBuildWorkflowEvent } from "./lifecycle";
 import { buildVersionAssetKey } from "./artifact-keys";
 import { runSchemaValidatedAiStage, type RawAiGenerate } from "./ai-boundary";
-import type { ImageSlot } from "./site-generator";
+import type { ImageSlot } from "./site-contracts";
 import { orientationConforms, sniffImageDimensions } from "../lib/image-dimensions";
 
 // PRD section 18.

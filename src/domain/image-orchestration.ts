@@ -57,7 +57,7 @@ import {
   type RunImageGenerationInput,
   type SlotGenerationOutcome,
 } from "./image-pipeline";
-import type { ImageSlot } from "./site-generator";
+import type { ImageSlot } from "./site-contracts";
 import {
   StageExecutionCollisionError,
   StageExecutionInProgressError,

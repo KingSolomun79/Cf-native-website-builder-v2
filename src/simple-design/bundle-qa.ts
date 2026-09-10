@@ -7,7 +7,7 @@
 // Both feed the ONE qa-package. No LLM runs here.
 
 import type { BusinessFacts } from "../domain/lifecycle-schema";
-import { factVocabulary, lintTrustContexts, UNSUPPORTED_FACT_PATTERNS } from "../domain/site-generator";
+import { factVocabulary, lintTrustContexts, UNSUPPORTED_FACT_PATTERNS } from "../domain/fact-lint";
 import { blueprintHeroSlotId, type DesignBlueprint, type SiteBundle } from "./contracts";
 import type { TechnicalGateResults } from "./release-mapping";
 import type { SimpleTechnicalFinding, SimpleTruthFinding } from "./contracts";

@@ -13,7 +13,7 @@ import { putImmutableObjectTolerant } from "../lib/assets";
 import { appendBuildWorkflowEvent } from "./lifecycle";
 import { getBuildStageArtifact, storeBuildStageArtifactIdempotent, type StoredStageArtifact } from "./stage-artifacts";
 import { buildVersionEvidenceKey } from "./artifact-keys";
-import type { PageId } from "./site-generator";
+import type { PageId } from "./site-contracts";
 
 export const QA_EVIDENCE_SCHEMA_VERSION = "qa-evidence/1";
 

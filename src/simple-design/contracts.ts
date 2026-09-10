@@ -23,7 +23,7 @@ import { Type, type Static } from "@sinclair/typebox";
 import { Value } from "@sinclair/typebox/value";
 import { resolveProviderAspectRatio, aspectRatioClass } from "../lib/aspect-ratio";
 import type { ImagePromptRecord } from "../domain/image-pipeline";
-import type { ImageSlot } from "../domain/site-generator";
+import type { ImageSlot } from "../domain/site-contracts";
 
 export const DESIGN_BLUEPRINT_SCHEMA_VERSION = "design-blueprint/1";
 export const SITE_BUNDLE_SCHEMA_VERSION = "site-bundle/1";

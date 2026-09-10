@@ -12,7 +12,7 @@
 // recorded network evidence plus the rendered captures.
 
 import type { Env } from "../env.d";
-import type { PageId } from "./site-generator";
+import type { PageId } from "./site-contracts";
 import type { QaCaptureFn, PageCapture } from "./qa-evidence";
 import { geometryFromRegions } from "./qa-evidence";
 import type { CraftCapture } from "./craft-preflight";

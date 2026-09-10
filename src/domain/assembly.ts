@@ -18,7 +18,7 @@ import { storeBuildStageArtifact, storeBuildStageArtifactIdempotent } from "./st
 import { buildVersionAssetKey, buildVersionManifestKey, buildVersionSourceKey } from "./artifact-keys";
 import { runTechnicalPreflight } from "./technical-preflight";
 import type { PreflightCheck } from "./technical-preflight";
-import type { ImageSlot } from "./site-generator";
+import type { ImageSlot } from "./site-contracts";
 
 export interface AssemblyInput {
   buildId: string;

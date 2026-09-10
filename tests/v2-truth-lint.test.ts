@@ -1,9 +1,6 @@
 import { describe, expect, it } from "vitest";
-import {
-  lintTrustContexts,
-  validateAssembledSite,
-  type AssembledSiteSource,
-} from "../src/domain/site-generator";
+import { lintTrustContexts } from "../src/domain/fact-lint";
+import { validateAssembledSite, type AssembledSiteSource } from "../src/domain/site-generator";
 import type { ImplementationContract } from "../src/domain/implementation-planner";
 import { buildImagePromptUserPrompt } from "../src/domain/image-pipeline";
 import {
