@@ -310,6 +310,8 @@ ${frozenPages}
 
 TASK (call 5 of 6 — this call): Realize the shared stylesheet AGAINST THE REAL DOM ABOVE. The full "site.css" styles exactly the elements, classes, ids and structures the four completed documents actually contain, implementing the blueprint's entire design system: tokens as CSS custom properties, the complete type scale with clamp() sizes, layout for every section present in the markup — including the sections that carry the MANDATORY CRITICAL IMAGE PLACEMENTS — responsive breakpoints, hover states, :focus-visible, and a prefers-reduced-motion block whenever the blueprint defines motion.
 
+HARD ANCHOR RULE (build fails on violation): the stylesheet is mechanically validated against the four documents and site.js — EVERY selector you write must contain at least one class or id that literally appears in those frozen files. NEVER add validation-state, success, error or animation-hook classes that the documents do not carry (live rejections: .field-error, .form-success, .js-reveal — all invented, all fatal). If the form contract markup defines no error/success classes, the form needs no error/success styling; if a reveal is not in the markup, it needs no reveal styling. Do not anticipate structure.
+
 FIDELITY PRIORITIES (in order): (1) the first viewport materially matches the Reference composition carried by the Blueprint; (2) page silhouette and region order; (3) dominant text/image mass; (4) typography scale and measure; (5) photographic mass, crop and treatment; (6) surface/color sequence; (7) signature design traits; (8) mobile preservation of the visual identity.
 
 NUMERIC BLUEPRINT VALUES ARE BINDING: where the Blueprint provides measurable guidance — clamp() sizes, section mass, container width, viewport-height hero, image ratios, max text measure, spacing, radius, surface sequence — IMPLEMENT those values rather than reinterpreting them loosely.
@@ -434,7 +436,7 @@ ${css}
 
 ${frozenPages}
 
-TASK (call 6 of 6 — this call): Realize the shared script. The "site.js" implements only the blueprint's interactions — navigation toggle, scroll/entrance reveals that enhance ALREADY-VISIBLE content, header states — small, defensive (querySelector null checks), dependency-free. Its selectors must match the frozen markup and stylesheet above exactly, INCLUDING the state classes the stylesheet already defines — reuse site.css's state class names verbatim (live evidence: CSS said .faq-collapsed while the script toggled .is-collapsed; that drift kills the build). ${outputModeBlock("site.js", "the first JavaScript statement.")}`;
+TASK (call 6 of 6 — this call): Realize the shared script. The "site.js" implements only the blueprint's interactions — navigation toggle, scroll/entrance reveals that enhance ALREADY-VISIBLE content, header states — small, defensive (querySelector null checks), dependency-free. Its selectors must match the frozen markup and stylesheet above exactly, INCLUDING the state classes the stylesheet already defines — reuse site.css's state class names verbatim (live evidence: CSS said .faq-collapsed while the script toggled .is-collapsed; that drift kills the build). Never invent a new class: every class site.js references or toggles must already exist in the frozen markup or the frozen stylesheet. ${outputModeBlock("site.js", "the first JavaScript statement.")}`;
 }
 
 // The Builder's DEFAULT seam: the ONE Coding Plan provider, streaming
