@@ -182,6 +182,23 @@ export function parseSingleFileSource(raw: string): { ok: true; value: string } 
   const thinkEnd = text.lastIndexOf("</think>");
   if (thinkEnd !== -1) text = text.slice(thinkEnd + "</think>".length).trim();
   if (text.length === 0) return { ok: false, error: "empty file realization" };
+  // ONE surrounding JSON string wrapper is tolerated: on the Coding Plan the
+  // model sometimes emits the WHOLE file as a JSON string literal (live A/B
+  // evidence 2026-09-11: all six Builder files arrived as
+  // '"<!DOCTYPE html>\n<html lang=\"en\">…"' — the escaped quotes/newlines
+  // defeat every src="IMG:…" consumer downstream). Decode only when the
+  // ENTIRE payload parses as exactly one JSON string — never heuristic
+  // surgery. Raw source never begins with a double quote, so the shape check
+  // is cheap and unambiguous.
+  if (text.startsWith('"') && text.endsWith('"') && text.length >= 2) {
+    try {
+      const decoded: unknown = JSON.parse(text);
+      if (typeof decoded === "string" && decoded.length > 0) text = decoded.trim();
+    } catch {
+      // not a single JSON string — keep the raw text; the fence handling and
+      // deterministic validation below judge it as-is
+    }
+  }
   if (!text.startsWith("```")) return { ok: true, value: text };
   // The content opens with a fence: it must open on a line of its own
   // (optional language tag), have a newline, and terminate with a fence on

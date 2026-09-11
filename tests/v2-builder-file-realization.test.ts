@@ -299,6 +299,20 @@ describe("stage discipline: SIX calls, one semantic generation each (GO §4)", (
     const result = await runSimpleWebsiteBuilderStage(env, stageInput(ctx, blueprint(), seam.generate) as Parameters<typeof runSimpleWebsiteBuilderStage>[1]);
     expect(result.bundle.sharedCss).toBe(TOKENS_CSS);
   });
+
+  it("§9b a realization wrapped as ONE JSON string literal decodes to the raw source (live A/B evidence: all six files arrived JSON-wrapped)", async () => {
+    const ctx = await scaffoldBuild("references/simple/dom-first-jsonwrap.png");
+    const wrap = (source: string) => JSON.stringify(source);
+    const seam = scriptedSixCallSeam({
+      pages: { about: wrap(FULL_PAGE("about")) },
+      css: wrap(TOKENS_CSS),
+      js: wrap(CODE_JS),
+    });
+    const result = await runSimpleWebsiteBuilderStage(env, stageInput(ctx, blueprint(), seam.generate) as Parameters<typeof runSimpleWebsiteBuilderStage>[1]);
+    expect(result.bundle.pages.about).toBe(FULL_PAGE("about"));
+    expect(result.bundle.sharedCss).toBe(TOKENS_CSS);
+    expect(result.bundle.sharedJs).toBe(CODE_JS);
+  });
 });
 
 // ── §8: frozen shared chrome ─────────────────────────────────────────────────
