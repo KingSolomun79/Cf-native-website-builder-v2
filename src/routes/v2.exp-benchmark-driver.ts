@@ -717,7 +717,7 @@ async function runDomFirstAbRun(env: Env, body: DriverBody) {
   // Per-call provenance for the report (the stage persisted six runs).
   const callRows = await step("builder-call-runs", () =>
     env.DB.prepare(
-      "SELECT schema_version, outcome, model, finish_reason, token_usage_json, duration_ms, output_chars FROM ai_stage_runs WHERE build_version_id = ?1 AND stage = 'simple-website-builder' ORDER BY created_at"
+      "SELECT schema_version, outcome, model, provider, prompt_version, token_usage_json, estimated_cost_usd, artifact_r2_key, created_at FROM ai_stage_runs WHERE build_version_id = ?1 AND stage = 'simple-website-builder' ORDER BY created_at"
     )
       .bind(created.buildVersionId)
       .all()
