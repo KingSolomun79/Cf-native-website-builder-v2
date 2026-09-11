@@ -30,7 +30,6 @@ import { buildStandardEvidenceBundle, type QaCaptureFn } from "../domain/qa-evid
 import { createProductionQaCapture } from "../domain/qa-capture";
 import { classifyStageFailure } from "../domain/stage-failure";
 import { getBuildStageArtifact, storeBuildStageArtifactIdempotent } from "../domain/stage-artifacts";
-import { VisionGatewayError } from "../lib/ai-gateway";
 import type { RawAiGenerate } from "../domain/ai-boundary";
 import type { BusinessFacts } from "../domain/lifecycle-schema";
 import {
@@ -254,9 +253,6 @@ export async function runSimpleBuildPipeline(
             // boundary) then HUMAN_REVIEW_REQUIRED. Never a second semantic
             // generation.
             return { kind: "review" as const, reason: `DESIGN_BLUEPRINT_REVIEW_REQUIRED: ${error.code}: ${error.message}` };
-          }
-          if (isVisionSeamExhaustion(error)) {
-            return { kind: "failed" as const, reason: `DESIGN_BLUEPRINT vision seam unavailable: ${(error as Error).message}` };
           }
           throw error;
         }
@@ -736,8 +732,4 @@ export async function runSimpleBuildPipeline(
     }).catch(() => {});
     return terminal("FAILED", [detail]);
   }
-}
-
-function isVisionSeamExhaustion(error: unknown): boolean {
-  return error instanceof VisionGatewayError;
 }

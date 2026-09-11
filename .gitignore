@@ -46,5 +46,9 @@ tests/_generated-migrations.ts
 /test.mjs
 /wf.txt
 .dev.vars.exp
+# Temporary verification/experiment outputs are never source history
+# (rollout GO 2026-09-11 §10): any `.tmp-<topic>` file or directory stays
+# untracked. Historical evidence lives in v2-docs reports and R2, not here.
+.tmp-*
 .tmp-exp-phase1/
 .tmp-exp-transport/

@@ -97,14 +97,18 @@
 
   "vars": {
     "CF_ACCOUNT_ID": "c1c0f6b100d55a09ce6a7a3121a19224",
-    "CF_AI_GATEWAY_ID": "website-factory",
     "PUBLIC_APP_URL": "https://cf-website-factory-v2.wazibizwebsites.workers.dev",
     // Platform Sender Identity (issue #32/#33): the operator-approved mailbox
     // on wazibiz.ke, the domain onboarded to Cloudflare Email Service Email
     // Sending (Enabled, 2026-09-02). Configuration, not a secret.
     "WAZIBIZ_SENDER_EMAIL": "notifications@wazibiz.ke",
     "KIE_API_URL": "https://api.kie.ai",
-    "KIE_MODEL": "z-image",
+    // Canonical SIMPLE image model (operator GO 2026-09-11, production
+    // rollout): Nano Banana 2 Lite via the KIE durable lifecycle. The
+    // model-routing hygiene gate (scripts/verify-llm-model-routing.mjs)
+    // asserts this exact value so a production release can never carry a
+    // retired image model.
+    "KIE_MODEL": "nano-banana-2-lite",
     // Durable image lifecycle (issue #58): the poll cadence and the per-attempt
     // provider wait bound for the submit -> sleep -> poll state machine.
     // Worst-case durable poll steps = 12 slots x 2 attempts x ceil(timeout /
@@ -113,23 +117,17 @@
     // paid-plan default. Raising the timeout requires re-checking that budget.
     "KIE_POLL_INTERVAL_MS": "30000",
     "KIE_ATTEMPT_TIMEOUT_MS": "900000",
-    "ZHIPU_API_URL": "https://api.z.ai/api/coding/paas/v4",
-    "ZHIPU_GATEWAY_PROVIDER": "custom-zhipu",
-    // One canonical LLM model for ALL V2 textual and multimodal calls
-    // (operator decision, issue #30): glm-5.3-flash on every provider leg.
-    // Provider failover (ZAI primary -> Cloudflare AI Gateway fallback, via
-    // src/lib/ai-gateway.ts key-driven chains) must keep serving exactly
-    // this model; a fallback to a different model is a routing defect. The
-    // OpenRouter leg stays coded but dormant without OPENROUTER_API_KEY.
-    "LLM_MODEL": "glm-5.3-flash",
-    "PRIMARY_PROVIDER": "zhipu",
-    // EXPERIMENT BRANCH ONLY (experiment/simplified-design-pipeline): default
-    // the A/B selector to the SIMPLE design pipeline on this branch. Flip to
-    // "legacy_v2" for comparison runs. NEVER deploy this branch to production
-    // (experiment spec sections 74-75).
-    "DESIGN_PIPELINE_VERSION": "simple_blueprint_v1",
-    "VISION_PRIMARY_PROVIDER": "zhipu",
-    "VISION_FALLBACK_PROVIDER": "ai-gateway",
+    // Z.AI Coding Plan unification (operator GO 2026-09-11, canonical policy
+    // in v2-docs/MODEL-AND-PROVIDER-POLICY.md): the ONE LLM provider for
+    // every V2 stage. Design Blueprint and Visual QA run the multimodal
+    // model; Website Builder and Site Repair run the coding model. There is
+    // no provider fallback of any kind. The credential is the Worker secret
+    // ZAI_CODING_API_KEY — never a config var, never committed.
+    "ZAI_CODING_BASE_URL": "https://api.z.ai/api/coding/paas/v4",
+    "ZAI_CODING_MODEL": "glm-5.3",
+    "ZAI_MULTIMODAL_MODEL": "glm-5.3-flash",
+    // Visual-input preparation bounds for capture/analysis preprocessing
+    // (consumed by src/domain/stage-execution.ts and src/lib/vision-input.ts).
     "VISION_REQUEST_TIMEOUT_MS": "120000",
     "VISION_MAX_ATTEMPTS_PER_PROVIDER": "2",
     "VISION_RETRY_DELAY_MS": "500",

@@ -1,44 +1,76 @@
 # PRODUCTION ROLLOUT CHECKLIST — SIMPLE V2
 
-Status: **BLOCKED / NOT AUTHORIZED** (as of the 2026-09-11 Coding Plan unification).
+Status: **ROLLOUT BRANCH PREPARED — DEPLOY GATED ON PRODUCTION SECRET** (as of
+the 2026-09-11 production-rollout GO from main `4127500`).
 
-## Provider prerequisites (operator GO 2026-09-11: ZAI CODING PLAN UNIFICATION)
+## Canonical production configuration (verified by scripts/verify-llm-model-routing.mjs)
 
-- All LLM inference routes through the Z.AI GLM Coding Plan only — see
-  `v2-docs/MODEL-AND-PROVIDER-POLICY.md`. No Workers AI LLM binding is
-  required in production; the previously noted "add Workers AI binding"
-  prerequisite is **CANCELLED**.
-- Production must carry: `ZAI_CODING_API_KEY` (Coding Plan secret),
-  `ZAI_CODING_BASE_URL` (Coding endpoint), and PASSING exact-model canaries
-  (text `glm-5.3`; the multimodal model verified live for Blueprint/Visual QA).
+### LLM — Z.AI Coding Plan ONLY
 
-## HARD BLOCKER — image model configuration
+- `ZAI_CODING_BASE_URL = https://api.z.ai/api/coding/paas/v4` (config var).
+- `ZAI_CODING_MODEL = glm-5.3` — Website Builder (all six DOM-first calls) and
+  Site Repair.
+- `ZAI_MULTIMODAL_MODEL = glm-5.3-flash` — Design Blueprint (design-blueprint/2)
+  and Visual QA.
+- Credential: the Worker SECRET `ZAI_CODING_API_KEY` — never a config var,
+  never committed. The legacy `ZHIPU_API_KEY` name is tolerated in code for
+  older sandbox environments ONLY; a production deployment is not ready unless
+  `ZAI_CODING_API_KEY` is explicitly configured (verify with
+  `npx wrangler secret list --name cf-website-factory-v2`, names only).
+- NO automatic fallback, Workers AI, AI Gateway, OpenRouter, Z.AI General API,
+  or Kimi. The retired multi-provider config vars (`LLM_MODEL`,
+  `PRIMARY_PROVIDER`, `ZHIPU_API_URL`, `ZHIPU_GATEWAY_PROVIDER`,
+  `VISION_PRIMARY_PROVIDER`, `VISION_FALLBACK_PROVIDER`, `DESIGN_PIPELINE_VERSION`,
+  `CF_AI_GATEWAY_ID`) are REMOVED from the production artifact.
 
-- Current production `wrangler.jsonc`: **`KIE_MODEL: "z-image"`**.
-- Canonical SIMPLE requirement: **`KIE_MODEL: "nano-banana-2-lite"`**.
-- Therefore: **PRODUCTION DEPLOYMENT FROM THE CURRENT CONFIG IS FORBIDDEN.**
-  Deploying SIMPLE with `z-image` would silently violate the accepted
-  photographic-hero image contract (text-free imagery, provider ratios,
-  screen-free heroes verified against Nano Banana 2 Lite).
-- The fix is NOT part of the legacy cleanup. It happens only in the dedicated
-  production-rollout change, verified in the sandbox first (`wrangler.exp.jsonc`
-  already carries `nano-banana-2-lite`).
+### Images — Nano Banana 2 Lite
 
-## Rollout sequence (when the GO is issued)
+- `KIE_MODEL = "nano-banana-2-lite"` via the KIE durable lifecycle
+  (`KIE_API_URL` unchanged, poll cadence and USD 3.00/site hard gate unchanged).
+- The routing hygiene gate fails any production artifact still carrying
+  `z-image`.
 
-1. Merge `cleanup/remove-legacy-design-pipeline` after its final live
-   verification gate passes ( SIMPLE_MAIN_VERIFIED equivalent on the cleaned
-   branch).
-2. Production-rollout commit: `wrangler.jsonc` `KIE_MODEL` -> `nano-banana-2-lite`
-   (single reviewable change), plus removal of the inert
-   `DESIGN_PIPELINE_VERSION` var if desired.
-3. Pre-deploy verification from the exact commit SHA to be deployed:
-   full suite, typecheck, `wrangler deploy --dry-run` (prod config), CSO.
-4. Deploy production from a clean tree at an exact committed SHA; record the
-   Cloudflare deployment/version identity.
-5. Post-deploy smoke (sandbox driver points at production is FORBIDDEN — use
-   a real operator-driven onboarding): one REFERENCE_BOUND Site Generation
-   end to end; verify four pages, four photographic heroes, marker-gated
-   preview, Technical/Truth/Visual QA, Release Ready; zero manual source edits.
-6. Only after the post-production smoke succeeds: retire the benchmark driver
-   route in its own small commit (operator decision 2).
+### Bindings
+
+- No Workers AI binding (`"ai"`) in the production config — not a prerequisite.
+- Benchmark driver: `EXP_BENCHMARK_DRIVER` absent → route 404s in production.
+
+### Builder
+
+- DOM-first/CSS-last, prompt `simple-website-builder/v8`, order
+  home → about → services → contact → site.css (against the real four-page
+  DOM) → site.js.
+
+### Release gates
+
+- Visual overall ≥ 90; every critical visual category ≥ 85.
+- ONE durable Repair maximum per Build Version; then `HUMAN_REVIEW_REQUIRED`.
+- Marker-gated capture required before Visual QA on any smoke candidate
+  (brand-new `*.workers.dev` previews can serve the placeholder to the
+  Worker's own Browser Rendering while external clients see the deployment).
+
+## Pre-deploy gate order (all from the exact release SHA)
+
+1. Full suite (includes `verify-llm-model-routing.mjs` + reachability gate),
+   typecheck, production + experiment `wrangler deploy --dry-run`.
+2. `/morabeza-cso` — SECURITY OK or accepted watch items only.
+3. `ZAI_CODING_API_KEY` configured on production (secret list, names only).
+4. Coding Plan canaries with the production credential, BEFORE deploy:
+   text `glm-5.3` (exact model echo, usable content) and multimodal
+   `glm-5.3-flash` (image input accepted, usable visual response). No
+   fallback. Failure → STOP.
+5. KIE canary: smallest safe `nano-banana-2-lite` task accepted and succeeded.
+   Failure → STOP.
+6. Merge rollout → main `--no-ff`, re-run gates on merged main, deploy from
+   the exact merged SHA with a clean tree; record Worker deployment/version
+   identity AND the previous production version for infrastructure rollback.
+7. Platform smoke (Worker/D1/R2/Workflow/Browser/Images/Email, benchmark route
+   unavailable), pending forward-only D1 migrations applied, then exactly ONE
+   real operator-flow `REFERENCE_BOUND` Site Generation to Release Ready.
+   No auto-publication.
+
+## Post-rollout cleanup (separate task — never in the deploy commit)
+
+Retire the experiment benchmark driver, delete the dead `ai-gateway.ts` /
+`ai-streaming.ts` provider seams, drop legacy `Env` fields, remove remaining
+experimental transport code.
