@@ -89,7 +89,7 @@ interface DriverFixtureImage {
 }
 
 interface DriverBody {
-  op: "health" | "put-fixture" | "finch-builder" | "file-canary" | "file-qualification" | "assemble-stored" | "capture" | "blueprint" | "artifact" | "probe" | "fetch-probe" | "sql-probe" | "general-api-canary" | "stream-canary-text" | "stream-canary-vision" | "schema-canary" | "stage-runs" | "simple-kie" | "simple-kie-validation" | "simple-full-run" | "simple-rerender-qa" | "simple-hardening-run" | "simple-final-run";
+  op: "health" | "put-fixture" | "finch-builder" | "file-canary" | "file-qualification" | "file-css-probe" | "assemble-stored" | "capture" | "blueprint" | "artifact" | "probe" | "fetch-probe" | "sql-probe" | "general-api-canary" | "stream-canary-text" | "stream-canary-vision" | "schema-canary" | "stage-runs" | "simple-kie" | "simple-kie-validation" | "simple-full-run" | "simple-rerender-qa" | "simple-hardening-run" | "simple-final-run";
   maxCompletionTokens?: number;
   model?: string;
   key?: string;
@@ -192,6 +192,9 @@ export async function expBenchmarkDriver(c: Context<{ Bindings: Env }>): Promise
 
       case "file-qualification":
         return c.json(await runFileQualification(c.env, body));
+
+      case "file-css-probe":
+        return c.json(await runFileCssProbe(c.env, body));
 
       case "assemble-stored":
         return c.json(await runAssembleStored(c.env, body));
@@ -516,6 +519,87 @@ async function runFileCanary(env: Env, body: DriverBody) {
       error: (error as Error).message,
     };
   }
+}
+
+// EXPERIMENT DIAGNOSTIC ONLY (precedent: the deleted transport diagnostic):
+// ONE site.css realization at an ELEVATED diagnostic budget so the operator
+// can measure the full model's NATURAL output size (healthy-but-verbose vs
+// degenerate repetition) after the 18K qualification exhaustion. The
+// pipeline's budget constants are unchanged and this op is never a pipeline
+// path.
+async function runFileCssProbe(env: Env, body: DriverBody) {
+  if (!body.facts || !body.blueprint) throw new Error("facts and blueprint required");
+  const blueprintV2 = storedBlueprintToV2(body.blueprint);
+  const gate = evaluateBlueprintQualityGateV2(blueprintV2);
+  if (!gate.passed) {
+    return { op: "file-css-probe", verdict: "FIXTURE_INVALID", gateFailures: gate.failures };
+  }
+  const referenceScreenshotKey = body.referenceScreenshotKey ?? "references/simple/exp-finch-ref.png";
+  const ctx = await scaffold(env, body.facts, { screenshotR2Key: referenceScreenshotKey });
+  const acceptedImages = materializeAcceptedImageDescriptors(blueprintV2);
+  const budget = body.maxCompletionTokens ?? 36_000;
+  const started = Date.now();
+  try {
+    const result = await generateWorkersAiFile(env, {
+      model: WEBSITE_BUILDER_MODEL,
+      system: composeStagePrompt("simple-website-builder").systemPrompt,
+      user: cssProbeUserPrompt(blueprintV2, body.facts, acceptedImages, `${env.PUBLIC_APP_URL}/api/v2/forms/submit`, `site:${ctx.siteId}`),
+      maxCompletionTokens: budget,
+      label: "file-css-probe",
+    });
+    return {
+      op: "file-css-probe",
+      verdict: result.finishReason === "length" ? "STILL_EXHAUSTED" : "TERMINATED",
+      model: result.model,
+      providerModel: result.providerModel,
+      maxCompletionTokens: budget,
+      finishReason: result.finishReason,
+      outputTokens: result.usage?.completion_tokens ?? null,
+      contentChars: result.contentChars,
+      charsPerToken: result.usage?.completion_tokens ? Math.round(result.contentChars / result.usage.completion_tokens * 100) / 100 : null,
+      durationMs: Date.now() - started,
+      // degeneracy signals: repeated 120-char windows within the last 8000 chars
+      tailSample: result.content.slice(-1500),
+    };
+  } catch (error) {
+    return {
+      op: "file-css-probe",
+      verdict: "FAILED",
+      maxCompletionTokens: budget,
+      durationMs: Date.now() - started,
+      error: (error as Error).message,
+    };
+  }
+}
+
+// The canonical css-call context, rebuilt for the probe (the pipeline's own
+// prompt builder is internal to the builder stage).
+function cssProbeUserPrompt(
+  blueprint: DesignBlueprintV2,
+  facts: BusinessFacts,
+  acceptedImages: ReturnType<typeof materializeAcceptedImageDescriptors>,
+  formServiceEndpoint: string,
+  siteFormId: string
+): string {
+  const accepted = acceptedImages
+    .map((image) => `- ${image.slotId} [${image.page}${image.section ? `/${image.section}` : ""}] ${image.aspectRatio} — priority: ${image.priority}${image.required ? " (MANDATORY)" : ""} — alt: ${image.altText}`)
+    .join("\n");
+  return `DESIGN BLUEPRINT (design authority — realize it faithfully; it is complete and implementation-ready):
+${JSON.stringify(blueprint)}
+
+BUSINESS FACTS (the ONLY content authority):
+${JSON.stringify(facts)}
+
+ACCEPTED IMAGES (the ONLY images you may reference, as <img src="IMG:{slotId}" data-image-id="{slotId}" alt="...">):
+${acceptedImages.length > 0 ? accepted : "(none yet — build WITHOUT images; do not invent slot ids)"}
+
+FORM CONTRACT (contact page only): form action ${formServiceEndpoint}; hidden input siteFormId ${siteFormId}; fields name, email, message with labels.
+
+TASK: Realize the shared stylesheet "site.css" implementing the blueprint's entire design system: tokens as CSS custom properties, the complete type scale with clamp() sizes, layout for every planned section, responsive breakpoints, hover states, :focus-visible, and a prefers-reduced-motion block.
+
+OUTPUT MODE (hard rule): return ONLY the complete contents of site.css — raw source starting directly with the first CSS rule. No Markdown fences, no explanation, no JSON, no TODO, no summaries.
+
+DIAGNOSTIC NOTE: keep the stylesheet COMPLETE but idiomatic and compact — do not pad, do not repeat rules, do not enumerate every breakpoint variation for every section when a shared pattern covers it. A complete production stylesheet for a four-page marketing site is typically 1500-4000 lines.`;
 }
 
 // QUALIFICATION: the six file-sized realization calls of the canonical

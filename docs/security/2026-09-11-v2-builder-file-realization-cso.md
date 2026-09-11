@@ -11,7 +11,7 @@
 - `src/domain/ai-boundary.ts`: `runAiFileStage` (one semantic generation per file call, deterministic per-file validation, ai_stage_runs + immutable R2 run artifact persistence), `parseSingleFileSource` normalization, `reasoningControl` provenance.
 - `src/simple-design/builder-file-realization.ts` (new): deterministic per-file structural validation + meta/reasoning-debris marker scan.
 - `src/simple-design/website-builder.ts`: rewrite to `SIX_CALL_FILE_REALIZATION` on `WEBSITE_BUILDER_MODEL = @cf/zai-org/glm-5.3`; the former ONE_CALL/TWO_CALL strategies and transport diagnostic deleted.
-- `src/routes/v2.exp-benchmark-driver.ts`: `structured-canary`/`structured-qualification`/`builder-diagnostic` replaced by `file-canary`/`file-qualification` (raw mode, per-file metrics).
+- `src/routes/v2.exp-benchmark-driver.ts`: `structured-canary`/`structured-qualification`/`builder-diagnostic` replaced by `file-canary`/`file-qualification` plus the experiment-only `file-css-probe` diagnostic (added after the qualification exhaustion to measure the model's natural css output size; never a pipeline path).
 - Prompt `simple-website-builder/v7` (contract, body, PROMPT-MANIFEST, regenerated bodies); pipeline/repair/visual-QA ripples; test/helper adaptations.
 
 ## 2. Security scope
