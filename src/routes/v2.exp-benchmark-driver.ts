@@ -49,7 +49,6 @@ import { createProductionQaCapture } from "../domain/qa-capture";
 import {
   runSimpleWebsiteBuilderStage,
   runSimpleBuilderFileRealizationCore,
-  runSimpleBuilderCssRealization,
   resolveWebsiteBuilderModel,
   SimpleWebsiteBuilderError,
 } from "../simple-design/website-builder";
@@ -96,7 +95,7 @@ interface DriverFixtureImage {
 }
 
 interface DriverBody {
-  op: "health" | "put-fixture" | "finch-builder" | "coding-plan-models" | "coding-plan-text-canary" | "coding-plan-vision-canary" | "coding-plan-css-qualification" | "file-qualification" | "assemble-stored" | "capture" | "blueprint" | "artifact" | "probe" | "fetch-probe" | "sql-probe" | "general-api-canary" | "stream-canary-text" | "stream-canary-vision" | "schema-canary" | "stage-runs" | "simple-kie" | "simple-kie-validation" | "simple-full-run" | "simple-rerender-qa" | "simple-hardening-run" | "simple-final-run";
+  op: "health" | "put-fixture" | "finch-builder" | "coding-plan-models" | "coding-plan-text-canary" | "coding-plan-vision-canary" | "file-qualification" | "assemble-stored" | "capture" | "blueprint" | "artifact" | "probe" | "fetch-probe" | "sql-probe" | "general-api-canary" | "stream-canary-text" | "stream-canary-vision" | "schema-canary" | "stage-runs" | "simple-kie" | "simple-kie-validation" | "simple-full-run" | "simple-rerender-qa" | "simple-hardening-run" | "simple-final-run" | "simple-dom-first-ab";
   maxCompletionTokens?: number;
   model?: string;
   imageBase64?: string;
@@ -206,11 +205,14 @@ export async function expBenchmarkDriver(c: Context<{ Bindings: Env }>): Promise
       case "coding-plan-vision-canary":
         return c.json(await runCodingPlanVisionCanary(c.env, body));
 
-      case "coding-plan-css-qualification":
-        return c.json(await runCodingPlanCssQualification(c.env, body));
-
       case "file-qualification":
         return c.json(await runFileQualification(c.env, body));
+
+      // DOM-FIRST A/B (operator GO 2026-09-11 §18): the reordered Builder on
+      // FROZEN inputs — streamed, because the six glm-5.3 calls + captures +
+      // visual QA exceed client idle timeouts.
+      case "simple-dom-first-ab":
+        return body.stream ? streamSimpleDomFirstAb(c, body) : c.json(await runDomFirstAbRun(c.env, body));
 
       case "assemble-stored":
         return c.json(await runAssembleStored(c.env, body));
@@ -601,88 +603,199 @@ async function runCodingPlanVisionCanary(env: Env, body: DriverBody) {
   }
 }
 
-// §12/§21 CSS-ONLY QUALIFICATION: the FIRST qualification bar — one site.css
-// realization through the canonical Coding Plan Builder seam on the VALID
-// fixture, judged by the already-accepted source-completeness validator. No
-// KIE / capture / preview / QA. Persists the frozen per-file artifact.
-async function runCodingPlanCssQualification(env: Env, body: DriverBody) {
-  if (!body.facts || !body.blueprint) throw new Error("facts and blueprint required");
-  const blueprintV2 = storedBlueprintToV2(body.blueprint);
+// DOM-FIRST A/B (operator GO 2026-09-11 §18/§19): the reordered Builder
+// (home → about → services → contact → site.css → site.js) runs on FROZEN
+// inputs — the frozen blueprint artifact and the already-accepted images of
+// the 82-score candidate version (zero Blueprint calls, zero KIE spend) —
+// then assemble → preview → capture → deterministic QA → the visual-QA
+// judgement. NO repair (§19: measure INITIAL realization quality; the repair
+// budget is not touched). This is an A/B test against the 82 candidate, not a
+// production subsystem.
+async function runDomFirstAbRun(env: Env, body: DriverBody) {
+  if (!body.siteGenerationId || !body.buildId || !body.buildVersionId) {
+    throw new Error("siteGenerationId, buildId and buildVersionId (frozen blueprint/image source version) required");
+  }
+  const step = async <T>(label: string, fn: () => Promise<T>): Promise<T> => {
+    try {
+      return await fn();
+    } catch (error) {
+      throw new Error(`[${label}] ${(error as Error).name}: ${(error as Error).message}`);
+    }
+  };
+  const frozen = await step("load-frozen-blueprint", () =>
+    getBuildStageArtifact<DesignBlueprint | DesignBlueprintV2>(env, body.buildVersionId!, "design_blueprint")
+  );
+  if (!frozen) throw new Error(`no frozen design_blueprint on source version ${body.buildVersionId}`);
+  const blueprintV2 = storedBlueprintToV2(frozen.value);
   const gate = evaluateBlueprintQualityGateV2(blueprintV2);
   if (!gate.passed) {
-    return { op: "coding-plan-css-qualification", verdict: "FIXTURE_INVALID", gateFailures: gate.failures };
+    return { op: "simple-dom-first-ab", verdict: "FROZEN_BLUEPRINT_INVALID", gateFailures: gate.failures };
   }
-  const requestedModel = resolveWebsiteBuilderModel(env);
-  if (body.model && body.model !== requestedModel) {
-    return { op: "coding-plan-css-qualification", verdict: "FAILED", error: `model '${body.model}' is not the routed Website Builder model ('${requestedModel}') — stage routing forbids substitution` };
+
+  // Fresh Build Version on the SAME frozen Build — or resume the A/B version
+  // (stream-drop resume, refused once a newer version exists, same guard as
+  // the hardening run).
+  let created: { buildVersionId: string; buildVersionNumber: number };
+  if (body.resumeBenchmarkVersionId) {
+    const row = await env.DB.prepare("SELECT id, version_number FROM build_versions WHERE id = ?1 AND build_id = ?2")
+      .bind(body.resumeBenchmarkVersionId, body.buildId)
+      .first<{ id: string; version_number: number }>();
+    if (!row) throw new Error(`resumeBenchmarkVersionId ${body.resumeBenchmarkVersionId} not found on build ${body.buildId}`);
+    const latest = await latestVersion(env, body.buildId);
+    if (latest.id !== row.id) {
+      throw new Error(`resume refused: benchmark version ${row.id} (v${row.version_number}) is no longer latest — operator decision required`);
+    }
+    created = { buildVersionId: row.id, buildVersionNumber: row.version_number };
+  } else {
+    created = await createNextBuildVersion(env, {
+      buildId: body.buildId,
+      cause: body.cause ?? "dom_first_ab",
+      detail: body.detail ?? "DOM-first A/B: reordered Builder on the frozen blueprint + accepted images of the 82 candidate (no Blueprint, no KIE, no repair)",
+    });
   }
-  const referenceScreenshotKey = body.referenceScreenshotKey ?? "references/simple/exp-finch-ref.png";
-  const ctx = await scaffold(env, body.facts, { screenshotR2Key: referenceScreenshotKey });
+
+  // FROZEN blueprint artifact copied byte-exact onto the A/B version.
+  await step("copy-frozen-blueprint", () =>
+    storeBuildStageArtifactIdempotent(env, {
+      buildId: body.buildId!,
+      buildVersionId: created.buildVersionId,
+      siteGenerationId: body.siteGenerationId!,
+      kind: "design_blueprint",
+      schemaVersion: frozen.schemaVersion ?? "design-blueprint/1",
+      value: frozen.value,
+    })
+  );
+  // The candidate's Accepted Images inherited — the image step has nothing
+  // left to resolve, so NO KIE call happens anywhere in this op.
+  let inheritedAcceptedImages = 0;
+  if (body.inheritAcceptedImagesFromBuildVersionId ?? true) {
+    const inserted = await env.DB.prepare(
+      `INSERT INTO accepted_images (build_version_id, slot_id, attempt_id, r2_key, accepted_at)
+       SELECT ?1, slot_id, attempt_id, r2_key, datetime('now')
+       FROM accepted_images WHERE build_version_id = ?2
+       ON CONFLICT (build_version_id, slot_id) DO NOTHING`
+    )
+      .bind(created.buildVersionId, body.inheritAcceptedImagesFromBuildVersionId ?? body.buildVersionId)
+      .run();
+    inheritedAcceptedImages = inserted.meta.changes ?? 0;
+  }
+
+  const generationRow = await step("load-generation", () =>
+    env.DB.prepare("SELECT site_id FROM site_generations WHERE id = ?1")
+      .bind(body.siteGenerationId!)
+      .first<{ site_id: string }>()
+  );
+  if (!generationRow) throw new Error("Site Generation not found");
+  const facts = await step("load-facts", async () => (await getEffectiveBusinessFacts(env, body.buildId!)).facts);
+  const ctx: Scaffold = {
+    siteGenerationId: body.siteGenerationId,
+    siteId: generationRow.site_id,
+    buildId: body.buildId,
+    buildVersionId: created.buildVersionId,
+    buildVersionNumber: created.buildVersionNumber,
+  };
   const acceptedImages = materializeAcceptedImageDescriptors(blueprintV2);
-  const started = Date.now();
-  try {
-    const outcome = await runSimpleBuilderCssRealization(env, {
+
+  // The reordered Builder, through the canonical STAGE seam (per-file resume,
+  // SiteBundle + CRITICAL coverage validation, persistence — all unchanged).
+  const builtStarted = Date.now();
+  await step("dom-first-builder", () =>
+    runSimpleWebsiteBuilderStage(env, {
       siteGenerationId: ctx.siteGenerationId,
       buildId: ctx.buildId,
       buildVersionId: ctx.buildVersionId,
       buildVersionNumber: ctx.buildVersionNumber,
       blueprint: blueprintV2,
-      facts: body.facts,
+      facts,
       acceptedImages,
       formServiceEndpoint: `${env.PUBLIC_APP_URL}/api/v2/forms/submit`,
       siteFormId: `site:${ctx.siteId}`,
-    });
-    const css = outcome.css;
-    // Decisive content checks (GO §21): actual CSS, no meta-stub, no
-    // reasoning debris, normal completion, no exhaustion.
-    const ruleCount = (css.match(/\{[^{}]*\}/g) ?? []).length;
-    const looksLikeCss = /(^|[^-])--[\w-]+\s*:/.test(css) || css.includes(":root");
-    const hasMedia = css.includes("@media");
-    const completed = outcome.metrics.finishReason !== "length" && outcome.metrics.finishReason !== null ? outcome.metrics.finishReason === "stop" || outcome.metrics.finishReason === null : outcome.metrics.finishReason !== "length";
-    const qualified =
-      outcome.validationFailures.length === 0 &&
-      looksLikeCss &&
-      hasMedia &&
-      ruleCount >= 10 &&
-      completed &&
-      outcome.metrics.reused !== true;
-    return {
-      op: "coding-plan-css-qualification",
-      verdict: qualified ? "QUALIFIED" : "FAILED",
-      model: requestedModel,
-      totalDurationMs: Date.now() - started,
-      css: {
-        chars: css.length,
-        ruleCount,
-        tokenLayer: looksLikeCss,
-        mediaQueries: hasMedia,
-        outputTokens: outcome.metrics.outputTokens,
-        inputTokens: outcome.metrics.inputTokens,
-        finishReason: outcome.metrics.finishReason,
-        durationMs: outcome.metrics.durationMs,
-        estimatedCostUsd: outcome.metrics.estimatedCostUsd,
-        requestId: null,
-        runId: outcome.metrics.runId,
-        reused: outcome.metrics.reused === true,
-      },
-      sourceCompleteness: outcome.validationFailures.length === 0 ? "PASS" : "FAIL",
-      completenessFailures: outcome.validationFailures.slice(0, 12),
-      head: css.slice(0, 240),
-    };
-  } catch (error) {
-    return {
-      op: "coding-plan-css-qualification",
-      verdict: "FAILED",
-      totalDurationMs: Date.now() - started,
-      errorClass:
-        error instanceof ZaiCodingPlanOutputExhaustedError
-          ? "OUTPUT_EXHAUSTED"
-          : error instanceof ZaiCodingPlanTransportError
-            ? "TRANSPORT_FAILED"
-            : "UNKNOWN",
-      error: (error as Error).message,
-    };
-  }
+    })
+  );
+  const builderDurationMs = Date.now() - builtStarted;
+
+  // Per-call provenance for the report (the stage persisted six runs).
+  const callRows = await step("builder-call-runs", () =>
+    env.DB.prepare(
+      "SELECT schema_version, outcome, model, finish_reason, token_usage_json, duration_ms, output_chars FROM ai_stage_runs WHERE build_version_id = ?1 AND stage = 'simple-website-builder' ORDER BY created_at"
+    )
+      .bind(created.buildVersionId)
+      .all()
+  );
+
+  // Assemble → freeze → preview → capture → deterministic QA (the canonical
+  // judge path), then the visual-QA judgement on the REAL captures.
+  const acceptedKeys = await step("load-accepted-images", async () => {
+    const acceptedEntries = await getAcceptedImageMap(env, created.buildVersionId);
+    return new Map([...acceptedEntries].map(([slotId, entry]) => [slotId, entry.r2Key] as const));
+  });
+  const stored = await step("load-site-bundle", () => getBuildStageArtifact<SiteBundle>(env, created.buildVersionId, "site_bundle"));
+  if (!stored) throw new Error("the Builder stage persisted no site_bundle");
+  const judged = await step("assemble-and-judge", () =>
+    assembleAndJudge(env, ctx, stored.value, { blueprint: blueprintV2, facts } as DriverBody, acceptedKeys)
+  );
+
+  const desktop = judged.evidenceCaptures.find((cap) => cap.page === "home" && cap.viewportWidth === 1440)?.artifactR2Key;
+  const mobile = judged.evidenceCaptures.find((cap) => cap.page === "home" && cap.viewportWidth === 390)?.artifactR2Key;
+  if (!desktop) throw new Error("A/B produced no home desktop capture");
+  const frozenEvidence = await step("load-frozen-evidence", () => getFrozenReferenceEvidence(env, body.siteGenerationId!));
+  if (!frozenEvidence) throw new Error("frozen reference evidence missing");
+  const visualQa = await step("visual-qa", () =>
+    runSimpleVisualQaStage(env, {
+      siteGenerationId: body.siteGenerationId!,
+      buildId: body.buildId!,
+      buildVersionId: created.buildVersionId,
+      buildVersionNumber: created.buildVersionNumber,
+      blueprint: blueprintV2,
+      referenceVisualInputs: frozenEvidence.evidence.visualInputs ?? [],
+      candidateDesktopR2Key: desktop,
+      ...(mobile ? { candidateMobileR2Key: mobile } : {}),
+    })
+  );
+
+  return {
+    op: "simple-dom-first-ab",
+    siteGenerationId: body.siteGenerationId,
+    buildId: body.buildId,
+    sourceFrozenVersionId: body.buildVersionId,
+    benchmarkVersionId: created.buildVersionId,
+    benchmarkVersionNumber: created.buildVersionNumber,
+    inheritedAcceptedImages,
+    builderDurationMs,
+    builderCalls: callRows.results,
+    previewUrl: judged.previewUrl,
+    qa: judged.qa,
+    evidenceCaptures: judged.evidenceCaptures,
+    evidenceArtifactR2Key: judged.evidenceArtifactR2Key,
+    candidateDesktopR2Key: desktop,
+    ...(mobile ? { candidateMobileR2Key: mobile } : {}),
+    visualQa: visualQa.report,
+  };
+}
+
+// NDJSON streaming wrapper (same contract as streamSimpleFullRun).
+function streamSimpleDomFirstAb(c: Context<{ Bindings: Env }>, body: DriverBody): Response {
+  const { readable, writable } = new TransformStream();
+  const writer = writable.getWriter();
+  const encoder = new TextEncoder();
+  const send = (payload: unknown) => writer.write(encoder.encode(JSON.stringify(payload) + "\n"));
+  const startedAt = Date.now();
+  const heartbeat = setInterval(() => {
+    void send({ event: "tick", elapsedMs: Date.now() - startedAt }).catch(() => {});
+  }, 15_000);
+  void (async () => {
+    try {
+      await send({ event: "started", at: new Date().toISOString() });
+      const result = await runDomFirstAbRun(c.env, body);
+      await send({ event: "done", elapsedMs: Date.now() - startedAt, result });
+    } catch (error) {
+      await send({ event: "error", elapsedMs: Date.now() - startedAt, message: (error as Error).message.slice(0, 500), name: (error as Error).name }).catch(() => {});
+    } finally {
+      clearInterval(heartbeat);
+      await writer.close().catch(() => {});
+    }
+  })();
+  return new Response(readable, { headers: { "content-type": "application/x-ndjson", "cache-control": "no-store" } });
 }
 
 // QUALIFICATION: the six file-sized realization calls of the canonical

@@ -169,7 +169,9 @@ export function createSimpleScripts(options: SimpleScriptsOptions = {}): SimpleP
     // file as RAW source — never JSON. The routed Builder model is full
     // GLM-5.3 (stage routing provenance).
     const respondRaw = (content: string) => ({ content, provider: "simple-script", model: "@cf/zai-org/glm-5.3" });
-    if (user.includes("call 1 of 6")) {
+    // DOM-first order (v8 GO): the four page calls are 1-4, the stylesheet is
+    // call 5, site.js stays call 6.
+    if (user.includes("call 5 of 6")) {
       return respondRaw(SIMPLE_CSS);
     }
     if (user.includes("call 6 of 6")) {

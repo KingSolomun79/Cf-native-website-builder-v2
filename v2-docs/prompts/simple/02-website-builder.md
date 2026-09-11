@@ -21,6 +21,6 @@ This is a flagship-quality marketing site, not a template. Honor the blueprint's
 
 ## Output
 
-This stage runs as SIX calls inside ONE Builder job: (1) the complete shared `site.css`; (2)–(5) the four complete HTML documents (`home`, `about`, `services`, `contact`), each on the frozen stylesheet; (6) the shared `site.js`, written against the frozen stylesheet and pages.
+This stage runs as SIX calls inside ONE Builder job, DOM-FIRST: (1)–(4) the four complete HTML documents (`home`, `about`, `services`, `contact`) — home defines the semantic DOM, the shared chrome and the structural class vocabulary, and the inner pages reproduce the frozen chrome and reuse that class vocabulary; (5) the complete shared `site.css`, written AGAINST the four final documents (style the markup that exists — never an imagined markup); (6) the shared `site.js`, written against the frozen stylesheet and pages.
 
 Each call returns exactly ONE file as RAW source — no Markdown fences, no explanation, no JSON, no prose before or after, no TODO, no "rest unchanged", no summaries or descriptions of the file. Return the complete file contents or nothing.
