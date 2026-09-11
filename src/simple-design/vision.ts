@@ -46,7 +46,7 @@ export function createSimpleVisionGenerate(
   env: Env,
   images: SimpleVisionImage[],
   meta: SimpleVisionMeta,
-  options?: { maxTokens?: number; jsonSchema?: SimpleVisionJsonSchema }
+  options?: { maxTokens?: number; jsonSchema?: SimpleVisionJsonSchema; temperature?: number }
 ): RawAiGenerate {
   const model = resolveCodingMultimodalModel(env);
   return async (systemPrompt, userPrompt, attempt) => {
@@ -59,6 +59,9 @@ export function createSimpleVisionGenerate(
       messages: [{ role: "user", content }],
       // The caller's budget stands (blueprint stage: 12288; visual QA: 4096).
       maxTokens: options?.maxTokens ?? 16_384,
+      // Structured stages may pin sampling below the provider default (0.7);
+      // the strict no-additional-properties blueprint schema needs it.
+      ...(options?.temperature !== undefined ? { temperature: options.temperature } : {}),
       stream: true,
       ...(options?.jsonSchema ? { jsonSchema: options.jsonSchema } : { jsonMode: true }),
       label: `${meta.stage}#${attempt}`,

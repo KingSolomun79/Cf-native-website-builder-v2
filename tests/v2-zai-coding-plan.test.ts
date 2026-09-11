@@ -68,6 +68,33 @@ describe("Coding Plan request shape (GO §1/§5)", () => {
     expect(body.thinking).toEqual({ type: "disabled" });
   });
 
+  it("§1b temperature defaults to 0.7 and an explicit override rides the request body", async () => {
+    const seen: Array<Record<string, unknown>> = [];
+    const stub = (init: RequestInit) => {
+      seen.push(JSON.parse(init.body as string) as Record<string, unknown>);
+      return jsonBodyResponse({ model: "glm-5.3", choices: [{ message: { content: "ok" }, finish_reason: "stop" }], usage: { completion_tokens: 1 } });
+    };
+    await generateZaiCodingPlan(ENV, {
+      model: "glm-5.3",
+      messages: [{ role: "user", content: "u" }],
+      maxTokens: 64,
+      stream: false,
+      label: "temp-default",
+      fetchImpl: async (_url, init) => stub(init as RequestInit),
+    });
+    await generateZaiCodingPlan(ENV, {
+      model: "glm-5.3",
+      messages: [{ role: "user", content: "u" }],
+      maxTokens: 64,
+      temperature: 0.3,
+      stream: false,
+      label: "temp-override",
+      fetchImpl: async (_url, init) => stub(init as RequestInit),
+    });
+    expect(seen[0].temperature).toBe(0.7);
+    expect(seen[1].temperature).toBe(0.3);
+  });
+
   it("§2 the legacy sandbox credential name (ZHIPU_API_KEY) is accepted; the base URL is configurable for a future proxy", async () => {
     const seen: string[] = [];
     await generateZaiCodingPlan({ ZHIPU_API_KEY: "legacy-key", ZAI_CODING_BASE_URL: "https://proxy.morabeza.example/coding" } as Env, {

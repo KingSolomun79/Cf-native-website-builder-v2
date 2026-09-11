@@ -153,7 +153,7 @@ export async function runSimpleDesignBlueprintStage(
   // shape travels in the boundary's prose output contract — the Coding Plan
   // endpoint does NOT enforce native response_format json_schema (live
   // end-to-end evidence 2026-09-11: schemaignored, v1-shaped output).
-  input.generate ?? createSimpleVisionGenerate(env, images, { buildId: input.buildId, stage: "simple-design-blueprint", buildVersionNumber: input.buildVersionNumber }, { maxTokens: 12288 });
+  input.generate ?? createSimpleVisionGenerate(env, images, { buildId: input.buildId, stage: "simple-design-blueprint", buildVersionNumber: input.buildVersionNumber }, { maxTokens: 12288, temperature: 0.3 });
 
   let run;
   try {
