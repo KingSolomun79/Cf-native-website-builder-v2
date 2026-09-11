@@ -116,12 +116,28 @@ export class AiStageFileInvalidError extends Error {
 
 // ── Parsing ─────────────────────────────────────────────────────────────────
 
-export function parseModelJson(raw: string): { ok: true; value: unknown } | { ok: false; error: string } {  let text = raw.trim();
+export function parseModelJson(raw: string): { ok: true; value: unknown } | { ok: false; error: string } {
+  let text = raw.trim();
   const fence = text.match(/```(?:json)?\s*([\s\S]*?)```/);
   if (fence) text = fence[1].trim();
   try {
     return { ok: true, value: JSON.parse(text) };
-  } catch {
+  } catch (error) {
+    // GLM framing (live Coding Plan evidence 2026-09-11): a COMPLETE JSON
+    // value followed by trailing non-whitespace content. The parser's own
+    // error names the exact position where the value ended — that boundary
+    // is deterministic, so the leading value is extracted and parsed.
+    const position = /position (\d+)/.exec((error as Error).message);
+    if (position) {
+      const start = text.indexOf("{");
+      if (start !== -1 && Number(position[1]) > start) {
+        try {
+          return { ok: true, value: JSON.parse(text.slice(start, Number(position[1]))) };
+        } catch {
+          // fall through to the brace-span extraction
+        }
+      }
+    }
     // fall through to prose/markdown extraction
   }
   // Models frequently wrap the JSON object in headings or prose (a markdown
