@@ -11,18 +11,18 @@ import { runSchemaValidatedAiStage, type AiProvenance, type RawAiGenerate } from
 import {
   SIMPLE_VISUAL_QA_SCHEMA_VERSION,
   VisualQaReportSchema,
-  type DesignBlueprint,
+  type DesignBlueprintV2,
   type VisualQaReport,
 } from "./contracts";
 import { bytesToBase64, createSimpleVisionGenerate, mimeForKey } from "./vision";
-import type { SimpleBuilderVisualInput } from "./website-builder";
+import type { SimpleBuilderVisualInput } from "./contracts";
 
 export interface RunSimpleVisualQaInput {
   siteGenerationId: string;
   buildId: string;
   buildVersionId: string;
   buildVersionNumber: number;
-  blueprint: DesignBlueprint;
+  blueprint: DesignBlueprintV2;
   referenceVisualInputs: SimpleBuilderVisualInput[];
   candidateDesktopR2Key: string;
   candidateMobileR2Key?: string;

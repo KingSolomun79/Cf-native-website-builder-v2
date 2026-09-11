@@ -10,7 +10,7 @@ import {
 } from "../src/domain/assembly";
 import { runTechnicalPreflight } from "../src/domain/technical-preflight";
 import { getObject, putObject } from "../src/lib/assets";
-import type { ImageSlot } from "../src/domain/site-generator";
+import type { ImageSlot } from "../src/domain/site-contracts";
 
 // Primary-seam tests for assembly, Technical Preflight and Preview
 // deployment (issue #12).
@@ -131,7 +131,7 @@ describe("Technical Preflight", () => {
     };
     const verdict = runTechnicalPreflight(
       { pages: broken, sharedCss: SHARED_CSS, sharedJs: "function ({" },
-      { formServiceEndpoint: FORM_ENDPOINT, expectedSiteFormId: "site:test-site", criticalSlotIds: ["home-hero"] }
+      { formServiceEndpoint: FORM_ENDPOINT, expectedSiteFormId: "site:test-site", criticalSlots: [{ slotId: "home-hero", page: "home" }] }
     );
     expect(verdict.passed).toBe(false);
     const ids = verdict.blockers.map((blocker) => blocker.id);
@@ -145,7 +145,7 @@ describe("Technical Preflight", () => {
   it("passes a complete well-formed candidate", () => {
     const verdict = runTechnicalPreflight(
       { pages: goodPages({ heroSrc: "assets/images/home-hero.webp", aboutSrc: "assets/images/about-main.webp" }), sharedCss: SHARED_CSS, sharedJs: SHARED_JS },
-      { formServiceEndpoint: FORM_ENDPOINT, expectedSiteFormId: "site:test-site", criticalSlotIds: ["home-hero"] }
+      { formServiceEndpoint: FORM_ENDPOINT, expectedSiteFormId: "site:test-site", criticalSlots: [{ slotId: "home-hero", page: "home" }] }
     );
     expect(verdict.passed).toBe(true);
     expect(verdict.blockers).toEqual([]);
@@ -153,6 +153,19 @@ describe("Technical Preflight", () => {
 });
 
 describe("assembly and preview deployment", () => {
+  it("resolves performance-hint preload references (href=\"IMG:…\") through the same plan map (live A/B evidence 2026-09-11)", async () => {
+    const context = await newBuildContext();
+    const accepted = await seedAcceptedImages();
+    const pages = goodPages();
+    pages.home = pages.home.replace(
+      "<head>",
+      '<head><link rel="preload" as="image" href="IMG:home-hero" fetchpriority="high">'
+    );
+    const candidate = await assembleBuildVersionCandidate(env, assemblyInput(context, { acceptedImages: accepted, pages }));
+    expect(candidate.pages.home).toContain('href="assets/images/home-hero.webp"');
+    expect(candidate.pages.home).not.toContain("IMG:");
+  });
+
   it("assembles the immutable candidate with resolved images and deploys the exact Build Version as Preview", async () => {
     const context = await newBuildContext();
     const accepted = await seedAcceptedImages();

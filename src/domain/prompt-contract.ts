@@ -25,107 +25,35 @@ export interface PromptManifestEntry {
 }
 
 export type PromptStageKey =
-  | "reference-analyzer"
-  | "visual-blueprint-generator"
-  | "original-design-blueprint-generator"
-  | "website-generator"
-  | "kie-image-prompt-generator"
-  | "qa-a-visual-content"
-  | "qa-b-browser-technical"
-  | "fix-coordinator"
-  | "qa-a-confirmation"
-  | "qa-b-confirmation"
-  | "release-blocker-fix"
-  | "realization-repair"
-  // Experiment branch only (experiment/simplified-design-pipeline): the
-  // SIMPLE design pipeline's four stages. Never invoked by the legacy chain.
   | "simple-design-blueprint"
   | "simple-website-builder"
   | "simple-visual-qa"
   | "simple-site-repair";
 
 export const PROMPT_MANIFEST: Record<PromptStageKey, PromptManifestEntry> = {
-  "reference-analyzer": {
-    promptId: "reference-analyzer",
-    promptVersion: "v3",
-    bodyFile: "01-reference-analyzer-v2.md",
-  },
-  "visual-blueprint-generator": {
-    promptId: "visual-blueprint-generator",
-    // v5 (issue #59): trait obligation ledger + fidelityPriorities string format.
-    promptVersion: "v5",
-    bodyFile: "02-visual-blueprint-generator-v2.md",
-  },
-  "original-design-blueprint-generator": {
-    promptId: "original-design-blueprint-generator",
-    promptVersion: "v3",
-    bodyFile: "03-original-design-blueprint-generator-v2.md",
-  },
-  "website-generator": {
-    promptId: "website-generator",
-    promptVersion: "v4",
-    bodyFile: "04-website-generator-v3.md",
-  },
-  "kie-image-prompt-generator": {
-    promptId: "kie-image-prompt-generator",
-    promptVersion: "v2",
-    bodyFile: "05-kie-image-prompt-generator-v1.md",
-  },
-  "qa-a-visual-content": {
-    promptId: "qa-a-visual-content",
-    promptVersion: "v4",
-    bodyFile: "06-qa-a-visual-content-v2.md",
-  },
-  "qa-b-browser-technical": {
-    promptId: "qa-b-browser-technical",
-    promptVersion: "v3",
-    bodyFile: "07-qa-b-browser-technical-v2.md",
-  },
-  "fix-coordinator": {
-    promptId: "fix-coordinator",
-    promptVersion: "v3",
-    bodyFile: "08-fix-coordinator-v2.md",
-  },
-  "qa-a-confirmation": {
-    promptId: "qa-a-confirmation",
-    promptVersion: "v3",
-    bodyFile: "09-qa-a-confirmation-v2.md",
-  },
-  "qa-b-confirmation": {
-    promptId: "qa-b-confirmation",
-    promptVersion: "v3",
-    bodyFile: "10-qa-b-confirmation-v2.md",
-  },
-  "release-blocker-fix": {
-    promptId: "release-blocker-fix",
-    promptVersion: "v2",
-    bodyFile: "11-release-blocker-fix-v1.md",
-  },
-  // Issue #67: the informed realization repair is a content-preserving patch
-  // stage, not full-page regeneration — its contract lives in the stage body.
-  "realization-repair": {
-    promptId: "realization-repair",
-    promptVersion: "v1",
-    bodyFile: "12-realization-repair-v1.md",
-  },
-  // ── SIMPLE design pipeline (experiment branch only) ─────────────────────
-  // v3 (schema-convergence brief §13): native json_schema owns structural
-  // compliance, so the body drops its JSON-tutorial clauses and keeps design
-  // intent (typed color roles, composition-vs-generation ratio, narrow
-  // display measures as legitimate).
-  // v4 (operator GO, 2026-09-09): FOUR-PAGE HERO MEDIA — every routed page
-  // opens with a photographic hero linked to a dedicated hero image slot
-  // (mediaSlotId); unique page heroes by default; screen-free hero rules.
+  // v5 (operator GO, 2026-09-10): the design-blueprint/2 contract — required
+  // per-page hero spec + required page-hero image briefs; hero slot ids, page
+  // ownership and priorities are deterministic, never model bookkeeping.
   "simple-design-blueprint": {
     promptId: "simple-design-blueprint",
-    promptVersion: "v4",
+    promptVersion: "v5",
     bodyFile: "simple/01-design-blueprint.md",
   },
-  // v2 (operator GO, 2026-09-09): hero-media hard requirement on every routed
-  // page + traceable Accepted Image identity + mobile hero mass floor.
+  // v8 (operator GO 2026-09-11, DOM-FIRST/CSS-LAST VISUAL FIDELITY): the SIX
+  // calls reorder to home → about → services → contact → site.css → site.js.
+  // Home defines the semantic DOM, the shared chrome and the structural class
+  // vocabulary; the inner pages are realized on the frozen chrome +
+  // vocabulary; the CSS call STYLES THE ACTUAL FINAL MARKUP of all four
+  // completed documents (the CSS-first order made the stylesheet predict
+  // markup that did not exist yet — the tested root cause of the 82-score
+  // realization failures); site.js stays last. Per-file raw output, no
+  // response_format, one tolerated Markdown fence, full GLM-5.3, no
+  // Reference screenshots attached — all unchanged. The Blueprint remains the
+  // complete, implementation-ready design authority; NO new geometry
+  // ontology, region graph, trait ledger or second design-analysis call.
   "simple-website-builder": {
     promptId: "simple-website-builder",
-    promptVersion: "v2",
+    promptVersion: "v8",
     bodyFile: "simple/02-website-builder.md",
   },
   // v2 (operator GO, 2026-09-09): visual QA verifies photographic hero
@@ -141,6 +69,7 @@ export const PROMPT_MANIFEST: Record<PromptStageKey, PromptManifestEntry> = {
     bodyFile: "simple/04-site-repair.md",
   },
 };
+
 
 export class PromptContractError extends Error {
   constructor(message: string) {

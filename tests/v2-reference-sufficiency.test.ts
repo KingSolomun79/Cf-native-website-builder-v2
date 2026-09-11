@@ -4,7 +4,7 @@ import type { Env } from "../src/env.d";
 import { startSiteGeneration, createInitialBuild } from "../src/domain/lifecycle";
 import { runReferenceIntake, getFrozenReferenceEvidence, type ReferenceCaptureFn, type ReferenceCaptureOutput } from "../src/domain/reference-intake";
 import { runBuildPipeline } from "../src/domain/build-pipeline";
-import { createPipelineScripts } from "./helpers/pipeline-scripts";
+import { createSimpleScripts } from "./helpers/simple-scripts";
 import { buildPng } from "./helpers/png";
 import {
   evaluateReferenceEvidenceSufficiency,
@@ -194,7 +194,7 @@ describe("evidence sufficiency at intake and in the pipeline", () => {
       siteGenerationId: context.siteGenerationId,
       buildId: context.buildId,
       deps: {
-        ...createPipelineScripts(),
+        ...createSimpleScripts(),
         generate: async () => {
           generateCalled = true;
           throw new Error("no AI stage may run on insufficient evidence");
@@ -204,10 +204,9 @@ describe("evidence sufficiency at intake and in the pipeline", () => {
     expect(generateCalled).toBe(false);
     expect(outcome.terminal).toBe("HUMAN_REVIEW_REQUIRED");
     expect(outcome.reasons.join(" ")).toContain("INSUFFICIENT_REFERENCE_EVIDENCE");
-    expect(outcome.reasons.join(" ")).toContain("EVIDENCE_EXTRACTION");
 
     const event = await env.DB.prepare(
-      "SELECT stage, to_state, detail FROM build_workflow_events WHERE build_id = ? AND stage = 'reference_evidence_sufficiency'"
+      "SELECT stage, to_state, detail FROM build_workflow_events WHERE build_id = ? AND stage = 'simple_reference_capture'"
     )
       .bind(context.buildId)
       .first<{ stage: string; to_state: string; detail: string }>();

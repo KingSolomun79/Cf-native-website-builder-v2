@@ -34,15 +34,18 @@ import {
   RepairedFilesSchema,
   type RepairedFile,
 } from "../src/simple-design/site-repair";
-import { validateDesignBlueprint, type SiteBundle } from "../src/simple-design/contracts";
-import { FINCH_KNOWN_GOOD_BLUEPRINT } from "./_generated-simple-finch";
+import { validateDesignBlueprintV2, type SiteBundle } from "../src/simple-design/contracts";
+import { FINCH_V2_KNOWN_GOOD_BLUEPRINT } from "./_generated-simple-finch-v2";
 
 // ── shared fixtures (same shapes as v2-simple-bundle-qa.test.ts) ────────────
 
-const blueprint = validateDesignBlueprint(FINCH_KNOWN_GOOD_BLUEPRINT);
-if (!blueprint.valid) throw new Error("Finch fixture must validate");
+const blueprint = validateDesignBlueprintV2(FINCH_V2_KNOWN_GOOD_BLUEPRINT);
+if (!blueprint.valid) throw new Error("Finch v2 fixture must validate");
 const bp = blueprint.value;
-const SLOT_IDS = new Set(bp.imagery.imageSlots.map((slot) => slot.id));
+const SLOT_IDS = new Set([
+  ...(["home", "about", "services", "contact"] as const).map((page) => `${page}-hero`),
+  ...bp.imagery.supportingImageSlots.map((slot) => slot.id),
+]);
 
 const endpoint = "https://test.example.com/api/v2/forms/submit";
 const siteFormId = "site:abc123";
@@ -218,6 +221,12 @@ describe("preview readiness before screenshot capture", () => {
 describe("progressive-enhancement reveal rules", () => {
   it("content hidden behind IntersectionObserver reveals is a blocker (visible without JS)", () => {
     const bundle = goodBundle();
+    // The historical defect SHIPS the hidden class in the markup: without JS
+    // the section is blank.
+    bundle.pages.home = page(
+      "Home",
+      `<link rel="stylesheet" href="site.css"><section class="hero reveal"><img src="IMG:${[...SLOT_IDS][0]}" data-image-id="${[...SLOT_IDS][0]}" alt="hero image"></section>`
+    );
     bundle.sharedCss = `${CLEAN_CSS}\n.reveal { opacity: 0; transition: opacity .6s; }\n.reveal.visible { opacity: 1; }`;
     bundle.sharedJs = "new IntersectionObserver(function(){}).observe(document.body);";
     const qa = runDeterministicBundleQa(qaInput(bundle));
@@ -252,6 +261,29 @@ describe("progressive-enhancement reveal rules", () => {
     const offenders = findHiddenByDefaultRevealRules(css);
     expect(offenders).toHaveLength(1);
     expect(offenders[0]).toContain(".reveal-mobile");
+  });
+
+  it("JS-applied reveal classes (absent from markup) and html.js-scoped rules are NOT violations (live §28 evidence 2026-09-11)", () => {
+    // Contract-endorsed enhancement: site.js ADDS .reveal-prep at runtime —
+    // without JS nothing matches, so nothing is ever hidden.
+    const jsApplied = findHiddenByDefaultRevealRules(
+      `.reveal-prep { opacity: 0; transform: translateY(24px); }`,
+      { home: `<section class="hero">x</section>` }
+    );
+    expect(jsApplied).toEqual([]);
+    // The JS-gated idiom: the hidden state requires html.js (set by JS).
+    const jsScoped = findHiddenByDefaultRevealRules(
+      `html.js .reveal-prep { opacity: 0; transform: translateY(24px); }`,
+      { home: `<section class="hero reveal-prep">x</section>` }
+    );
+    expect(jsScoped).toEqual([]);
+    // ...but a hidden class that SHIPS in the markup is still a blocker.
+    const shipped = findHiddenByDefaultRevealRules(
+      `.reveal-prep { opacity: 0; }`,
+      { home: `<section class="hero reveal-prep">x</section>` }
+    );
+    expect(shipped).toHaveLength(1);
+    expect(shipped[0]).toContain(".reveal-prep");
   });
 
   it("a clean visible-by-default bundle passes with no new findings", () => {

@@ -214,11 +214,11 @@ describe("artifact pruning and compact Build Records", () => {
     // Give the version provenance + cost + a repair root cause (the QA
     // report artifact is stored by assignReleaseReady itself).
     const { runSchemaValidatedAiStage } = await import("../src/domain/ai-boundary");
-    const { ReferenceAnalysisSchema } = await import("../src/domain/reference-analysis");
+    const { DesignBlueprintSchema, DESIGN_BLUEPRINT_SCHEMA_VERSION } = await import("../src/simple-design/contracts");
     await runSchemaValidatedAiStage(env, {
-      stage: "reference-analyzer",
-      schema: ReferenceAnalysisSchema,
-      schemaVersion: "reference-analysis/1",
+      stage: "simple-design-blueprint",
+      schema: DesignBlueprintSchema,
+      schemaVersion: DESIGN_BLUEPRINT_SCHEMA_VERSION,
       userPrompt: "x",
       buildId: context.buildId,
       siteGenerationId: context.siteGenerationId,
@@ -261,7 +261,7 @@ describe("artifact pruning and compact Build Records", () => {
     expect(record!.versions[0].qa).toEqual({ visual: 94, content: 93, technical: 95 });
     expect(record!.rootCauses[0].rootCause).toContain("mobile stacking");
     expect(record!.imageSpendUsd).toBeCloseTo(0.4, 4);
-    expect(record!.provenance.some((entry) => entry.stage === "reference-analyzer" && entry.model === "m")).toBe(true);
+    expect(record!.provenance.some((entry) => entry.stage === "simple-design-blueprint" && entry.model === "m")).toBe(true);
   });
 
   it("benchmark sites keep evidence on the longer retention policy", async () => {

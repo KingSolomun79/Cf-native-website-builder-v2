@@ -7,6 +7,8 @@
 // contract failures, duplicate critical IDs, obvious assembly failures.
 // Only a preflight-passing candidate enters full QA.
 
+import { validateCriticalImageCoverage } from "../simple-design/critical-image-coverage";
+
 export interface PreflightCheck {
   id: string;
   severity: "blocker" | "warning";
@@ -23,7 +25,10 @@ export interface PreflightCandidate {
 export interface PreflightContext {
   formServiceEndpoint: string;
   expectedSiteFormId: string;
-  criticalSlotIds: string[];
+  /** CRITICAL image slots of the materialized plan with their page
+   *  ownership — the SAME shared coverage invariant the Website Builder
+   *  validated before persisting; the preflight is the final defense. */
+  criticalSlots: Array<{ slotId: string; page: string; section?: string }>;
 }
 
 const TEMP_PROVIDER_URL_PATTERNS = [
@@ -104,16 +109,18 @@ export function runTechnicalPreflight(
     }
   }
 
-  // CRITICAL slots must have shipped.
-  const shipped = new Set(
-    Array.from(
-      Object.values(candidate.pages)
-        .join("\n")
-        .matchAll(/src="assets\/images\/([a-zA-Z0-9_-]+)\.webp"/g)
-    ).map((match) => match[1])
+  // CRITICAL slots must have shipped — on their declared page (shared
+  // invariant; MISSING_CRITICAL_IMAGE / WRONG_PAGE_CRITICAL_IMAGE), checked
+  // against the resolved bundled asset paths of the assembled candidate.
+  // One check per CRITICAL slot, exactly as before.
+  const coverage = validateCriticalImageCoverage(
+    candidate.pages,
+    context.criticalSlots.map((slot) => ({ ...slot, priority: "CRITICAL" })),
+    "bundled"
   );
-  for (const slotId of context.criticalSlotIds) {
-    checks.push(check("MISSING_CRITICAL_IMAGE", shipped.has(slotId), `CRITICAL slot '${slotId}' has no shipped Accepted Image`));
+  for (const slot of context.criticalSlots) {
+    const finding = coverage.find((entry) => entry.slotId === slot.slotId);
+    checks.push(finding ? check(finding.id, false, finding.detail) : check("MISSING_CRITICAL_IMAGE", true));
   }
 
   const contact = candidate.pages.contact ?? "";

@@ -1,6 +1,6 @@
-// SIMPLE design pipeline orchestration (experiment/simplified-design-pipeline).
+// The V2 design pipeline (canonical since the 2026-09 legacy cleanup): the
+// SIMPLE chain is the ONLY design path.
 //
-// Replaces the legacy design chain for DESIGN_PIPELINE_VERSION=simple_blueprint_v1:
 //
 //   reference capture (REUSED legacy intake)
 //   -> DESIGN BLUEPRINT      (ONE multimodal schema-validated call + deterministic gate)
@@ -34,32 +34,25 @@ import { VisionGatewayError } from "../lib/ai-gateway";
 import type { RawAiGenerate } from "../domain/ai-boundary";
 import type { BusinessFacts } from "../domain/lifecycle-schema";
 import {
-  blueprintSlotsToImageSlots,
-  blueprintSlotsToPromptRecords,
-  type DesignBlueprint,
+  materializeAcceptedImageDescriptors,
+  materializeBlueprintImageSlots,
+  materializeBlueprintPromptRecords,
+  type DesignBlueprintV2,
   type QaPackage,
   type SiteBundle,
 } from "./contracts";
 import { runSimpleDesignBlueprintStage, SimpleDesignBlueprintError } from "./design-blueprint";
-import { runSimpleWebsiteBuilderStage, type SimpleBuilderVisualInput } from "./website-builder";
+import { runSimpleWebsiteBuilderStage, SimpleWebsiteBuilderError } from "./website-builder";
+import type { SimpleBuilderVisualInput } from "./contracts";
 import { runSimpleVisualQaStage } from "./visual-qa";
 import { runSimpleSiteRepairStage } from "./site-repair";
 import { runDeterministicBundleQa } from "./bundle-qa";
 import { buildSimpleQaPackage, finalizeSimpleRelease, simpleReleaseVerdict, storeSimpleQaPackage } from "./qa-package";
 
-// ── Experiment selector (spec section 4) ────────────────────────────────────
-
-export type DesignPipelineVersion = "legacy_v2" | "simple_blueprint_v1";
-export const DESIGN_PIPELINE_VERSIONS: readonly DesignPipelineVersion[] = ["legacy_v2", "simple_blueprint_v1"];
-// Experiment-branch default: SIMPLE. Flip the wrangler var to "legacy_v2"
-// for A/B comparison runs. Never exposed in onboarding; the business-facing
-// Build Mode remains REFERENCE_BOUND only.
-export const DEFAULT_DESIGN_PIPELINE_VERSION: DesignPipelineVersion = "simple_blueprint_v1";
-
-export function resolveDesignPipelineVersion(env: Partial<Pick<Env, "DESIGN_PIPELINE_VERSION">> | undefined): DesignPipelineVersion {
-  const value = env?.DESIGN_PIPELINE_VERSION as DesignPipelineVersion | undefined;
-  return value && DESIGN_PIPELINE_VERSIONS.includes(value) ? value : DEFAULT_DESIGN_PIPELINE_VERSION;
-}
+// Pipeline provenance identifier. The legacy_v2 executable path was removed
+// (cleanup 2026-09-10): this constant is retained only as the artifact/
+// provenance version string. There is no runtime selector and no env var.
+export const DESIGN_PIPELINE_VERSION = "simple_blueprint_v1";
 
 // ── Seams / inputs / outcome ────────────────────────────────────────────────
 
@@ -88,7 +81,7 @@ export interface SimplePipelineOutcome {
   artifactManifestHash: string | null;
   previewUrl: string | null;
   repairApplied: boolean;
-  builderStrategy: "ONE_CALL" | "TWO_CALL_SINGLE_STAGE" | null;
+  builderStrategy: "SIX_CALL_FILE_REALIZATION" | null;
   designBlueprintR2Key: string | null;
 }
 
@@ -230,11 +223,12 @@ export async function runSimpleBuildPipeline(
 
     // ── DESIGN BLUEPRINT (the ONE design-authority artifact) ───────────────
     const blueprintResult = await stepDo("simple: design blueprint", (): Promise<
-      | { kind: "ok"; blueprint: DesignBlueprint; artifactR2Key: string }
+      | { kind: "ok"; blueprint: DesignBlueprintV2; artifactR2Key: string; schemaVersion: string }
       | { kind: "review"; reason: string }
       | { kind: "failed"; reason: string }
     > => {
-      // Artifact reuse lives inside the stage (frozen blueprint IS the result).
+      // Artifact reuse lives inside the stage (frozen blueprint IS the result;
+      // v1 artifacts resume through the stage's read-only compat path).
       return (async () => {
         try {
           const produced = await runSimpleDesignBlueprintStage(env, {
@@ -253,7 +247,7 @@ export async function runSimpleBuildPipeline(
             ...(deps.visionGenerate ? { generate: deps.visionGenerate } : {}),
             ...(deps.generate ? { generate: deps.generate } : {}),
           });
-          return { kind: "ok" as const, blueprint: produced.blueprint, artifactR2Key: produced.artifactR2Key };
+          return { kind: "ok" as const, blueprint: produced.blueprint, artifactR2Key: produced.artifactR2Key, schemaVersion: produced.schemaVersion };
         } catch (error) {
           if (error instanceof SimpleDesignBlueprintError) {
             // Spec section 30: one schema correction (already spent inside the
@@ -282,20 +276,25 @@ export async function runSimpleBuildPipeline(
     }
     const blueprint = blueprintResult.blueprint;
     const blueprintArtifactR2Key: string = blueprintResult.artifactR2Key;
+    const blueprintSchemaVersion: string = blueprintResult.schemaVersion;
+    // design-blueprint/2: hero slots, page ownership and priorities are
+    // deterministic domain construction — the materialized plan is the ONLY
+    // image representation downstream stages see.
+    const imagePlan = materializeBlueprintImageSlots(blueprint);
+    const acceptedImageDescriptors = materializeAcceptedImageDescriptors(blueprint);
     await appendBuildWorkflowEvent(env, {
       buildId,
       buildVersionId: version.buildVersionId,
       fromState: "REFERENCE_EVIDENCE",
       toState: "BLUEPRINT",
       stage: "simple_design_blueprint",
-      detail: `Design Blueprint produced (${blueprint.designDna.length} DNA rules, ${blueprint.imagery.imageSlots.length} image slots, ${blueprint.acceptanceChecklist.length} acceptance conditions)`,
+      detail: `Design Blueprint produced (${blueprintResult.schemaVersion}: ${blueprint.designDna.length} DNA rules, ${imagePlan.length} materialized image slots incl. 4 page heroes, ${blueprint.acceptanceChecklist.length} acceptance conditions)`,
     });
 
     // ── IMAGES (REUSED durable KIE machinery; blueprint is prompt authority)
     await stepDo(`simple: images (v${version.buildVersionNumber})`, async () => {
-      const slots = blueprintSlotsToImageSlots(blueprint);
       const accepted = await getAcceptedImageMap(env, version.buildVersionId);
-      const unresolved = slots.filter((slot) => !accepted.has(slot.id));
+      const unresolved = imagePlan.filter((slot) => !accepted.has(slot.id));
       if (unresolved.length > 0) {
         await runImageGenerationDurable(
           env,
@@ -309,7 +308,7 @@ export async function runSimpleBuildPipeline(
             // No expandToTarget: the blueprint decides how many images the
             // design needs (spec section 21 — never force 12).
             expandToTarget: false,
-            promptRecords: blueprintSlotsToPromptRecords(blueprint),
+            promptRecords: materializeBlueprintPromptRecords(blueprint),
             ...(deps.generate ? { generate: deps.generate } : {}),
           },
           { stepDo, ...(deps.sleep ? { sleep: deps.sleep } : {}) }
@@ -337,7 +336,7 @@ export async function runSimpleBuildPipeline(
             pages: bundle.pages,
             sharedCss: bundle.sharedCss,
             sharedJs: bundle.sharedJs,
-            imagePlanSlots: blueprintSlotsToImageSlots(blueprint),
+            imagePlanSlots: imagePlan,
             acceptedImages,
             formServiceEndpoint,
             expectedSiteFormId: siteFormId,
@@ -351,7 +350,7 @@ export async function runSimpleBuildPipeline(
             sharedCss: bundle.sharedCss,
             sharedJs: bundle.sharedJs,
             candidate: built,
-            imagePlanSlots: blueprintSlotsToImageSlots(blueprint),
+            imagePlanSlots: imagePlan,
             acceptedImages,
             formServiceEndpoint,
             expectedSiteFormId: siteFormId,
@@ -404,7 +403,7 @@ export async function runSimpleBuildPipeline(
           facts,
           formServiceEndpoint,
           siteFormId,
-          slotIds: new Set(blueprint.imagery.imageSlots.map((slot) => slot.id)),
+          slotIds: new Set(imagePlan.map((slot) => slot.id)),
           resolvedSlotIds: new Set(
             [...(await getAcceptedImageMap(env, ctx.buildVersionId)).keys()]
           ),
@@ -486,29 +485,46 @@ export async function runSimpleBuildPipeline(
       });
     };
 
-    const buildOutcome = await stepDo(`simple: website build (v${version.buildVersionNumber})`, async () => {
-      const built = await runSimpleWebsiteBuilderStage(env, {
-        siteGenerationId: input.siteGenerationId,
+    const buildOutcome = await stepDo(
+      `simple: website build (v${version.buildVersionNumber})`,
+      async (): Promise<{ kind: "ok"; strategy: SimplePipelineOutcome["builderStrategy"] } | { kind: "review"; reason: string }> => {
+        try {
+          const built = await runSimpleWebsiteBuilderStage(env, {
+            siteGenerationId: input.siteGenerationId,
+            buildId,
+            buildVersionId: version.buildVersionId,
+            buildVersionNumber: version.buildVersionNumber,
+            blueprint,
+            facts,
+            acceptedImages: acceptedImageDescriptors,
+            formServiceEndpoint,
+            siteFormId,
+            ...(deps.generate ? { generate: deps.generate } : {}),
+          });
+          return { kind: "ok" as const, strategy: built.strategy };
+        } catch (error) {
+          // The Builder's CRITICAL image coverage contract failed after the
+          // canonical SIX_CALL_FILE_REALIZATION build: fail closed IN-STEP
+          // (the #62 §7 terminal-result pattern) — no engine retry, no second
+          // Builder attempt, no bundle handed to downstream QA.
+          if (error instanceof SimpleWebsiteBuilderError && error.code === "CRITICAL_IMAGE_COVERAGE") {
+            return { kind: "review" as const, reason: `WEBSITE_BUILDER_CRITICAL_IMAGE_COVERAGE: ${error.message}` };
+          }
+          throw error;
+        }
+      }
+    );
+    if (buildOutcome.kind === "review") {
+      await appendBuildWorkflowEvent(env, {
         buildId,
         buildVersionId: version.buildVersionId,
-        buildVersionNumber: version.buildVersionNumber,
-        blueprint,
-        facts,
-        acceptedImages: blueprint.imagery.imageSlots.map((slot) => ({
-          slotId: slot.id,
-          altText: slot.altText,
-          aspectRatio: slot.generationAspectRatio,
-          page: slot.page,
-          ...(slot.section ? { section: slot.section } : {}),
-        })),
-        formServiceEndpoint,
-        siteFormId,
-        visualInputs,
-        ...(deps.visionGenerate ? { visionGenerate: deps.visionGenerate } : {}),
-        ...(deps.generate ? { generate: deps.generate } : {}),
+        fromState: "BLUEPRINT",
+        toState: "HUMAN_REVIEW_REQUIRED",
+        stage: "simple_website_build",
+        detail: buildOutcome.reason.slice(0, 400),
       });
-      return { strategy: built.strategy };
-    });
+      return terminal("HUMAN_REVIEW_REQUIRED", [buildOutcome.reason], { designBlueprintR2Key: blueprintArtifactR2Key });
+    }
     builderStrategy = buildOutcome.strategy;
     await appendBuildWorkflowEvent(env, {
       buildId,
@@ -587,7 +603,7 @@ export async function runSimpleBuildPipeline(
             buildVersionId: created.buildVersionId,
             siteGenerationId: input.siteGenerationId,
             kind: "design_blueprint",
-            schemaVersion: "design-blueprint/1",
+            schemaVersion: blueprintSchemaVersion,
             value: blueprint,
           });
           return null;
@@ -620,11 +636,7 @@ export async function runSimpleBuildPipeline(
           blueprint,
           facts,
           qaPackage: first.pkg,
-          acceptedImages: blueprint.imagery.imageSlots.map((slot) => ({
-            slotId: slot.id,
-            altText: slot.altText,
-            aspectRatio: slot.generationAspectRatio,
-          })),
+          acceptedImages: acceptedImageDescriptors,
           formServiceEndpoint,
           siteFormId,
           referenceVisualInputs: visualInputs,

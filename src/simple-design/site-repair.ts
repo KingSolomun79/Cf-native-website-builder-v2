@@ -19,14 +19,14 @@ import { Type } from "@sinclair/typebox";
 import type { BusinessFacts } from "../domain/lifecycle-schema";
 import {
   SITE_BUNDLE_SCHEMA_VERSION,
-  type DesignBlueprint,
+  type DesignBlueprintV2,
   type QaPackage,
   type SiteBundle,
 } from "./contracts";
 import { bytesToBase64, mimeForKey } from "./vision";
-import { generateSimpleStreamingCompletion } from "../lib/ai-streaming";
+import { generateZaiCodingPlan, resolveCodingModel } from "../lib/zai-coding-plan";
 import { SIMPLE_PAGE_FILES } from "./bundle-qa";
-import type { SimpleBuilderVisualInput } from "./website-builder";
+import type { SimpleBuilderVisualInput } from "./contracts";
 
 export class SimpleRepairBudgetExceededError extends Error {
   constructor() {
@@ -110,7 +110,7 @@ export interface RunSimpleSiteRepairInput {
   buildVersionId: string;
   buildVersionNumber: number;
   bundle: SiteBundle;
-  blueprint: DesignBlueprint;
+  blueprint: DesignBlueprintV2;
   facts: BusinessFacts;
   qaPackage: QaPackage;
   acceptedImages: Array<{ slotId: string; altText: string; aspectRatio: string }>;
@@ -129,29 +129,36 @@ export interface SimpleSiteRepairResult {
   changedPaths: RepairFilePath[];
 }
 
-// SIMPLE transport pin (final-iteration fix for the Phase 4 Finding B): the
-// repair ALWAYS runs on the configured SIMPLE streaming transport (Workers AI
-// glm-5.3-flash, stream: true, enable_thinking: false) — text-only when no
-// candidate renders exist, multimodal when they do. Whether visual inputs
-// exist is INDEPENDENT of provider selection: a preflight-rejected candidate
-// has no renders, and losing the streaming seam there used to drop the repair
-// to the legacy non-streaming gateway (OpenRouter), which truncated at ~38K
-// chars. No legacy gateway, no AI Gateway, no model-boundary fallback.
+// SIMPLE repair seam (operator GO 2026-09-11, ZAI CODING PLAN UNIFICATION
+// §26; live §28 evidence 2026-09-11): the repair runs on the ONE Coding Plan
+// provider with the coding model (glm-5.3) — stream: true, thinking disabled,
+// json_object mode. TEXT-ONLY, always: on the Coding Plan endpoint glm-5.3
+// rejects non-text content parts with 400 "messages.content.type is invalid,
+// allowed values: ['text']" (multimodal on this endpoint is glm-5.3-flash per
+// the §9 canary; the repair's model routing is glm-5.3 per GO §27). The
+// repair's visual context is carried by the QA package's textual findings and
+// the prompt's textual image manifest. No Workers AI, no AI Gateway, no
+// provider fallback.
 function simpleRepairGenerate(
   env: Env,
-  images: Array<{ base64: string; mimeType: string }>,
+  _images: Array<{ base64: string; mimeType: string }>,
   meta: { stage: string; buildId: string }
 ): RawAiGenerate {
+  const model = resolveCodingModel(env);
   return async (systemPrompt, userPrompt, attempt) => {
-    const result = await generateSimpleStreamingCompletion(env, {
-      system: systemPrompt,
-      user: userPrompt,
-      ...(images.length > 0 ? { images } : {}),
+    const messages = [
+      { role: "system" as const, content: systemPrompt },
+      { role: "user" as const, content: userPrompt },
+    ];
+    const result = await generateZaiCodingPlan(env, {
+      model,
+      messages,
       maxTokens: 32000,
+      stream: true,
       jsonMode: true,
       label: `${meta.stage}#${attempt}`,
     });
-    return { content: result.content, provider: result.provider, model: result.model };
+    return { content: result.content, provider: result.provider, model: result.model, finishReason: result.finishReason, reasoningControl: "thinking.type=disabled" };
   };
 }
 

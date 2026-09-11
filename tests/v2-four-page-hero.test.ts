@@ -17,7 +17,10 @@ import {
   blueprintSlotsToImageSlots,
   evaluateBlueprintQualityGate,
   validateDesignBlueprint,
+  heroSlotIdForPage,
+  materializeAcceptedImageDescriptors,
   type DesignBlueprint,
+  type DesignBlueprintV2,
   type SiteBundle,
 } from "../src/simple-design/contracts";
 import { runDeterministicBundleQa, findInnerPageHeroMediaFinding } from "../src/simple-design/bundle-qa";
@@ -25,7 +28,8 @@ import { runSimpleWebsiteBuilderStage } from "../src/simple-design/website-build
 import { planKieImageRequest, NANO_BANANA_MODEL_ID, SCREEN_FREE_PHOTO_REQUIREMENT } from "../src/lib/kie-v2";
 import { composeStagePrompt } from "../src/domain/prompt-contract";
 import { FINCH_KNOWN_GOOD_BLUEPRINT } from "./_generated-simple-finch";
-import { createSimpleScripts, simpleBlueprintFixture } from "./helpers/simple-scripts";
+import { FINCH_V2_KNOWN_GOOD_BLUEPRINT } from "./_generated-simple-finch-v2";
+import { createSimpleScripts, finchV1BlueprintFixture, simpleBlueprintFixture } from "./helpers/simple-scripts";
 import { startSiteGeneration, createInitialBuild } from "../src/domain/lifecycle";
 
 const env = providedEnv as unknown as Env;
@@ -59,13 +63,13 @@ function pageHtml(page: (typeof PAGES)[number], heroSlotId: string | null, varia
   return `<!DOCTYPE html><html lang="en"><head><title>${page}</title><meta name="description" content="${page}"></head><body><header><nav><a href="/">home</a><a href="/about">about</a><a href="/services">services</a><a href="/contact">contact</a></nav></header><main>${hero}<section class="body-copy"><h2>Body</h2><p>Some copy.</p></section></main><footer></footer></body></html>`;
 }
 
-function bundleWithHeroes(heroByPage: Partial<Record<(typeof PAGES)[number], { slotId: string | null; variant?: "img" | "data-id" | "css-only" }>>): { bundle: SiteBundle; blueprint: DesignBlueprint } {
-  const blueprint = clone();
+function bundleWithHeroes(heroByPage: Partial<Record<(typeof PAGES)[number], { slotId: string | null; variant?: "img" | "data-id" | "css-only" }>>): { bundle: SiteBundle; blueprint: DesignBlueprintV2 } {
+  const blueprint = JSON.parse(JSON.stringify(FINCH_V2_KNOWN_GOOD_BLUEPRINT)) as DesignBlueprintV2;
   const defaults: Record<(typeof PAGES)[number], string> = {
     home: "home-hero",
     about: "about-hero",
     services: "services-hero",
-    contact: "contact-atmosphere",
+    contact: "contact-hero",
   };
   // `slotId: null` (typography-only hero) must be distinguishable from an
   // absent override — hence explicit undefined checks, never ??.
@@ -87,8 +91,13 @@ function bundleWithHeroes(heroByPage: Partial<Record<(typeof PAGES)[number], { s
   return { bundle, blueprint };
 }
 
-function runQa(input: { bundle: SiteBundle; blueprint: DesignBlueprint }) {
-  const slotIds = new Set(input.blueprint.imagery.imageSlots.map((slot) => slot.id));
+function runQa(input: { bundle: SiteBundle; blueprint: DesignBlueprintV2 }) {
+  const slotIds = new Set(
+    [
+      ...PAGES.map((page) => heroSlotIdForPage(page)),
+      ...input.blueprint.imagery.supportingImageSlots.map((slot) => slot.id),
+    ]
+  );
   return runDeterministicBundleQa({
     bundle: input.bundle,
     blueprint: input.blueprint,
@@ -106,7 +115,7 @@ const heroFindingIds = (result: ReturnType<typeof runQa>) =>
 
 describe("Blueprint contract: hero media on all four pages", () => {
   it("the known-good fixture (with hero media) passes schema and the quality gate", () => {
-    const validated = validateDesignBlueprint(simpleBlueprintFixture());
+    const validated = validateDesignBlueprint(finchV1BlueprintFixture());
     expect(validated.valid).toBe(true);
     if (!validated.valid) return;
     const gate = evaluateBlueprintQualityGate(validated.value);
@@ -161,7 +170,7 @@ describe("Blueprint contract: hero media on all four pages", () => {
   });
 
   it("exposes the per-page hero slot id via blueprintHeroSlotId", () => {
-    const blueprint = simpleBlueprintFixture();
+    const blueprint = finchV1BlueprintFixture();
     expect(blueprintHeroSlotId(blueprint, "home")).toBe("home-hero");
     expect(blueprintHeroSlotId(blueprint, "about")).toBe("about-hero");
     expect(blueprintHeroSlotId(blueprint, "services")).toBe("services-hero");
@@ -174,7 +183,7 @@ describe("Blueprint contract: hero media on all four pages", () => {
 
 describe("Image plan: page-hero slots", () => {
   it("carries one dedicated hero slot per routed page", () => {
-    const slots = blueprintSlotsToImageSlots(simpleBlueprintFixture());
+    const slots = blueprintSlotsToImageSlots(finchV1BlueprintFixture());
     for (const page of PAGES) {
       const heroSlots = slots.filter((slot) => slot.page === page && /hero/i.test(slot.regionId ?? ""));
       expect(heroSlots.length, page).toBeGreaterThanOrEqual(1);
@@ -233,14 +242,24 @@ describe("Deterministic QA: INNER_PAGE_HERO_MEDIA_MISSING", () => {
     // ...but the same identity hidden in the footer (below the body sections) FAILS.
     const blueprint = clone();
     const html = `<!DOCTYPE html><html lang="en"><head><title>about</title><meta name="description" content="about"></head><body><header><nav><a href="/">home</a><a href="/about">about</a><a href="/services">services</a><a href="/contact">contact</a></nav></header><main><section class="hero about-hero"><h1>About headline</h1><p>No image here.</p></section><section class="body"><p>Copy.</p></section></main><footer><div data-image-id="about-hero"></div></footer></body></html>`;
-    const finding = findInnerPageHeroMediaFinding("about", html, blueprint);
+    const finding = findInnerPageHeroMediaFinding("about", html, "about-hero");
     expect(finding).toContain("outside the hero region");
   });
 
   it("an <img> hero inside a hero-marked element passes (data-image-id traceable)", () => {
-    const blueprint = clone();
     const html = `<!DOCTYPE html><html lang="en"><head><title>t</title></head><body><main><section class="hero about-hero"><img src="IMG:about-hero" data-image-id="about-hero" alt="x"></section></main></body></html>`;
-    expect(findInnerPageHeroMediaFinding("about", html, blueprint)).toBeNull();
+    expect(findInnerPageHeroMediaFinding("about", html, "about-hero")).toBeNull();
+  });
+
+  it("a <link rel=\"preload\"> performance hint does NOT position the hero reference (live A/B evidence 2026-09-11)", () => {
+    // The preload hint in <head> precedes the hero section; the actual media
+    // sits inside it. The hint is not placement — the page must PASS.
+    const html = `<!DOCTYPE html><html lang="en"><head><title>t</title><link rel="preload" as="image" href="IMG:about-hero" fetchpriority="high"></head><body><main><section class="hero about-hero"><img src="IMG:about-hero" data-image-id="about-hero" alt="x"></section></main></body></html>`;
+    expect(findInnerPageHeroMediaFinding("about", html, "about-hero")).toBeNull();
+    // ...while a page whose ONLY hero-slot reference is the hint still FAILS:
+    // a hint is not a photographic hero.
+    const hintOnly = `<!DOCTYPE html><html lang="en"><head><title>t</title><link rel="preload" as="image" href="IMG:about-hero"></head><body><main><section class="hero about-hero"><h1>About</h1></section></main></body></html>`;
+    expect(findInnerPageHeroMediaFinding("about", hintOnly, "about-hero")).toContain("is not referenced");
   });
 });
 
@@ -263,13 +282,7 @@ describe("Builder: hero invariant ships in every builder call", () => {
       buildVersionNumber: build.buildVersionNumber,
       blueprint,
       facts: FACTS as unknown as typeof FACTS & Record<string, never>,
-      acceptedImages: blueprint.imagery.imageSlots.map((slot) => ({
-        slotId: slot.id,
-        altText: slot.altText,
-        aspectRatio: slot.generationAspectRatio,
-        page: slot.page,
-        ...(slot.section ? { section: slot.section } : {}),
-      })),
+      acceptedImages: materializeAcceptedImageDescriptors(blueprint),
       formServiceEndpoint: "https://test.example.com/api/v2/forms/submit",
       siteFormId: "site:abc123",
       visualInputs: [],
@@ -278,7 +291,7 @@ describe("Builder: hero invariant ships in every builder call", () => {
     expect(result.bundle.pages.home).toContain('src="IMG:home-hero"');
     expect(result.bundle.pages.about).toContain('src="IMG:about-hero"');
     expect(result.bundle.pages.services).toContain('src="IMG:services-hero"');
-    expect(result.bundle.pages.contact).toContain('src="IMG:contact-atmosphere"');
+    expect(result.bundle.pages.contact).toContain('src="IMG:contact-hero"');
     for (const page of PAGES) {
       expect(result.bundle.pages[page]).toMatch(/class="[^"]*hero/);
     }
@@ -286,25 +299,24 @@ describe("Builder: hero invariant ships in every builder call", () => {
 });
 
 describe("Nano Banana screen-free adaptation covers every page hero", () => {
-  it("every hero slot's effective prompt carries the SCREEN-FREE clause and the nano profile", () => {
+  it("every materialized hero slot's effective prompt carries the SCREEN-FREE clause and the nano profile", () => {
     const blueprint = simpleBlueprintFixture();
     for (const page of PAGES) {
-      const heroSlotId = blueprintHeroSlotId(blueprint, page);
-      expect(heroSlotId, page).not.toBeNull();
-      const slot = blueprint.imagery.imageSlots.find((candidate) => candidate.id === heroSlotId)!;
+      const heroSlotId = heroSlotIdForPage(page);
+      const brief = blueprint.imagery.pageHeroes[page];
       const plan = planKieImageRequest(
         {
-          slotId: slot.id,
-          promptText: slot.kiePrompt,
+          slotId: heroSlotId,
+          promptText: brief.kiePrompt,
           aspectRatio: "16:9",
-          compositionAspectRatio: slot.compositionAspectRatio,
-          generationAspectRatio: slot.generationAspectRatio,
+          compositionAspectRatio: brief.compositionAspectRatio,
+          generationAspectRatio: brief.generationAspectRatio,
         },
         NANO_BANANA_MODEL_ID
       );
       expect(plan.profile, page).toBe("nano-banana-2-lite");
       expect(plan.prompt, page).toContain(SCREEN_FREE_PHOTO_REQUIREMENT);
-      expect(plan.providerAspectRatio, page).toBe(slot.generationAspectRatio);
+      expect(plan.providerAspectRatio, page).toBe(brief.generationAspectRatio);
     }
   });
 });
@@ -312,12 +324,13 @@ describe("Nano Banana screen-free adaptation covers every page hero", () => {
 describe("Mobile hero mass rule ships in the builder prompt", () => {
   it("the composed builder prompt contains the hero media rule and the mobile 35-50svh floor", async () => {
     const composed = composeStagePrompt("simple-website-builder");
-    expect(composed.promptVersion).toBe("v2");
+    expect(composed.promptVersion).toBe("v8");
     expect(composed.systemPrompt).toContain("FOUR-PAGE HERO MEDIA");
     expect(composed.systemPrompt).toContain("35–50svh");
     const blueprint = composeStagePrompt("simple-design-blueprint");
-    expect(blueprint.promptVersion).toBe("v4");
-    expect(blueprint.systemPrompt).toContain("mediaSlotId");
+    expect(blueprint.promptVersion).toBe("v5");
+    expect(blueprint.systemPrompt).toContain("pageHeroes");
+    expect(blueprint.systemPrompt).not.toContain("mediaSlotId");
     const visualQa = composeStagePrompt("simple-visual-qa");
     expect(visualQa.promptVersion).toBe("v2");
     expect(visualQa.systemPrompt).toContain("photographic hero treatment");

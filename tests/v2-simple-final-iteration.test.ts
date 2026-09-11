@@ -1,7 +1,7 @@
 // FINAL SIMPLE ITERATION (operator GO, 2026-09-09): regression proofs for the
 // five scoped changes before the final decision benchmark —
 //   #1  screen-free KIE scene adaptation at the request boundary (+ hashes)
-//   #2  SIMPLE repair transport pinned to Workers AI streaming (no legacy
+//   #2  SIMPLE repair transport pinned to the Z.AI Coding Plan (no legacy
 //       gateway fallback, even when a preflight-rejected candidate has no
 //       renders)
 //   #3  changed-files repair receives the full bundle + blueprint + exact
@@ -29,17 +29,18 @@ import {
   runSimpleSiteRepairStage,
 } from "../src/simple-design/site-repair";
 import { runSimpleWebsiteBuilderStage } from "../src/simple-design/website-builder";
-import { lintTrustContexts, factVocabulary } from "../src/domain/site-generator";
-import { validateDesignBlueprint, type QaPackage, type SiteBundle } from "../src/simple-design/contracts";
-import { FINCH_KNOWN_GOOD_BLUEPRINT } from "./_generated-simple-finch";
+import { lintTrustContexts, factVocabulary } from "../src/domain/fact-lint";
+import { validateDesignBlueprintV2,
+  materializeAcceptedImageDescriptors, type QaPackage, type SiteBundle } from "../src/simple-design/contracts";
+import { FINCH_V2_KNOWN_GOOD_BLUEPRINT } from "./_generated-simple-finch-v2";
 import { startSiteGeneration, createInitialBuild } from "../src/domain/lifecycle";
 
 const env = providedEnv as unknown as Env;
 
 // ── shared fixtures ──────────────────────────────────────────────────────────
 
-const blueprint = validateDesignBlueprint(FINCH_KNOWN_GOOD_BLUEPRINT);
-if (!blueprint.valid) throw new Error("Finch fixture must validate");
+const blueprint = validateDesignBlueprintV2(FINCH_V2_KNOWN_GOOD_BLUEPRINT);
+if (!blueprint.valid) throw new Error("Finch v2 fixture must validate");
 const bp = blueprint.value;
 
 const endpoint = "https://test.example.com/api/v2/forms/submit";
@@ -214,23 +215,41 @@ async function scaffoldBuild(): Promise<{ siteGenerationId: string; buildId: str
 }
 
 describe("SIMPLE repair transport pin (#2)", () => {
-  it("a preflight-rejected candidate (no renders) repairs on Workers AI streaming — legacy gateway calls 0, openrouter calls 0", async () => {
+  it("a preflight-rejected candidate (no renders) repairs on the Z.AI Coding Plan — glm-5.3, streaming, thinking disabled; no Workers AI binding, no legacy gateway", async () => {
     const ctx = await scaffoldBuild();
-    const aiCalls: Array<{ model: string; options: Record<string, unknown> }> = [];
-    const repairEnv = {
-      ...env,
-      DESIGN_PIPELINE_VERSION: "simple_blueprint_v1",
-      SIMPLE_STREAMING_TRANSPORT: "workers_ai_stream",
-      AI: workersAiBinding(aiCalls),
-    } as unknown as Env;
-
+    const repairPayload = JSON.stringify({
+      files: [{ path: "site.css", content: "/* repaired css */ :root { --accent: #7c3aed; } .hero { min-height: 55vh; }" }],
+    });
     const fetchCalls: string[] = [];
+    const bodies: Array<Record<string, unknown>> = [];
     const originalFetch = globalThis.fetch;
     globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
-      fetchCalls.push(String(input instanceof Request ? input.url : input));
+      const url = String(input instanceof Request ? input.url : input);
+      fetchCalls.push(url);
+      if (url.includes("/chat/completions")) {
+        const body = JSON.parse(String((init as RequestInit).body)) as Record<string, unknown>;
+        bodies.push(body);
+        const encoder = new TextEncoder();
+        const half = Math.ceil(repairPayload.length / 2);
+        const sse =
+          `data: ${JSON.stringify({ choices: [{ delta: { reasoning_content: "analysis..." } }] })}\n\n` +
+          `data: ${JSON.stringify({ choices: [{ delta: { content: repairPayload.slice(0, half) } }] })}\n\n` +
+          `data: ${JSON.stringify({ choices: [{ delta: { content: repairPayload.slice(half) } }] })}\n\n` +
+          `data: ${JSON.stringify({ choices: [{ delta: {}, finish_reason: "stop" }] })}\n\n` +
+          "data: [DONE]\n\n";
+        return new Response(new ReadableStream<Uint8Array>({
+          start(controller) {
+            controller.enqueue(encoder.encode(sse));
+            controller.close();
+          },
+        }), { status: 200, headers: { "content-type": "text/event-stream" } });
+      }
       return originalFetch(input, init);
     }) as typeof fetch;
 
+    // The repair runs on the Coding Plan provider with a stubbed fetch; the
+    // key value itself is irrelevant, its PRESENCE is configuration.
+    const repairEnv = { ...env, ZAI_CODING_API_KEY: "test-cp-key" } as unknown as Env;
     let result;
     try {
       result = await runSimpleSiteRepairStage(repairEnv, {
@@ -257,21 +276,22 @@ describe("SIMPLE repair transport pin (#2)", () => {
       globalThis.fetch = originalFetch;
     }
 
-    // runtime_host = workers-ai, stream = true, enable_thinking = false
-    expect(aiCalls.length).toBe(1);
-    expect(aiCalls[0].model).toBe("@cf/zai-org/glm-5.3-flash");
-    expect(aiCalls[0].options.stream).toBe(true);
-    expect((aiCalls[0].options.chat_template_kwargs as Record<string, unknown>).enable_thinking).toBe(false);
+    // Coding Plan transport: coding endpoint, glm-5.3, stream = true,
+    // thinking disabled; reasoning_content was sent but never entered source
+    expect(bodies.length).toBe(1);
+    expect(bodies[0].model).toBe("glm-5.3");
+    expect(bodies[0].stream).toBe(true);
+    expect(bodies[0].thinking).toEqual({ type: "disabled" });
 
-    // no legacy gateway / openrouter / z.ai general calls
-    const legacy = fetchCalls.filter((url) => /openrouter|gateway\.ai\.cloudflare\.com|api\.z\.ai/i.test(url));
+    // no Workers AI binding call, no legacy gateway / openrouter / general API
+    const legacy = fetchCalls.filter((url) => !url.includes("/chat/completions"));
     expect(legacy).toEqual([]);
 
     // the deterministic merge produced the repaired Build Version bundle
     expect(result.changedPaths).toEqual(["site.css"]);
     expect(result.bundle.sharedCss).toContain("repaired css");
     expect(result.bundle.pages.home).toBe(repairBundle().pages.home);
-    expect(result.provenance?.model).toBe("@cf/zai-org/glm-5.3-flash");
+    expect(result.provenance?.model).toBe("glm-5.3");
   });
 
   it("the changed-files output schema accepts only the six bundle files", () => {
@@ -357,19 +377,22 @@ describe("builder progressive-enhancement instruction (#4)", () => {
   it("the builder's frozen context states the base-visibility rule and names the banned pattern", async () => {
     const ctx = await scaffoldBuild();
     const seen: Array<{ system: string; user: string }> = [];
-    // schema-valid bundle (pages >= 200 chars each) returned by the injected seam
-    const longPage = (title: string) =>
-      `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${title}</title><meta name="description" content="${title} page with a full descriptive body for the fixture bundle."><meta property="og:title" content="${title}"><meta property="og:description" content="${title} description"></head><body><header><nav aria-label="Primary"><a href="/">Home</a><a href="/about">About</a><a href="/services">Services</a><a href="/contact">Contact</a></nav></header><main><h1>${title}</h1><section class="hero"><p>${title} hero copy for the fixture bundle, long enough to satisfy the schema floor and describe the section honestly.</p></section></main><footer><p>Business footer line for the fixture.</p></footer><script src="site.js" defer></script></body></html>`;
+    // schema-valid bundle (pages >= 200 chars each, every CRITICAL hero slot
+    // placed on its declared page) returned by the injected seam
+    const longPage = (pageId: "home" | "about" | "services" | "contact") => {
+      const title = pageId[0].toUpperCase() + pageId.slice(1);
+      return `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${title}</title><meta name="description" content="${title} page with a full descriptive body for the fixture bundle."><meta property="og:title" content="${title}"><meta property="og:description" content="${title} description"><link rel="stylesheet" href="site.css"></head><body><header><nav class="site-nav" aria-label="Primary"><a href="/">Home</a><a href="/about">About</a><a href="/services">Services</a><a href="/contact">Contact</a></nav></header><main><section class="hero"><img src="IMG:${pageId}-hero" data-image-id="${pageId}-hero" alt="${title} hero photograph"><h1>${title}</h1><p>${title} hero copy for the fixture bundle, long enough to satisfy the schema floor and describe the section honestly.</p></section></main><footer><p>Business footer line for the fixture.</p></footer><script src="site.js" defer></script></body></html>`;
+    };
     const builderBundle: SiteBundle = {
       version: "1",
       pages: {
-        home: longPage("Home"),
-        about: longPage("About"),
-        services: longPage("Services"),
-        contact: longPage("Contact"),
+        home: longPage("home"),
+        about: longPage("about"),
+        services: longPage("services"),
+        contact: longPage("contact"),
       },
       sharedCss:
-        ":root { --accent: #7c3aed; --ink: #1a1523; --paper: #faf7f2; }\nbody { background: var(--paper); color: var(--ink); font-family: system-ui, sans-serif; }\n.hero { min-height: 60vh; display: grid; place-items: center; }\na:hover { text-decoration: underline; }\n:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }\n@media (max-width: 767px) { .hero { min-height: 40vh; } }\n@media (prefers-reduced-motion: reduce) { * { animation: none; transition: none; } }",
+        ":root { --accent: #7c3aed; --ink: #1a1523; --paper: #faf7f2; }\nbody { background: var(--paper); color: var(--ink); font-family: system-ui, sans-serif; }\n.hero { min-height: 60vh; display: grid; place-items: center; }\n.site-nav { display: flex; gap: 1.5rem; }\nimg { max-width: 100%; display: block; }\nform { display: grid; gap: 1rem; }\na:hover { text-decoration: underline; }\n:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }\n@media (max-width: 767px) { .hero { min-height: 40vh; } }\n@media (prefers-reduced-motion: reduce) { * { animation: none; transition: none; } }",
       sharedJs: "(function(){var t=document.querySelector('.nav-toggle');if(t){t.addEventListener('click',function(){document.body.classList.toggle('nav-open');});}})();",
     };
     await runSimpleWebsiteBuilderStage(env, {
@@ -379,21 +402,23 @@ describe("builder progressive-enhancement instruction (#4)", () => {
       buildVersionNumber: 1,
       blueprint: bp,
       facts: FACTS,
-      acceptedImages: bp.imagery.imageSlots.map((slot) => ({
-        slotId: slot.id,
-        altText: slot.altText,
-        aspectRatio: slot.generationAspectRatio,
-        page: slot.page,
-      })),
+      acceptedImages: materializeAcceptedImageDescriptors(bp),
       formServiceEndpoint: endpoint,
       siteFormId,
-      visualInputs: [],
       generate: async (system, user) => {
         seen.push({ system, user });
-        return { content: JSON.stringify(builderBundle), provider: "test", model: "test" };
+        // Canonical SIX_CALL shapes: one RAW file per call, in order.
+        if (user.includes("call 5 of 6")) {
+          return { content: builderBundle.sharedCss, provider: "test", model: "@cf/zai-org/glm-5.3" };
+        }
+        if (user.includes("call 6 of 6")) {
+          return { content: builderBundle.sharedJs, provider: "test", model: "@cf/zai-org/glm-5.3" };
+        }
+        const page = /Realize the \"(home|about|services|contact)\" page/.exec(user)![1];
+        return { content: builderBundle.pages[page as keyof typeof builderBundle.pages], provider: "test", model: "@cf/zai-org/glm-5.3" };
       },
     });
-    expect(seen.length).toBeGreaterThan(0);
+    expect(seen.length).toBe(6);
     for (const phrase of [
       "All content must be visible in the base HTML/CSS state.",
       "content visibility may never depend on JavaScript execution",

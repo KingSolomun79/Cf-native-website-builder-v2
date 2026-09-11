@@ -21,7 +21,7 @@ import { getObject, putImmutableObjectTolerant } from "../lib/assets";
 import { appendBuildWorkflowEvent } from "./lifecycle";
 import { buildVersionAssetKey } from "./artifact-keys";
 import { runSchemaValidatedAiStage, type RawAiGenerate } from "./ai-boundary";
-import type { ImageSlot } from "./site-generator";
+import type { ImageSlot } from "./site-contracts";
 import { orientationConforms, sniffImageDimensions } from "../lib/image-dimensions";
 
 // PRD section 18.
@@ -83,8 +83,6 @@ export function expandSlotsToTarget(slots: ImageSlot[], target = NORMAL_TARGET_A
 
 // ── KIE prompt generation stage ─────────────────────────────────────────────
 
-export const IMAGE_PROMPT_RECORDS_SCHEMA_VERSION = "image-prompt-records/1";
-
 export const ImagePromptRecordSchema = Type.Object(
   {
     slotId: Type.String({ minLength: 1 }),
@@ -98,26 +96,6 @@ export const ImagePromptRecordSchema = Type.Object(
 );
 export type ImagePromptRecord = Static<typeof ImagePromptRecordSchema>;
 
-export const ImagePromptRecordsSchema = Type.Object(
-  { records: Type.Array(ImagePromptRecordSchema, { minItems: 1 }) },
-  { additionalProperties: false }
-);
-export type ImagePromptRecords = Static<typeof ImagePromptRecordsSchema>;
-
-export function buildImagePromptUserPrompt(slots: ImageSlot[], slotIdsWithPrompts?: string[]): string {
-  const scoped = slotIdsWithPrompts ? slots.filter((slot) => slotIdsWithPrompts.includes(slot.id)) : slots;
-  // Issue #48: generated imagery must never carry fabricated identity — the
-  // frozen RankForge candidate baked a fake client-logo strip into an asset's
-  // pixels. The prohibition is binding for every slot prompt record.
-  return `Generate KIE image prompts for the Image Slots below. Each record keeps the slot's stable semantic/compositional identity, honors its priority, orientation and text-space requirements, and follows the slot avoidance discipline.
-
-IDENTITY PROHIBITION (binding, issue #48): every prompt must produce abstract or photographic imagery only — NO readable text, lettering, numbers, wordmarks, logos, brand or client names, awards or certifications marks, watermarks, UI chrome, or screenshot-like composition. Reproducing a Reference trust band's visual rhythm never licenses inventing the entities in it; a prompt that would render any name, logo or text must be rewritten to an abstract/photographic equivalent before output.
-
-IMAGE SLOTS:
-${JSON.stringify(scoped, null, 2)}`;
-}
-
-// ── Provider boundary ───────────────────────────────────────────────────────
 
 export interface ResolvedSlotTask {
   slotId: string;
@@ -444,78 +422,20 @@ export async function runImageWave(env: Env, input: RunImageWaveInput): Promise<
   return outcomes;
 }
 
-// ── Full pipeline ───────────────────────────────────────────────────────────
-// NOTE (issue #58): the production pipeline now drives images through the
-// durable submit → sleep → poll state machine in image-orchestration.ts.
-// runImageGeneration/runImageWave remain the synchronous implementation for
-// the benchmark harness and focused ledger-semantics tests; the budget,
-// attempt and acceptance rules below are the authoritative semantics both
-// paths share.
-
-export interface RunImageGenerationInput {
-  siteGenerationId: string;
-  buildId: string;
-  buildVersionId: string;
-  buildVersionNumber: number;
-  slots: ImageSlot[];
-  provider: ImageGenerationProvider;
-  generate?: RawAiGenerate;
-  expandToTarget?: boolean;
-  /** SIMPLE pipeline only (experiment branch): pre-derived prompt records —
-   *  the Design Blueprint itself is the prompt authority, so the
-   *  kie-image-prompt-generator LLM stage is skipped. Legacy callers omit
-   *  this and get the unchanged prompt-stage behavior. Records must cover
-   *  every slot id. */
-  promptRecords?: ImagePromptRecord[];
-}
-
 export interface ImageGenerationResult {
   outcomes: SlotGenerationOutcome[];
   report: ImageSpendReport;
 }
 
-export async function runImageGeneration(
-  env: Env,
-  input: RunImageGenerationInput
-): Promise<ImageGenerationResult> {
-  const slots = input.expandToTarget === false ? input.slots : expandSlotsToTarget(input.slots);
+// ── Wave execution ──────────────────────────────────────────────────────────
+// NOTE (issue #58): the production pipeline drives images through the durable
+// submit → sleep → poll state machine in image-orchestration.ts (the SIMPLE
+// pipeline's Design Blueprint is the prompt authority — the legacy
+// kie-image-prompt-generator LLM stage was removed with the legacy chain).
+// runImageWave is the focused ledger-semantics reference (attempt numbering,
+// orientation rejections, wave events) shared conceptually with the durable
+// driver and exercised directly by tests.
 
-  const promptRun = await runSchemaValidatedAiStage<ImagePromptRecords>(env, {
-    stage: "kie-image-prompt-generator",
-    schema: ImagePromptRecordsSchema,
-    schemaVersion: IMAGE_PROMPT_RECORDS_SCHEMA_VERSION,
-    userPrompt: buildImagePromptUserPrompt(slots),
-    buildId: input.buildId,
-    siteGenerationId: input.siteGenerationId,
-    buildVersionId: input.buildVersionId,
-    buildVersionNumber: input.buildVersionNumber,
-    temperature: 0.4,
-    generate: input.generate,
-  });
-  const promptRecords = new Map(promptRun.value.records.map((record) => [record.slotId, record]));
-
-  const wave1 = await runImageWave(env, {
-    buildId: input.buildId,
-    buildVersionId: input.buildVersionId,
-    buildVersionNumber: input.buildVersionNumber,
-    wave: 1,
-    slots,
-    promptRecords,
-    provider: input.provider,
-  });
-  const wave2 = await runImageWave(env, {
-    buildId: input.buildId,
-    buildVersionId: input.buildVersionId,
-    buildVersionNumber: input.buildVersionNumber,
-    wave: 2,
-    slots,
-    promptRecords,
-    provider: input.provider,
-  });
-
-  const report = await getImageSpendReport(env, input.buildId, slots);
-  return { outcomes: [...wave1, ...wave2], report };
-}
 
 // Reader: resolved image manifest for assembly (slot -> accepted R2 key).
 export async function getAcceptedImageMap(

@@ -1,11 +1,7 @@
 import { describe, expect, it } from "vitest";
-import {
-  lintTrustContexts,
-  validateAssembledSite,
-  type AssembledSiteSource,
-} from "../src/domain/site-generator";
-import type { ImplementationContract } from "../src/domain/implementation-planner";
-import { buildImagePromptUserPrompt } from "../src/domain/image-pipeline";
+import { factVocabulary, lintTrustContexts, TRUST_CONTEXT_PATTERN } from "../src/domain/fact-lint";
+import { materializeBlueprintPromptRecords } from "../src/simple-design/contracts";
+import { simpleBlueprintFixture } from "./helpers/simple-scripts";
 import {
   evaluateQaARelease,
   QA_A_HARD_GATE_IDS,
@@ -44,44 +40,26 @@ const CLIENT_BAND = (labels: string[]): string =>
 const PAGE = (main: string): string =>
   `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>RankForge Kenya</title><link rel="stylesheet" href="site.css"><script src="site.js" defer></script></head><body><header><nav aria-label="Primary"><a href="/">Home</a><a href="/about">About</a><a href="/services">Services</a><a href="/contact">Contact</a></nav></header><main>${main}</main><footer><p>RankForge Kenya</p></footer></body></html>`;
 
-function contractFixture(): ImplementationContract {
-  return {
-    version: "1",
-    blueprintVisualThesis: "t",
-    blueprintSignatureTraitIds: ["bp-trait"],
-    blueprintFirstViewportRegionIds: ["hero"],
-    pages: [
-      { id: "home", path: "/", regions: [{ id: "hero", realization: "section" }] },
-      { id: "about", path: "/about", regions: [] },
-      { id: "services", path: "/services", regions: [] },
-      { id: "contact", path: "/contact", regions: [] },
-    ],
-    files: { sharedCss: "site.css", sharedJs: "site.js", pageFiles: { home: "index.html", about: "about.html", services: "services.html", contact: "contact.html" } },
-    tokens: {},
-    components: [],
-    responsiveStrategy: {},
-    imageSlotStrategy: {},
-    formContract: {
-      formServiceEndpoint: "https://forms.wazibiz.example/api/v2/forms/submit",
-      siteFormId: "site:test-site",
-      fields: ["name", "email", "message"],
-      turnstile: false,
-    },
-    approvedDependencies: [],
-    blockers: [],
-  };
-}
-
-type ValidationContext = Parameters<typeof validateAssembledSite>[1];
-
-function verdictFor(homeHtml: string, facts: BusinessFacts | undefined, blueprint?: VisualBlueprint) {
-  const source: AssembledSiteSource = {
-    pages: { home: homeHtml, about: "", services: "", contact: "" },
-    sharedCss: "[data-region=\"hero\"] { min-height: 50vh; }\n@media (max-width: 768px) { [data-region=\"hero\"] { min-height: auto; } }",
-    sharedJs: "(function(){})();",
-  };
-  const context: ValidationContext = { contract: contractFixture(), slots: [], ...(facts ? { facts } : {}), ...(blueprint ? { blueprint } : {}) };
-  return validateAssembledSite(source, context);
+// The legacy assembled-site validator (which used to wrap this lint) was
+// removed with the legacy generator; the verdict helper now drives the shared
+// lint directly, with the same trust-region-purpose derivation the pipeline
+// uses (Blueprint regions whose purpose matches the trust-context pattern).
+function verdictFor(homeHtml: string, facts: BusinessFacts | undefined, blueprint?: { homepageRegions: Array<{ id: string; purpose: string }> }) {
+  const factWords = factVocabulary(facts);
+  const businessNameWords = new Set<string>(
+    (facts?.businessName ?? "").toLowerCase().split(/[^a-z0-9]+/).filter(Boolean)
+  );
+  const trustRegionPurposes = new Map<string, string>();
+  for (const region of blueprint?.homepageRegions ?? []) {
+    if (TRUST_CONTEXT_PATTERN.test(region.purpose)) trustRegionPurposes.set(region.id, region.purpose);
+  }
+  const findings = lintTrustContexts(homeHtml, "home", factWords, trustRegionPurposes, businessNameWords).map(
+    (violation) => ({
+      id: "FABRICATED_TRUST_ENTITY",
+      detail: `home: trust label '${violation.text}' is not backed by the Business Facts (${violation.context})`,
+    })
+  );
+  return { passed: findings.length === 0, findings };
 }
 
 const truthFindings = (findings: Array<{ id: string; detail: string }>) =>
@@ -210,22 +188,17 @@ describe("fabrication is a tracked, unloseable release blocker (issue #48)", () 
 });
 
 describe("generated imagery cannot carry fabricated identity (issue #48)", () => {
-  it("every KIE prompt carries the binding identity prohibition", () => {
-    const prompt = buildImagePromptUserPrompt([
-      {
-        id: "home-hero",
-        page: "home",
-        semanticRole: "editorial hero",
-        blueprintRole: "role-hero",
-        priority: "CRITICAL",
-        orientation: "landscape",
-        negativeSpaceForText: true,
-      },
-    ]);
-    expect(prompt).toContain("IDENTITY PROHIBITION");
-    expect(prompt).toContain("NO readable text");
-    expect(prompt).toContain("logo");
-    expect(prompt).toContain("screenshot-like composition");
+  it("every SIMPLE KIE prompt record carries the binding no-text/no-logo prohibition", () => {
+    // The Design Blueprint is the KIE prompt authority: its per-slot
+    // negativePrompt travels verbatim into the record the durable image
+    // driver submits, so every generated image is bounded by it.
+    const blueprint = simpleBlueprintFixture();
+    const records = materializeBlueprintPromptRecords(blueprint);
+    expect(records.length).toBeGreaterThan(0);
+    for (const record of records) {
+      expect(record.promptText + " " + record.avoidance).toMatch(/no readable text|no text/i);
+      expect(record.avoidance.length).toBeGreaterThan(0);
+    }
   });
 });
 

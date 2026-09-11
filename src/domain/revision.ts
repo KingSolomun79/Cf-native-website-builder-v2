@@ -24,7 +24,7 @@ export type RevisionErrorCode =
   | "REVISION_INVALID"
   | "DESIGN_ORIGIN_IMMUTABLE"
   | "FACT_UPDATE_INVALID"
-  | "ORIGINAL_DESIGN_LOCKED";
+  | "ORIGINAL_DESIGN_NOT_ENABLED";
 
 export class RevisionError extends Error {
   readonly code: RevisionErrorCode;
@@ -288,12 +288,13 @@ export async function createRevisionBuild(
       .bind(parent.site_generation_id)
       .first<{ build_mode: "REFERENCE_BOUND" | "ORIGINAL_DESIGN" }>();
     if (generationMode?.build_mode === "ORIGINAL_DESIGN") {
-      const { assertOriginalDesignUnlocked } = await import("./proof-gate");
-      try {
-        await assertOriginalDesignUnlocked(env);
-      } catch (error) {
-        throw new RevisionError("ORIGINAL_DESIGN_LOCKED", (error as Error).message);
-      }
+      // Same deferred-mode lock as the initial path: ORIGINAL_DESIGN is
+      // recognized but NOT ENABLED — every way a Build can START is bound by
+      // the explicit lock, including Revision Request.
+      throw new RevisionError(
+        "ORIGINAL_DESIGN_NOT_ENABLED",
+        "ORIGINAL_DESIGN is a recognized V2 Build Mode but is NOT ENABLED: its SIMPLE implementation is deferred. REFERENCE_BOUND is the only enabled design path."
+      );
     }
   }
 

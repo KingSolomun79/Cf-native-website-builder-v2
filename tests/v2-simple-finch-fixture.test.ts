@@ -13,15 +13,18 @@ import { buildAssembledCandidate } from "../src/domain/assembly";
 import { putObject } from "../src/lib/assets";
 import { runDeterministicBundleQa } from "../src/simple-design/bundle-qa";
 import { runSimpleWebsiteBuilderStage } from "../src/simple-design/website-builder";
-import { renderDesignBlueprintMarkdown } from "../src/simple-design/render-blueprint";
+import { renderDesignBlueprintV2Markdown } from "../src/simple-design/render-blueprint-v2";
 import {
-  blueprintSlotsToImageSlots,
-  blueprintSlotsToPromptRecords,
+  materializeAcceptedImageDescriptors,
+  materializeBlueprintImageSlots,
   validateDesignBlueprint,
+  validateDesignBlueprintV2,
+  type DesignBlueprintV2,
   type SiteBundle,
 } from "../src/simple-design/contracts";
 import { createSimpleScripts, persistSimpleScreenshot } from "./helpers/simple-scripts";
 import { FINCH_KNOWN_GOOD_BLUEPRINT } from "./_generated-simple-finch";
+import { FINCH_V2_KNOWN_GOOD_BLUEPRINT } from "./_generated-simple-finch-v2";
 
 const env = providedEnv as unknown as Env;
 
@@ -35,7 +38,7 @@ const FACTS = {
 
 describe("known-good Blueprint builder test (spec section 61)", () => {
   it("the Website Builder turns the fixed blueprint into a valid, truth-clean bundle", async () => {
-    const validated = validateDesignBlueprint(FINCH_KNOWN_GOOD_BLUEPRINT);
+    const validated = validateDesignBlueprintV2(FINCH_V2_KNOWN_GOOD_BLUEPRINT);
     expect(validated.valid).toBe(true);
     if (!validated.valid) return;
     const blueprint = validated.value;
@@ -64,29 +67,20 @@ describe("known-good Blueprint builder test (spec section 61)", () => {
       buildVersionNumber: 1,
       blueprint,
       facts: FACTS,
-      acceptedImages: blueprint.imagery.imageSlots.map((slot) => ({
-        slotId: slot.id,
-        altText: slot.altText,
-        aspectRatio: slot.generationAspectRatio,
-        page: slot.page,
-        ...(slot.section ? { section: slot.section } : {}),
-      })),
+      acceptedImages: materializeAcceptedImageDescriptors(blueprint),
       formServiceEndpoint: ENDPOINT,
       siteFormId: "site:finch-fixture",
-      visualInputs: [
-        { kind: "full-page", artifact: "references/simple/finch-ref.png", sha256: "fixture-sha", width: 1440, height: 3200 },
-      ],
-      visionGenerate: scripts.visionGenerate,
+      generate: scripts.generate,
     });
 
-    expect(built.strategy).toBe("ONE_CALL");
+    expect(built.strategy).toBe("SIX_CALL_FILE_REALIZATION");
     const bundle: SiteBundle = built.bundle;
     expect(Object.keys(bundle.pages).sort()).toEqual(["about", "contact", "home", "services"]);
     expect(bundle.sharedCss).toContain(":focus-visible");
     expect(bundle.sharedCss).toContain("prefers-reduced-motion");
 
     // Deterministic truth + technical contract passes on the bundle.
-    const slotIds = new Set(blueprint.imagery.imageSlots.map((slot) => slot.id));
+    const slotIds = new Set(materializeBlueprintImageSlots(blueprint).map((slot) => slot.id));
     const qa = runDeterministicBundleQa({
       bundle,
       blueprint,
@@ -105,9 +99,9 @@ describe("known-good Blueprint builder test (spec section 61)", () => {
   });
 
   it("assembles through the shared KEEP-list assembly path with real accepted image bytes", async () => {
-    const validated = validateDesignBlueprint(FINCH_KNOWN_GOOD_BLUEPRINT);
+    const validated = validateDesignBlueprintV2(FINCH_V2_KNOWN_GOOD_BLUEPRINT);
     if (!validated.valid) return;
-    const blueprint = validated.value;
+    const blueprint: DesignBlueprintV2 = validated.value;
     const scripts = createSimpleScripts();
 
     await persistSimpleScreenshot(env, "references/simple/finch-assembly-ref.png");
@@ -131,24 +125,15 @@ describe("known-good Blueprint builder test (spec section 61)", () => {
       buildVersionNumber: 1,
       blueprint,
       facts: FACTS,
-      acceptedImages: blueprint.imagery.imageSlots.map((slot) => ({
-        slotId: slot.id,
-        altText: slot.altText,
-        aspectRatio: slot.generationAspectRatio,
-        page: slot.page,
-        ...(slot.section ? { section: slot.section } : {}),
-      })),
+      acceptedImages: materializeAcceptedImageDescriptors(blueprint),
       formServiceEndpoint: ENDPOINT,
       siteFormId: "site:finch-fixture",
-      visualInputs: [
-        { kind: "full-page", artifact: "references/simple/finch-assembly-ref.png", sha256: "fixture-sha", width: 1440, height: 3200 },
-      ],
-      visionGenerate: scripts.visionGenerate,
+      generate: scripts.generate,
     });
 
     // Real image bytes per slot so assembly resolves every placeholder.
     const acceptedImages = new Map<string, string>();
-    for (const slot of blueprint.imagery.imageSlots) {
+    for (const slot of materializeBlueprintImageSlots(blueprint)) {
       const key = `fixtures/simple-images/${slot.id}.webp`;
       await putObject(env, key, new TextEncoder().encode(`WEBP-fixture-${slot.id}`));
       acceptedImages.set(slot.id, key);
@@ -162,7 +147,7 @@ describe("known-good Blueprint builder test (spec section 61)", () => {
       pages: built.bundle.pages,
       sharedCss: built.bundle.sharedCss,
       sharedJs: built.bundle.sharedJs,
-      imagePlanSlots: blueprintSlotsToImageSlots(blueprint),
+      imagePlanSlots: materializeBlueprintImageSlots(blueprint),
       acceptedImages,
       formServiceEndpoint: ENDPOINT,
       expectedSiteFormId: "site:finch-fixture",
@@ -170,7 +155,7 @@ describe("known-good Blueprint builder test (spec section 61)", () => {
     expect(candidate.files.has("index.html")).toBe(true);
     expect(candidate.files.has("site.css")).toBe(true);
     expect(candidate.files.has("site.js")).toBe(true);
-    expect(candidate.files.has(`assets/images/${blueprint.imagery.imageSlots[0].id}.webp`)).toBe(true);
+    expect(candidate.files.has(`assets/images/${materializeBlueprintImageSlots(blueprint)[0].id}.webp`)).toBe(true);
     expect(candidate.artifactManifestHash).toBeTruthy();
     // The placeholder convention survived: bundled pages reference real asset paths.
     const indexHtml = new TextDecoder().decode(candidate.files.get("index.html")!);
@@ -179,14 +164,14 @@ describe("known-good Blueprint builder test (spec section 61)", () => {
   });
 
   it("markdown handoff is readable and stable for the fixed blueprint", () => {
-    const markdown = renderDesignBlueprintMarkdown(FINCH_KNOWN_GOOD_BLUEPRINT);
-    expect(markdown).toContain("## 06 · Home — Section Spec");
+    const markdown = renderDesignBlueprintV2Markdown(FINCH_V2_KNOWN_GOOD_BLUEPRINT);
+    expect(markdown).toContain("## 06 · Home — Page Spec (hero first)");
     expect(markdown).toContain("Signature Design Elements");
+    expect(markdown).toContain("Page heroes (deterministically materialized)");
     expect(markdown).not.toContain("sourceTraitId");
     expect(markdown).not.toContain("obligation");
     expect(markdown.split("\n").length).toBeGreaterThan(120);
     // Deterministic: same input, byte-identical output.
-    expect(renderDesignBlueprintMarkdown(FINCH_KNOWN_GOOD_BLUEPRINT)).toBe(markdown);
-    void blueprintSlotsToPromptRecords;
+    expect(renderDesignBlueprintV2Markdown(FINCH_V2_KNOWN_GOOD_BLUEPRINT)).toBe(markdown);
   });
 });

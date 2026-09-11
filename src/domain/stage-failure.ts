@@ -40,9 +40,9 @@ import { NonRetryableError } from "cloudflare:workflows";
 import { StageExecutionCollisionError } from "./stage-execution";
 import { StageArtifactError } from "./stage-artifacts";
 import { ImageBudgetExceededError } from "./image-pipeline";
-import { SiteGenerationValidationError } from "./site-generator";
-import { VisualBlueprintError } from "./visual-blueprint";
 import { AiStageSchemaInvalidError } from "./ai-boundary";
+import { OriginalDesignNotEnabledError } from "./original-design-lock";
+import { SimpleWebsiteBuilderError } from "../simple-design/website-builder";
 
 export type StageFailureClass =
   | "TRANSIENT_RETRYABLE"
@@ -84,19 +84,21 @@ export function classifyStageFailure(error: unknown): StageFailureClass {
   if (
     error instanceof StageExecutionCollisionError ||
     error instanceof ImageBudgetExceededError ||
+    error instanceof OriginalDesignNotEnabledError ||
     (error instanceof StageArtifactError && error.code === "REPAIR_ARTIFACT_MISMATCH")
   ) {
     return "TERMINAL_INVARIANT";
   }
   // DETERMINISTIC_REVIEW_REQUIRED: the stage's bounded repair is spent and
   // the same immutable inputs deterministically re-produce the blocker.
-  // VisualBlueprintError is escalated IN-STEP by issue #60 before the
-  // boundary; SiteGenerationValidationError by the #62 pipeline markers.
-  if (
-    error instanceof SiteGenerationValidationError ||
-    error instanceof VisualBlueprintError ||
-    error instanceof AiStageSchemaInvalidError
-  ) {
+  // (The legacy VisualBlueprintError / SiteGenerationValidationError classes
+  // were removed with the legacy design chain; the SIMPLE pipeline's
+  // schema-invalid class carries the semantics.) The Website Builder's
+  // CRITICAL image coverage and SOURCE_INCOMPLETE / OUTPUT_EXHAUSTED
+  // failures belong here too: the six file-sized realization calls ARE the
+  // Builder's whole budget — the pipeline handles them in-step; this backstop
+  // guarantees no engine retry can ever become a second Builder attempt.
+  if (error instanceof AiStageSchemaInvalidError || error instanceof SimpleWebsiteBuilderError) {
     return "DETERMINISTIC_REVIEW_REQUIRED";
   }
   // Everything else — including StageExecutionInProgressError (single-flight

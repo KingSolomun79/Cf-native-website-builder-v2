@@ -177,3 +177,12 @@
 5. `prompts/PROMPT-MANIFEST.md`.
 6. `prompts/00-domain-contract-v1.md` + retained full detailed stage prompt.
 7. Older root/V1 docs only for explicitly retained historical/infrastructure context.
+
+## 16. SIMPLE canonical and legacy design-pipeline removal (2026-09-10)
+
+116. The SIMPLE design pipeline is the canonical — and only — V2 design path: Reference Capture -> Design Blueprint -> Nano Banana images -> Website Builder -> Technical + Truth + Visual QA -> optional ONE Repair -> Release Ready -> Approval -> Publication. The runtime selector (`legacy_v2` vs `simple_blueprint_v1`) was removed; `DESIGN_PIPELINE_VERSION` survives only as a provenance string.
+117. The obsolete COMPLEX design chain was deleted: Reference Analysis, Visual Blueprint (region/trait/obligation system), Implementation Contract, site generator realization, assembly/realization repair, Craft Preflight, Fix Coordinator/Release Blocker Fix, the 3-of-5 legacy benchmark proof gate, and their prompts, tests and fixtures. Applied migrations are untouched (history-only tables may remain unused).
+118. ORIGINAL_DESIGN remains a recognized V2 Build Mode whose runtime is explicitly NOT ENABLED: a deterministic lock (`ORIGINAL_DESIGN_NOT_ENABLED`) replaces the retired proof gate. No fallback to REFERENCE_BOUND, no legacy generator, no automatic enablement. The creative-direction input contract is preserved (`src/domain/creative-direction.ts`); its SIMPLE implementation (Business Facts + creative direction -> the SAME Design Blueprint -> images -> builder -> QA -> repair path) is deferred and will not recreate a second design pipeline.
+119. The experimental benchmark driver route (`EXP_BENCHMARK_DRIVER`, sandbox-only) is retained temporarily as verification tooling for cleanup/staging/first-production verification; it is removed later in its own small commit after the production rollout succeeds.
+120. Production deployment from the then-current production config is FORBIDDEN until `KIE_MODEL` is updated from `z-image` to the canonical `nano-banana-2-lite` in a dedicated production-rollout GO.
+121. Known follow-up (out of cleanup scope): Workers AI long-stream `8005` reliability and the Z.AI General transport's missing thinking-parameter contract — see `v2-docs/FOLLOW-UP-TRANSPORT-RESILIENCE.md`.

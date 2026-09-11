@@ -14,6 +14,7 @@ import type { ReferenceCaptureFn } from "../../src/domain/reference-intake";
 import type { SimplePipelineDeps } from "../../src/simple-design/pipeline";
 import { putObject } from "../../src/lib/assets";
 import { FINCH_KNOWN_GOOD_BLUEPRINT } from "../_generated-simple-finch";
+import { FINCH_V2_KNOWN_GOOD_BLUEPRINT } from "../_generated-simple-finch-v2";
 import { buildDecodableSolidPng } from "./png";
 
 export const SIMPLE_SCRIPTS_BUSINESS = "RankForge Kenya";
@@ -25,7 +26,14 @@ export async function persistSimpleScreenshot(env: Env, key: string): Promise<vo
   await putObject(env, key, await buildDecodableSolidPng(1440, 3200));
 }
 
-export function simpleBlueprintFixture(): typeof FINCH_KNOWN_GOOD_BLUEPRINT {
+// design-blueprint/2 known-good fixture (the pipeline's blueprint contract
+// since the 2026-09-10 operator GO). The v1 fixture remains available via
+// finchV1BlueprintFixture for the retained v1 contract tests.
+export function simpleBlueprintFixture(): typeof FINCH_V2_KNOWN_GOOD_BLUEPRINT {
+  return JSON.parse(JSON.stringify(FINCH_V2_KNOWN_GOOD_BLUEPRINT));
+}
+
+export function finchV1BlueprintFixture(): typeof FINCH_KNOWN_GOOD_BLUEPRINT {
   return JSON.parse(JSON.stringify(FINCH_KNOWN_GOOD_BLUEPRINT));
 }
 
@@ -80,7 +88,9 @@ function nav(): string {
 }
 
 function shell(title: string, main: string): string {
-  return `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${title}</title><meta name="description" content="${title} — quiet luxury"><meta property="og:title" content="${title}"><meta property="og:description" content="${title}"><link rel="stylesheet" href="site.css"><script src="site.js" defer></script></head><body>${nav()}<main>${main}</main><footer class="site-footer"><p>© <span id="year">2026</span> ${title}</p></footer></body></html>`;
+  // The footer is FROZEN SHARED CHROME (GO §18): identical on every page —
+  // only <head> metadata and <main> are page-specific.
+  return `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${title}</title><meta name="description" content="${title} — quiet luxury"><meta property="og:title" content="${title}"><meta property="og:description" content="${title}"><link rel="stylesheet" href="site.css"><script src="site.js" defer></script></head><body>${nav()}<main>${main}</main><footer class="site-footer"><p>© <span id="year">2026</span> RankForge Kenya</p></footer></body></html>`;
 }
 
 const img = (slotId: string, alt: string) => `<img src="IMG:${slotId}" data-image-id="${slotId}" alt="${alt}">`;
@@ -119,7 +129,7 @@ function servicesHtml(): string {
 function contactHtml(endpoint: string, siteFormId: string): string {
   return shell(
     `Contact — RankForge Kenya`,
-    `<section class="hero contact-hero"><div><img src="IMG:contact-atmosphere" data-image-id="contact-atmosphere" alt="Evening at the camp fire"><h1>Contact</h1><p>Begin the conversation.</p></div></section><section class="section"><div class="section-inner split"><div><form method="post" action="${endpoint}"><input type="hidden" name="siteFormId" value="${siteFormId}"><label for="name">Name</label><input id="name" name="name" required><label for="email">Email</label><input id="email" name="email" type="email" required><label for="message">Message</label><textarea id="message" name="message" required></textarea><button class="cta" type="submit">Send enquiry</button></form></div><div><h2>Reach us</h2><p>ops@wazibizwebsites.example</p></div></div></section>`
+    `<section class="hero contact-hero"><div><img src="IMG:contact-hero" data-image-id="contact-hero" alt="Evening at the camp fire"><h1>Contact</h1><p>Begin the conversation.</p></div></section><section class="section"><div class="section-inner split"><div><form method="post" action="${endpoint}"><input type="hidden" name="siteFormId" value="${siteFormId}"><label for="name">Name</label><input id="name" name="name" required><label for="email">Email</label><input id="email" name="email" type="email" required><label for="message">Message</label><textarea id="message" name="message" required></textarea><button class="cta" type="submit">Send enquiry</button></form></div><div><h2>Reach us</h2><p>ops@wazibizwebsites.example</p></div></div></section>`
   );
 }
 
@@ -130,11 +140,15 @@ export interface SimpleScriptsOptions {
   allVisualQaFails?: boolean;
   /** Return a blueprint that passes schema but fails the quality gate. */
   blueprintFailsGate?: boolean;
+  /** The builder omits the CRITICAL about-hero on its page call — the
+   *  Builder coverage fail-closed path. */
+  builderOmitsAboutHero?: boolean;
 }
 
 export function createSimpleScripts(options: SimpleScriptsOptions = {}): SimplePipelineDeps {
   let visualQaCalls = 0;
   let repairCalls = 0;
+  const aboutPage = () => (options.builderOmitsAboutHero ? aboutHtml().replace(/<img src="IMG:about-hero"[^>]*>/, "") : aboutHtml());
 
   const generate: RawAiGenerate = async (_system, user) => {
     const respond = (value: unknown) => ({
@@ -151,36 +165,29 @@ export function createSimpleScripts(options: SimpleScriptsOptions = {}): SimpleP
       }
       return respond(simpleBlueprintFixture());
     }
-    if (user.includes("TASK: Build the COMPLETE website in one response")) {
-      const endpoint = /form action:\s*(\S+)/.exec(user)?.[1] ?? "";
-      const siteFormId = /value="(site:[^"]+)"/.exec(user)?.[1] ?? "site:unknown";
-      return respond({
-        version: "1",
-        pages: {
-          home: homeHtml(),
-          about: aboutHtml(),
-          services: servicesHtml(),
-          contact: contactHtml(endpoint, siteFormId),
-        },
-        sharedCss: SIMPLE_CSS,
-        sharedJs: SIMPLE_JS,
-        notes: "scripted bundle",
-      });
+    // Builder file-realization calls (file-sized GO): each call returns ONE
+    // file as RAW source — never JSON. The routed Builder model is full
+    // GLM-5.3 (stage routing provenance).
+    const respondRaw = (content: string) => ({ content, provider: "simple-script", model: "@cf/zai-org/glm-5.3" });
+    // DOM-first order (v8 GO): the four page calls are 1-4, the stylesheet is
+    // call 5, site.js stays call 6.
+    if (user.includes("call 5 of 6")) {
+      return respondRaw(SIMPLE_CSS);
     }
-    if (user.includes("TASK (1 of 2")) {
-      return respond({ sharedCss: SIMPLE_CSS, sharedJs: SIMPLE_JS });
+    if (user.includes("call 6 of 6")) {
+      return respondRaw(SIMPLE_JS);
     }
-    if (user.includes("TASK (2 of 2")) {
+    const builderPage = /Realize the \"(home|about|services|contact)\" page/.exec(user);
+    if (builderPage) {
       const endpoint = /form action:\s*(\S+)/.exec(user)?.[1] ?? "";
-      const siteFormId = /value="(site:[^"]+)"/.exec(user)?.[1] ?? "site:unknown";
-      return respond({
-        pages: {
-          home: homeHtml(),
-          about: aboutHtml(),
-          services: servicesHtml(),
-          contact: contactHtml(endpoint, siteFormId),
-        },
-      });
+      const siteFormId = /value=\"(site:[^"]+)\"/.exec(user)?.[1] ?? "site:unknown";
+      const page = builderPage[1];
+      return respondRaw(
+        page === "home" ? homeHtml()
+        : page === "about" ? aboutPage()
+        : page === "services" ? servicesHtml()
+        : contactHtml(endpoint, siteFormId)
+      );
     }
     if (user.includes("Compare the CANDIDATE renders against the REFERENCE screenshots")) {
       visualQaCalls += 1;

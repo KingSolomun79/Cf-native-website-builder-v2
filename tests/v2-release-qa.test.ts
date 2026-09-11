@@ -4,7 +4,6 @@ import type { Env } from "../src/env.d";
 import { startSiteGeneration, createInitialBuild } from "../src/domain/lifecycle";
 import {
   buildStandardEvidenceBundle,
-  compareGeometry,
   standardCaptureSpec,
   type GeometryProfile,
   type PageCapture,
@@ -13,8 +12,6 @@ import {
 import {
   evaluateQaARelease,
   evaluateQaBRelease,
-  runQaAStage,
-  runQaBStage,
   QA_A_HARD_GATE_IDS,
   QA_B_MANDATORY_GATE_IDS,
   QaAConfirmationReportSchema,
@@ -29,10 +26,11 @@ import { Value } from "@sinclair/typebox/value";
 import { assignReleaseReady, getReleaseRecord, ReleaseGateError } from "../src/domain/release";
 import { getBuildStageArtifact } from "../src/domain/stage-artifacts";
 import type { RawAiGenerate } from "../src/domain/ai-boundary";
-import type { PageId } from "../src/domain/site-generator";
+import type { PageId } from "../src/domain/site-contracts";
 
-// Primary-seam tests for standardized evidence, geometry comparison, QA-A/
-// QA-B and Release Ready (issue #13).
+// Primary-seam tests for standardized evidence, release-gate evaluation and
+// Release Ready (issue #13); the legacy QA-A/QA-B LLM stages were removed with
+// the legacy pipeline (the SIMPLE pipeline owns visual/truth/technical QA).
 
 const env = providedEnv as unknown as Env;
 
@@ -124,37 +122,6 @@ describe("standardized QA evidence", () => {
   });
 });
 
-describe("geometry comparator", () => {
-  it("matches structurally equivalent candidates regardless of pixel content", () => {
-    const reference = geometry();
-    // Different bytes entirely, near-identical structure within tolerances.
-    const candidate = geometry({
-      firstViewportHeightRatio: 0.95,
-      imageMassRatio: 0.42,
-      whitespaceRatio: 0.24,
-      sectionHeightRatios: [0.95, 0.62, 0.78, 0.32],
-    });
-    const comparison = compareGeometry(reference, candidate);
-    expect(comparison.similarityScore).toBeGreaterThanOrEqual(75);
-    expect(comparison.materialDeviations).toEqual([]);
-  });
-
-  it("flags material structural deviations without pixel equality", () => {
-    const reference = geometry();
-    const reordered = geometry({
-      regionOrder: ["intro", "hero", "cta", "services"],
-      surfaceSequence: ["ink", "ink", "ink", "ink"],
-      dominantAlignment: "center",
-      firstViewportHeightRatio: 0.4,
-      imageMassRatio: 0.05,
-    });
-    const comparison = compareGeometry(reference, reordered);
-    expect(comparison.similarityScore).toBeLessThan(50);
-    const deviationIds = comparison.materialDeviations.map((entry) => entry.split(" ")[0]);
-    expect(deviationIds).toEqual(expect.arrayContaining(["region_order", "dominant_alignment", "surface_sequence"]));
-  });
-});
-
 describe("QA-A / QA-B release evaluation", () => {
   it("hard composition-gate failure cannot be averaged away by high scores", () => {
     const verdict = evaluateQaARelease(
@@ -208,56 +175,8 @@ describe("QA-A / QA-B release evaluation", () => {
     expect(gateFailure.reasons.join(" ")).toContain("RESPONSIVE_MECHANICS");
     expect(evaluateQaBRelease(qaBReport()).releaseReady).toBe(true);
   });
-
-  it("runs both stages through the canonical prompts with provenance", async () => {
-    const context = await newBuildContext();
-    const generate: RawAiGenerate = async (_system, user) => {
-      if (user.includes("hard composition gate")) {
-        return { content: JSON.stringify(qaAReport()), provider: "test", model: "test-model-q" };
-      }
-      return { content: JSON.stringify(qaBReport()), provider: "test", model: "test-model-q" };
-    };
-    const qaA = await runQaAStage(env, {
-      ...context,
-      buildVersionNumber: 1,
-      context: {
-        businessName: "Rift Valley Roasters",
-        geometryComparison: compareGeometry(geometry(), geometry()),
-        evidenceSummary: "9 standardized captures",
-        signatureTraitIds: ["bp-serif", "bp-asymmetric", "bp-surfaces"],
-        canonicalRegions: [
-          { order: 1, id: "hero", purpose: "thesis + editorial image" },
-          { order: 2, id: "intro", purpose: "introduction" },
-        ],
-        firstViewportRegionIds: ["hero"],
-        adaptationContractQaExceptions: [],
-      },
-      evidenceR2Key: "evidence/qa-bundle.json",
-      generate,
-    });
-    expect(qaA.provenance.promptId).toBe("qa-a-visual-content");
-    expect(qaA.provenance.promptVersion).toBe("v4");
-
-    const qaB = await runQaBStage(env, {
-      ...context,
-      buildVersionNumber: 1,
-      context: {
-        formServiceEndpoint: "https://forms.wazibiz.example/api/v2/forms/submit",
-        evidenceSummary: "runtime clean",
-        preflightPassed: true,
-        imageManifestSummary: "2 accepted images bundled",
-      },
-      evidenceR2Key: "evidence/qa-bundle.json",
-      generate,
-    });
-    expect(qaB.provenance.promptId).toBe("qa-b-browser-technical");
-    expect(qaB.provenance.promptVersion).toBe("v3");
-  });
 });
 
-// Issue #38 regression matrix: confirmation findings carry an explicit
-// ACTIVE/RESOLVED status. Only ACTIVE P0/P1 findings are Release Blockers;
-// a RESOLVED note keeps its ORIGINAL severity but is a resolution record.
 describe("confirmation resolution status semantics (issue #38)", () => {
   const passingGatesA = QA_A_HARD_GATE_IDS.map((id) => ({ id, passed: true }));
   const passingGatesB = QA_B_MANDATORY_GATE_IDS.map((id) => ({ id, passed: true }));
@@ -392,7 +311,13 @@ describe("Release Ready assignment", () => {
       qaA: qaAReport(),
       qaB: qaBReport(),
       qaBuildVersionId: context.buildVersionId,
-      geometryComparison: compareGeometry(geometry(), geometry()),
+      geometryComparison: {
+        status: "MEASURED",
+        metrics: [],
+        similarityScore: 0.93,
+        measuredCoverage: 1,
+        materialDeviations: [],
+      },
       evidenceR2Keys: ["evidence/qa-bundle.json"],
     });
     expect(result.releaseReady).toBe(true);

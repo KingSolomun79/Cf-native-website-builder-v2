@@ -16,7 +16,7 @@ import {
   LifecycleError,
 } from "../src/domain/lifecycle";
 import { generateId, hmacSha256 } from "../src/lib/crypto";
-import { createPipelineScripts, persistPipelineScreenshot } from "./helpers/pipeline-scripts";
+import { createSimpleScripts, persistSimpleScreenshot } from "./helpers/simple-scripts";
 
 // Primary-seam tests for the V2 domain lifecycle backbone (issue #4):
 // Onboarding Submission -> Site Generation -> Build -> immutable Build Version.
@@ -91,7 +91,7 @@ async function postSubmission(
 // scripted deps.
 async function postScreenshotSubmission(app: Hono<{ Bindings: Env }>, env: Env): Promise<string> {
   const key = `references/lifecycle/${generateId()}.png`;
-  await persistPipelineScreenshot(env, key);
+  await persistSimpleScreenshot(env, key);
   const response = await postSubmission(app, env, { reference: { screenshotR2Key: key, url: "https://meridian-atelier.example.com/" } });
   const body = (await response.json()) as { siteGenerationId: string };
   return body.siteGenerationId;
@@ -99,11 +99,11 @@ async function postScreenshotSubmission(app: Hono<{ Bindings: Env }>, env: Env):
 
 // Executes the real WebsiteBuildWorkflow step bodies synchronously — the
 // workflow is the primary boundary, so the seam under test is its run() body.
-// Deterministic pipeline scripts stand in for the real providers (the
-// pipeline service itself is covered by tests/v2-build-pipeline.test.ts).
+// Deterministic SIMPLE pipeline scripts stand in for the real providers
+// (the SIMPLE pipeline itself is covered by tests/v2-simple-*.test.ts).
 async function runWebsiteBuildWorkflow(env: Env, siteGenerationId: string): Promise<{ buildId: string; buildVersionId: string }> {
   const workflow = Object.assign(Object.create(WebsiteBuildWorkflow.prototype), { env }) as WebsiteBuildWorkflow;
-  workflow.pipelineDeps = createPipelineScripts();
+  workflow.pipelineDeps = createSimpleScripts();
   const step = {
     do: async (_name: string, a: unknown, b?: unknown) => await (typeof b === "function" ? (b as () => Promise<unknown>) : (a as () => Promise<unknown>))(),
   } as unknown as WorkflowStep;

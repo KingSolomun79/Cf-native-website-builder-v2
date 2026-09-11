@@ -46,22 +46,47 @@ import { buildAssembledCandidate, deployPreview, freezeAssembledCandidate, Assem
 import { storeBuildStageArtifactIdempotent, getBuildStageArtifact } from "../domain/stage-artifacts";
 import { buildStandardEvidenceBundle } from "../domain/qa-evidence";
 import { createProductionQaCapture } from "../domain/qa-capture";
-import { runSimpleWebsiteBuilderStage, runSimpleBuilderTransportDiagnostic } from "../simple-design/website-builder";
+import {
+  runSimpleWebsiteBuilderStage,
+  runSimpleBuilderFileRealizationCore,
+  resolveWebsiteBuilderModel,
+  SimpleWebsiteBuilderError,
+} from "../simple-design/website-builder";
+import {
+  generateZaiCodingPlan,
+  listZaiCodingPlanModels,
+  ZaiCodingPlanOutputExhaustedError,
+  ZaiCodingPlanTransportError,
+} from "../lib/zai-coding-plan";
+import { validateBuilderFileBundle, blueprintMotionExists } from "../simple-design/builder-file-realization";
 import { runSimpleDesignBlueprintStage } from "../simple-design/design-blueprint";
 import { renderDesignBlueprintMarkdown } from "../simple-design/render-blueprint";
+import { renderDesignBlueprintV2Markdown } from "../simple-design/render-blueprint-v2";
 import { runDeterministicBundleQa } from "../simple-design/bundle-qa";
 import { runSimpleVisualQaStage } from "../simple-design/visual-qa";
+import { Value } from "@sinclair/typebox/value";
+import { validateCriticalImageCoverage } from "../simple-design/critical-image-coverage";
 import {
   blueprintSlotsToImageSlots,
   blueprintSlotsToPromptRecords,
+  blueprintPromptRecordsAny,
+  evaluateBlueprintQualityGateAny,
+  materializeAcceptedImageDescriptors,
+  materializeBlueprintImageSlots,
+  materializeBlueprintPromptRecords,
+  storedBlueprintToV2,
   DESIGN_BLUEPRINT_NATIVE_JSON_SCHEMA,
   DESIGN_BLUEPRINT_SCHEMA_VERSION,
+  SiteBundleSchema,
   evaluateBlueprintQualityGate,
+  evaluateBlueprintQualityGateV2,
   validateDesignBlueprint,
   type DesignBlueprint,
+  type DesignBlueprintV2,
   type SiteBundle,
 } from "../simple-design/contracts";
-import { parseModelJson } from "../domain/ai-boundary";
+import { parseModelJson, parseSingleFileSource, AiStageFileInvalidError } from "../domain/ai-boundary";
+import { AI_BOUNDARY_BUILD } from "../domain/ai-boundary";
 import { composeStagePrompt } from "../domain/prompt-contract";
 import type { BusinessFacts } from "../domain/lifecycle-schema";
 
@@ -71,11 +96,16 @@ interface DriverFixtureImage {
 }
 
 interface DriverBody {
-  op: "health" | "put-fixture" | "finch-builder" | "builder-diagnostic" | "assemble-stored" | "capture" | "blueprint" | "artifact" | "probe" | "fetch-probe" | "sql-probe" | "general-api-canary" | "stream-canary-text" | "stream-canary-vision" | "schema-canary" | "stage-runs" | "simple-kie" | "simple-kie-validation" | "simple-full-run" | "simple-rerender-qa" | "simple-hardening-run" | "simple-final-run";
+  op: "health" | "put-fixture" | "finch-builder" | "coding-plan-models" | "coding-plan-text-canary" | "coding-plan-vision-canary" | "file-qualification" | "assemble-stored" | "capture" | "blueprint" | "artifact" | "probe" | "fetch-probe" | "sql-probe" | "general-api-canary" | "stream-canary-text" | "stream-canary-vision" | "schema-canary" | "stage-runs" | "simple-kie" | "simple-kie-validation" | "simple-full-run" | "simple-rerender-qa" | "simple-hardening-run" | "simple-final-run" | "simple-dom-first-ab";
+  maxCompletionTokens?: number;
+  model?: string;
+  imageBase64?: string;
+  imageMimeType?: string;
+  question?: string;
   key?: string;
   base64?: string;
   facts?: BusinessFacts;
-  blueprint?: DesignBlueprint;
+  blueprint?: DesignBlueprint | DesignBlueprintV2;
   fixtureImages?: DriverFixtureImage[];
   referenceUrl?: string;
   referenceScreenshotKey?: string;
@@ -148,7 +178,7 @@ export async function expBenchmarkDriver(c: Context<{ Bindings: Env }>): Promise
   try {
     switch (body.op) {
       case "health":
-        return c.json({ ok: true, driver: "exp-benchmark/1" });
+        return c.json({ ok: true, driver: "exp-benchmark/1", aiBoundaryBuild: AI_BOUNDARY_BUILD });
 
       case "put-fixture": {
         if (!body.key || !body.base64) return c.json({ error: "key and base64 required" }, 400);
@@ -167,8 +197,23 @@ export async function expBenchmarkDriver(c: Context<{ Bindings: Env }>): Promise
       case "finch-builder":
         return c.json(await runFinchBuilder(c.env, body));
 
-      case "builder-diagnostic":
-        return c.json(await runBuilderDiagnostic(c.env, body));
+      case "coding-plan-models":
+        return c.json(await runCodingPlanModels(c.env));
+
+      case "coding-plan-text-canary":
+        return c.json(await runCodingPlanTextCanary(c.env, body));
+
+      case "coding-plan-vision-canary":
+        return c.json(await runCodingPlanVisionCanary(c.env, body));
+
+      case "file-qualification":
+        return c.json(await runFileQualification(c.env, body));
+
+      // DOM-FIRST A/B (operator GO 2026-09-11 §18): the reordered Builder on
+      // FROZEN inputs — streamed, because the six glm-5.3 calls + captures +
+      // visual QA exceed client idle timeouts.
+      case "simple-dom-first-ab":
+        return body.stream ? streamSimpleDomFirstAb(c, body) : c.json(await runDomFirstAbRun(c.env, body));
 
       case "assemble-stored":
         return c.json(await runAssembleStored(c.env, body));
@@ -362,6 +407,7 @@ async function storeFixtureImages(
 
 async function runFinchBuilder(env: Env, body: DriverBody) {
   if (!body.facts || !body.blueprint) throw new Error("facts and blueprint required");
+  const blueprintV2 = storedBlueprintToV2(body.blueprint);
   const referenceScreenshotKey = body.referenceScreenshotKey ?? "references/simple/exp-finch-ref.png";
   const ctx = await scaffold(env, body.facts, { screenshotR2Key: referenceScreenshotKey });
   const acceptedKeys = await storeFixtureImages(env, ctx, body.fixtureImages ?? []);
@@ -373,23 +419,14 @@ async function runFinchBuilder(env: Env, body: DriverBody) {
     buildId: ctx.buildId,
     buildVersionId: ctx.buildVersionId,
     buildVersionNumber: ctx.buildVersionNumber,
-    blueprint: body.blueprint,
+    blueprint: blueprintV2,
     facts: body.facts,
-    acceptedImages: body.blueprint.imagery.imageSlots.map((slot) => ({
-      slotId: slot.id,
-      altText: slot.altText,
-      aspectRatio: slot.generationAspectRatio,
-      page: slot.page,
-      ...(slot.section ? { section: slot.section } : {}),
-    })),
+    acceptedImages: materializeAcceptedImageDescriptors(blueprintV2),
     formServiceEndpoint,
     siteFormId,
-    visualInputs: [
-      { kind: "full-page", artifact: referenceScreenshotKey, sha256: "exp-fixture", width: 1440, height: 3200 } as const,
-    ],
   };
   const built = await runSimpleWebsiteBuilderStage(env, stageInput);
-  const result = await assembleAndJudge(env, ctx, built.bundle, body, acceptedKeys);
+  const result = await assembleAndJudge(env, ctx, built.bundle, { ...body, blueprint: blueprintV2 }, acceptedKeys);
   return { ...result, builderStrategy: built.strategy };
 }
 
@@ -445,63 +482,416 @@ function sanitizeDiagnosticBundle(bundle: SiteBundle): { bundle: SiteBundle; nor
   return { bundle: { ...bundle, pages, sharedCss, sharedJs }, normalizations };
 }
 
-// EXPERIMENT DIAGNOSTIC ONLY: measures design-transfer quality under a forced
-// small-call decomposition (see website-builder.ts). Not a pipeline strategy.
-async function runBuilderDiagnostic(env: Env, body: DriverBody) {
+// ── CODING PLAN CANARIES + QUALIFICATION (operator GO 2026-09-11 §8/§9/§12) ─
+
+// Model allowlist — the driver never becomes a generic model runner.
+const CODING_PLAN_CANARY_MODELS = ["glm-5.3", "glm-5.3-flash"];
+
+async function runCodingPlanModels(env: Env) {
+  const result = await listZaiCodingPlanModels(env);
+  return {
+    op: "coding-plan-models",
+    verdict: result.listed ? "LISTED" : "NOT_LISTED",
+    modelCount: result.models.length,
+    models: result.models,
+    relevant: result.models.filter((m) => /^glm/i.test(m)),
+    ...(result.raw ? { raw: result.raw } : {}),
+  };
+}
+
+// §8 TEXT CANARY: tiny glm-5.3 completion through the Coding Plan endpoint.
+// Records provider, exact model, finish reason, duration, usage and request
+// id. No fallback.
+async function runCodingPlanTextCanary(env: Env, body: DriverBody) {
+  const requestedModel = body.model && CODING_PLAN_CANARY_MODELS.includes(body.model) ? body.model : "glm-5.3";
+  const stream = body.stream ?? false;
+  const started = Date.now();
+  try {
+    const result = await generateZaiCodingPlan(env, {
+      model: requestedModel,
+      messages: [
+        { role: "system", content: "You are a transport canary. Reply with exactly the requested text and nothing else." },
+        { role: "user", content: "Reply with exactly: ok" },
+      ],
+      maxTokens: body.maxCompletionTokens ?? 256,
+      stream,
+      label: "coding-plan-text-canary",
+    });
+    const contentOk = result.content.trim() === "ok";
+    return {
+      op: "coding-plan-text-canary",
+      verdict: contentOk && result.providerModel === requestedModel ? "PASS" : "CONTENT_OR_MODEL_FAIL",
+      model: result.model,
+      providerModel: result.providerModel,
+      modelSubstitution: result.providerModel !== null && result.providerModel !== requestedModel,
+      stream,
+      finishReason: result.finishReason,
+      durationMs: result.durationMs,
+      usage: result.usage,
+      requestId: result.requestId,
+      contentChars: result.contentChars,
+      contentHead: result.content.slice(0, 120),
+      contentOk,
+    };
+  } catch (error) {
+    return {
+      op: "coding-plan-text-canary",
+      verdict: "FAIL",
+      stream,
+      durationMs: Date.now() - started,
+      errorClass:
+        error instanceof ZaiCodingPlanOutputExhaustedError
+          ? "OUTPUT_EXHAUSTED"
+          : error instanceof ZaiCodingPlanTransportError
+            ? "TRANSPORT"
+            : "UNKNOWN",
+      error: (error as Error).message,
+    };
+  }
+}
+
+// §9 MULTIMODAL CANARY: tiny image+text call through the SAME Coding Plan
+// endpoint. Determines the Blueprint / Visual QA model. Multimodal support is
+// never inferred from the model name alone.
+async function runCodingPlanVisionCanary(env: Env, body: DriverBody) {
+  const requestedModel = body.model && CODING_PLAN_CANARY_MODELS.includes(body.model) ? body.model : "glm-5.3-flash";
+  if (!body.imageBase64) {
+    return { op: "coding-plan-vision-canary", verdict: "FAILED", error: "imageBase64 required" };
+  }
+  const mimeType = body.imageMimeType ?? "image/png";
+  const question = body.question ?? "What single word is written in this image? Answer with the word only.";
+  const started = Date.now();
+  try {
+    const result = await generateZaiCodingPlan(env, {
+      model: requestedModel,
+      messages: [{
+        role: "user",
+        content: [
+          { type: "image_url", image_url: { url: `data:${mimeType};base64,${body.imageBase64}` } },
+          { type: "text", text: question },
+        ],
+      }],
+      maxTokens: body.maxCompletionTokens ?? 512,
+      stream: body.stream ?? false,
+      label: "coding-plan-vision-canary",
+    });
+    return {
+      op: "coding-plan-vision-canary",
+      verdict: result.providerModel === requestedModel ? "PASS" : "MODEL_FAIL",
+      model: result.model,
+      providerModel: result.providerModel,
+      modelSubstitution: result.providerModel !== null && result.providerModel !== requestedModel,
+      imageAccepted: true,
+      finishReason: result.finishReason,
+      durationMs: result.durationMs,
+      usage: result.usage,
+      requestId: result.requestId,
+      contentChars: result.contentChars,
+      contentHead: result.content.slice(0, 200),
+    };
+  } catch (error) {
+    // A 4xx that names the image/multimodal capability is the decisive
+    // "image input NOT accepted" evidence (GO §9: never infer from the name).
+    const message = (error as Error).message;
+    const imageRejected = /image|multimodal|vision|not support/i.test(message) && error instanceof ZaiCodingPlanTransportError;
+    return {
+      op: "coding-plan-vision-canary",
+      verdict: imageRejected ? "IMAGE_INPUT_REJECTED" : "FAIL",
+      imageAccepted: false,
+      durationMs: Date.now() - started,
+      error: message,
+    };
+  }
+}
+
+// DOM-FIRST A/B (operator GO 2026-09-11 §18/§19): the reordered Builder
+// (home → about → services → contact → site.css → site.js) runs on FROZEN
+// inputs — the frozen blueprint artifact and the already-accepted images of
+// the 82-score candidate version (zero Blueprint calls, zero KIE spend) —
+// then assemble → preview → capture → deterministic QA → the visual-QA
+// judgement. NO repair (§19: measure INITIAL realization quality; the repair
+// budget is not touched). This is an A/B test against the 82 candidate, not a
+// production subsystem.
+async function runDomFirstAbRun(env: Env, body: DriverBody) {
+  if (!body.siteGenerationId || !body.buildId || !body.buildVersionId) {
+    throw new Error("siteGenerationId, buildId and buildVersionId (frozen blueprint/image source version) required");
+  }
+  const step = async <T>(label: string, fn: () => Promise<T>): Promise<T> => {
+    try {
+      return await fn();
+    } catch (error) {
+      throw new Error(`[${label}] ${(error as Error).name}: ${(error as Error).message}`);
+    }
+  };
+  const frozen = await step("load-frozen-blueprint", () =>
+    getBuildStageArtifact<DesignBlueprint | DesignBlueprintV2>(env, body.buildVersionId!, "design_blueprint")
+  );
+  if (!frozen) throw new Error(`no frozen design_blueprint on source version ${body.buildVersionId}`);
+  const blueprintV2 = storedBlueprintToV2(frozen.value);
+  const gate = evaluateBlueprintQualityGateV2(blueprintV2);
+  if (!gate.passed) {
+    return { op: "simple-dom-first-ab", verdict: "FROZEN_BLUEPRINT_INVALID", gateFailures: gate.failures };
+  }
+
+  // Fresh Build Version on the SAME frozen Build — or resume the A/B version
+  // (stream-drop resume, refused once a newer version exists, same guard as
+  // the hardening run).
+  let created: { buildVersionId: string; buildVersionNumber: number };
+  if (body.resumeBenchmarkVersionId) {
+    const row = await env.DB.prepare("SELECT id, version_number FROM build_versions WHERE id = ?1 AND build_id = ?2")
+      .bind(body.resumeBenchmarkVersionId, body.buildId)
+      .first<{ id: string; version_number: number }>();
+    if (!row) throw new Error(`resumeBenchmarkVersionId ${body.resumeBenchmarkVersionId} not found on build ${body.buildId}`);
+    const latest = await latestVersion(env, body.buildId);
+    if (latest.id !== row.id) {
+      throw new Error(`resume refused: benchmark version ${row.id} (v${row.version_number}) is no longer latest — operator decision required`);
+    }
+    created = { buildVersionId: row.id, buildVersionNumber: row.version_number };
+  } else {
+    created = await createNextBuildVersion(env, {
+      buildId: body.buildId,
+      cause: body.cause ?? "dom_first_ab",
+      detail: body.detail ?? "DOM-first A/B: reordered Builder on the frozen blueprint + accepted images of the 82 candidate (no Blueprint, no KIE, no repair)",
+    });
+  }
+
+  // FROZEN blueprint artifact copied byte-exact onto the A/B version.
+  await step("copy-frozen-blueprint", () =>
+    storeBuildStageArtifactIdempotent(env, {
+      buildId: body.buildId!,
+      buildVersionId: created.buildVersionId,
+      siteGenerationId: body.siteGenerationId!,
+      kind: "design_blueprint",
+      schemaVersion: frozen.schemaVersion ?? "design-blueprint/1",
+      value: frozen.value,
+    })
+  );
+  // The candidate's Accepted Images inherited — the image step has nothing
+  // left to resolve, so NO KIE call happens anywhere in this op.
+  let inheritedAcceptedImages = 0;
+  if (body.inheritAcceptedImagesFromBuildVersionId ?? true) {
+    const inserted = await env.DB.prepare(
+      `INSERT INTO accepted_images (build_version_id, slot_id, attempt_id, r2_key, accepted_at)
+       SELECT ?1, slot_id, attempt_id, r2_key, datetime('now')
+       FROM accepted_images WHERE build_version_id = ?2
+       ON CONFLICT (build_version_id, slot_id) DO NOTHING`
+    )
+      .bind(created.buildVersionId, body.inheritAcceptedImagesFromBuildVersionId ?? body.buildVersionId)
+      .run();
+    inheritedAcceptedImages = inserted.meta.changes ?? 0;
+  }
+
+  const generationRow = await step("load-generation", () =>
+    env.DB.prepare("SELECT site_id FROM site_generations WHERE id = ?1")
+      .bind(body.siteGenerationId!)
+      .first<{ site_id: string }>()
+  );
+  if (!generationRow) throw new Error("Site Generation not found");
+  const facts = await step("load-facts", async () => (await getEffectiveBusinessFacts(env, body.buildId!)).facts);
+  const ctx: Scaffold = {
+    siteGenerationId: body.siteGenerationId,
+    siteId: generationRow.site_id,
+    buildId: body.buildId,
+    buildVersionId: created.buildVersionId,
+    buildVersionNumber: created.buildVersionNumber,
+  };
+  const acceptedImages = materializeAcceptedImageDescriptors(blueprintV2);
+
+  // The reordered Builder, through the canonical STAGE seam (per-file resume,
+  // SiteBundle + CRITICAL coverage validation, persistence — all unchanged).
+  const builtStarted = Date.now();
+  await step("dom-first-builder", () =>
+    runSimpleWebsiteBuilderStage(env, {
+      siteGenerationId: ctx.siteGenerationId,
+      buildId: ctx.buildId,
+      buildVersionId: ctx.buildVersionId,
+      buildVersionNumber: ctx.buildVersionNumber,
+      blueprint: blueprintV2,
+      facts,
+      acceptedImages,
+      formServiceEndpoint: `${env.PUBLIC_APP_URL}/api/v2/forms/submit`,
+      siteFormId: `site:${ctx.siteId}`,
+    })
+  );
+  const builderDurationMs = Date.now() - builtStarted;
+
+  // Per-call provenance for the report (the stage persisted six runs).
+  const callRows = await step("builder-call-runs", () =>
+    env.DB.prepare(
+      "SELECT schema_version, outcome, model, provider, prompt_version, token_usage_json, estimated_cost_usd, artifact_r2_key, created_at FROM ai_stage_runs WHERE build_version_id = ?1 AND stage = 'simple-website-builder' ORDER BY created_at"
+    )
+      .bind(created.buildVersionId)
+      .all()
+  );
+
+  // Assemble → freeze → preview → capture → deterministic QA (the canonical
+  // judge path), then the visual-QA judgement on the REAL captures.
+  const acceptedKeys = await step("load-accepted-images", async () => {
+    const acceptedEntries = await getAcceptedImageMap(env, created.buildVersionId);
+    return new Map([...acceptedEntries].map(([slotId, entry]) => [slotId, entry.r2Key] as const));
+  });
+  const stored = await step("load-site-bundle", () => getBuildStageArtifact<SiteBundle>(env, created.buildVersionId, "site_bundle"));
+  if (!stored) throw new Error("the Builder stage persisted no site_bundle");
+  const judged = await step("assemble-and-judge", () =>
+    assembleAndJudge(env, ctx, stored.value, { blueprint: blueprintV2, facts } as DriverBody, acceptedKeys)
+  );
+
+  const desktop = judged.evidenceCaptures.find((cap) => cap.page === "home" && cap.viewportWidth === 1440)?.artifactR2Key;
+  const mobile = judged.evidenceCaptures.find((cap) => cap.page === "home" && cap.viewportWidth === 390)?.artifactR2Key;
+  if (!desktop) throw new Error("A/B produced no home desktop capture");
+  const frozenEvidence = await step("load-frozen-evidence", () => getFrozenReferenceEvidence(env, body.siteGenerationId!));
+  if (!frozenEvidence) throw new Error("frozen reference evidence missing");
+  const visualQa = await step("visual-qa", () =>
+    runSimpleVisualQaStage(env, {
+      siteGenerationId: body.siteGenerationId!,
+      buildId: body.buildId!,
+      buildVersionId: created.buildVersionId,
+      buildVersionNumber: created.buildVersionNumber,
+      blueprint: blueprintV2,
+      referenceVisualInputs: frozenEvidence.evidence.visualInputs ?? [],
+      candidateDesktopR2Key: desktop,
+      ...(mobile ? { candidateMobileR2Key: mobile } : {}),
+    })
+  );
+
+  return {
+    op: "simple-dom-first-ab",
+    siteGenerationId: body.siteGenerationId,
+    buildId: body.buildId,
+    sourceFrozenVersionId: body.buildVersionId,
+    benchmarkVersionId: created.buildVersionId,
+    benchmarkVersionNumber: created.buildVersionNumber,
+    inheritedAcceptedImages,
+    builderDurationMs,
+    builderCalls: callRows.results,
+    previewUrl: judged.previewUrl,
+    qa: judged.qa,
+    evidenceCaptures: judged.evidenceCaptures,
+    evidenceArtifactR2Key: judged.evidenceArtifactR2Key,
+    candidateDesktopR2Key: desktop,
+    ...(mobile ? { candidateMobileR2Key: mobile } : {}),
+    visualQa: visualQa.report,
+  };
+}
+
+// NDJSON streaming wrapper (same contract as streamSimpleFullRun).
+function streamSimpleDomFirstAb(c: Context<{ Bindings: Env }>, body: DriverBody): Response {
+  const { readable, writable } = new TransformStream();
+  const writer = writable.getWriter();
+  const encoder = new TextEncoder();
+  const send = (payload: unknown) => writer.write(encoder.encode(JSON.stringify(payload) + "\n"));
+  const startedAt = Date.now();
+  const heartbeat = setInterval(() => {
+    void send({ event: "tick", elapsedMs: Date.now() - startedAt }).catch(() => {});
+  }, 15_000);
+  void (async () => {
+    try {
+      await send({ event: "started", at: new Date().toISOString() });
+      const result = await runDomFirstAbRun(c.env, body);
+      await send({ event: "done", elapsedMs: Date.now() - startedAt, result });
+    } catch (error) {
+      await send({ event: "error", elapsedMs: Date.now() - startedAt, message: (error as Error).message.slice(0, 500), name: (error as Error).name }).catch(() => {});
+    } finally {
+      clearInterval(heartbeat);
+      await writer.close().catch(() => {});
+    }
+  })();
+  return new Response(readable, { headers: { "content-type": "application/x-ndjson", "cache-control": "no-store" } });
+}
+
+// QUALIFICATION: the six file-sized realization calls of the canonical
+// Builder core on a VALID design-blueprint/2 fixture — zero KIE / zero
+// preview / zero QA. Persists no site_bundle. NEVER raises budgets, never
+// retries the qualification inside the op.
+async function runFileQualification(env: Env, body: DriverBody) {
   if (!body.facts || !body.blueprint) throw new Error("facts and blueprint required");
+  const blueprintV2 = storedBlueprintToV2(body.blueprint);
+  // The fixture must be a VALID v2 artifact — rejected BEFORE any Builder call.
+  const gate = evaluateBlueprintQualityGateV2(blueprintV2);
+  if (!gate.passed) {
+    return { op: "file-qualification", verdict: "FIXTURE_INVALID", gateFailures: gate.failures };
+  }
+  // The qualification always runs the ROUTED Builder model (stage policy:
+  // never substituted); a caller-supplied value is accepted only if it matches.
+  const routedModel = resolveWebsiteBuilderModel(env);
+  const requestedModel = !body.model || body.model === routedModel ? routedModel : null;
+  if (!requestedModel) {
+    return { op: "file-qualification", verdict: "FAILED", error: `model '${body.model}' is not the routed Website Builder model — stage routing forbids substitution` };
+  }
   const referenceScreenshotKey = body.referenceScreenshotKey ?? "references/simple/exp-finch-ref.png";
   const ctx = await scaffold(env, body.facts, { screenshotR2Key: referenceScreenshotKey });
-  const acceptedKeys = await storeFixtureImages(env, ctx, body.fixtureImages ?? []);
-
-  const formServiceEndpoint = `${env.PUBLIC_APP_URL}/api/v2/forms/submit`;
-  const siteFormId = `site:${ctx.siteId}`;
-  const diagnostic = await runSimpleBuilderTransportDiagnostic(env, {
-    siteGenerationId: ctx.siteGenerationId,
-    buildId: ctx.buildId,
-    buildVersionId: ctx.buildVersionId,
-    buildVersionNumber: ctx.buildVersionNumber,
-    blueprint: body.blueprint,
-    facts: body.facts,
-    acceptedImages: body.blueprint.imagery.imageSlots.map((slot) => ({
-      slotId: slot.id,
-      altText: slot.altText,
-      aspectRatio: slot.generationAspectRatio,
-      page: slot.page,
-      ...(slot.section ? { section: slot.section } : {}),
-    })),
-    formServiceEndpoint,
-    siteFormId,
-    visualInputs: [
-      { kind: "full-page", artifact: referenceScreenshotKey, sha256: "exp-fixture", width: 1440, height: 3200 } as const,
-    ],
-  });
-  // Persist BEFORE assembly so the (expensive) generated bundle survives a
-  // preflight rejection for inspection.
-  const { bundle: cleanBundle, normalizations } = sanitizeDiagnosticBundle(diagnostic.bundle);
-  await storeBuildStageArtifactIdempotent(env, {
-    buildId: ctx.buildId,
-    siteGenerationId: ctx.siteGenerationId,
-    buildVersionId: ctx.buildVersionId,
-    kind: "site_bundle",
-    schemaVersion: "site-bundle/1",
-    value: cleanBundle,
-  });
+  await storeFixtureImages(env, ctx, body.fixtureImages ?? []);
+  const acceptedImages = materializeAcceptedImageDescriptors(blueprintV2);
+  const started = Date.now();
   try {
-    const result = await assembleAndJudge(env, ctx, cleanBundle, body, acceptedKeys);
-    return { ...result, builderStrategy: "TRANSPORT_DIAGNOSTIC", calls: diagnostic.calls, normalizations };
+    const core = await runSimpleBuilderFileRealizationCore(env, {
+      siteGenerationId: ctx.siteGenerationId,
+      buildId: ctx.buildId,
+      buildVersionId: ctx.buildVersionId,
+      buildVersionNumber: ctx.buildVersionNumber,
+      blueprint: blueprintV2,
+      facts: body.facts,
+      acceptedImages,
+      formServiceEndpoint: `${env.PUBLIC_APP_URL}/api/v2/forms/submit`,
+      siteFormId: `site:${ctx.siteId}`,
+    });
+    const bundleSchemaPass = Value.Check(SiteBundleSchema, core.bundle);
+    const completeness = validateBuilderFileBundle(core.bundle, {
+      blueprintMotionExists: blueprintMotionExists(blueprintV2),
+    });
+    const coverage = validateCriticalImageCoverage(core.pages, acceptedImages, "placeholder");
+    const unusedCritical = coverage.filter((f) => f.id === "MISSING_CRITICAL_IMAGE").length;
+    const wrongPageCritical = coverage.filter((f) => f.id === "WRONG_PAGE_CRITICAL_IMAGE").length;
+    const noExhaustion = core.calls.every((call) => call.finishReason !== "length");
+    const qualified = bundleSchemaPass && completeness.passed && coverage.length === 0 && noExhaustion;
+    const totalCost = core.calls.reduce((sum, call) => sum + (call.estimatedCostUsd ?? 0), 0);
+    return {
+      op: "file-qualification",
+      verdict: qualified ? "QUALIFIED" : "FAILED",
+      model: requestedModel,
+      totalDurationMs: Date.now() - started,
+      totalEstimatedCostUsd: Math.round(totalCost * 10000) / 10000,
+      calls: core.calls.map((call) => ({
+        call: call.call,
+        model: call.model,
+        outputChars: call.outputChars,
+        outputTokens: call.outputTokens,
+        inputTokens: call.inputTokens,
+        finishReason: call.finishReason,
+        durationMs: call.durationMs,
+        estimatedCostUsd: call.estimatedCostUsd,
+        runId: call.runId,
+      })),
+      cssChars: core.css.length,
+      pageChars: Object.fromEntries(Object.entries(core.pages).map(([page, html]) => [page, html.length])),
+      jsChars: core.js.length,
+      sourceCompleteness: completeness.passed ? "PASS" : "FAIL",
+      completenessFailures: completeness.failures.slice(0, 12),
+      siteBundleSchema: bundleSchemaPass ? "PASS" : "FAIL",
+      criticalCoverage: {
+        unusedCritical,
+        wrongPageCritical,
+        findings: coverage.map((f) => `${f.id}: ${f.detail}`.slice(0, 300)),
+      },
+      bundleNotes: core.bundle.notes,
+    };
   } catch (error) {
-    if (error instanceof AssemblyPreflightError) {
-      return {
-        ...ctx,
-        builderStrategy: "TRANSPORT_DIAGNOSTIC",
-        calls: diagnostic.calls,
-        normalizations,
-        bundle: cleanBundle,
-        preflightBlockers: error.blockers.map((blocker) => ({ id: blocker.id, detail: blocker.detail ?? blocker.id })),
-        previewUrl: null,
-      };
-    }
-    throw error;
+    return {
+      op: "file-qualification",
+      verdict: "FAILED",
+      totalDurationMs: Date.now() - started,
+      errorClass:
+        error instanceof ZaiCodingPlanOutputExhaustedError
+          ? "OUTPUT_EXHAUSTED"
+          : error instanceof ZaiCodingPlanTransportError
+            ? "TRANSPORT_FAILED"
+            : error instanceof AiStageFileInvalidError
+              ? "SOURCE_INCOMPLETE"
+              : error instanceof SimpleWebsiteBuilderError
+                ? `BUILDER_${error.code}`
+                : "UNKNOWN",
+      error: (error as Error).message,
+    };
   }
 }
 
@@ -561,7 +951,7 @@ async function assembleAndJudge(
   acceptedKeys: Map<string, string>,
   opts?: { skipFreeze?: boolean }
 ) {
-  const blueprint = body.blueprint!;
+  const blueprint = storedBlueprintToV2(body.blueprint!);
   const facts = body.facts!;
   const formServiceEndpoint = `${env.PUBLIC_APP_URL}/api/v2/forms/submit`;
   const siteFormId = `site:${ctx.siteId}`;
@@ -585,7 +975,7 @@ async function assembleAndJudge(
     pages: bundle.pages,
     sharedCss: bundle.sharedCss,
     sharedJs: bundle.sharedJs,
-    imagePlanSlots: blueprintSlotsToImageSlots(blueprint),
+    imagePlanSlots: materializeBlueprintImageSlots(blueprint),
     acceptedImages,
     formServiceEndpoint,
     expectedSiteFormId: siteFormId,
@@ -603,7 +993,7 @@ async function assembleAndJudge(
       sharedCss: bundle.sharedCss,
       sharedJs: bundle.sharedJs,
       candidate,
-      imagePlanSlots: blueprintSlotsToImageSlots(blueprint),
+      imagePlanSlots: materializeBlueprintImageSlots(blueprint),
       acceptedImages,
       formServiceEndpoint,
       expectedSiteFormId: siteFormId,
@@ -633,7 +1023,7 @@ async function assembleAndJudge(
     facts,
     formServiceEndpoint,
     siteFormId,
-    slotIds: new Set(blueprint.imagery.imageSlots.map((slot) => slot.id)),
+    slotIds: new Set(materializeBlueprintImageSlots(blueprint).map((slot) => slot.id)),
     resolvedSlotIds: new Set(acceptedKeys.keys()),
     renderEvidence: evidence
       ? {
@@ -735,7 +1125,7 @@ async function runBlueprint(env: Env, body: DriverBody) {  if (!body.siteGenerat
     ...(frozen.evidence.referenceUrl ? { referenceUrl: frozen.evidence.referenceUrl } : {}),
     visualInputs: frozen.evidence.visualInputs ?? [],
   });
-  const markdown = renderDesignBlueprintMarkdown(produced.blueprint);
+  const markdown = renderDesignBlueprintV2Markdown(produced.blueprint);
   return {
     siteGenerationId: body.siteGenerationId,
     buildId: body.buildId,
@@ -1021,11 +1411,11 @@ function driverSleep(_name: string, ms: number): Promise<void> {
 async function runSimpleKie(env: Env, body: DriverBody) {
   if (!body.siteGenerationId || !body.buildId) throw new Error("siteGenerationId and buildId required");
   const version = await latestVersion(env, body.buildId);
-  const stored = await getBuildStageArtifact<DesignBlueprint>(env, version.id, "design_blueprint");
+  const stored = await getBuildStageArtifact<DesignBlueprint | DesignBlueprintV2>(env, version.id, "design_blueprint");
   if (!stored) throw new Error(`no stored design_blueprint for Build Version ${version.id} — run the blueprint stage first`);
-  const blueprint = stored.value;
+  const blueprint = storedBlueprintToV2(stored.value);
 
-  const slots = blueprintSlotsToImageSlots(blueprint);
+  const slots = materializeBlueprintImageSlots(blueprint);
   const acceptedBefore = await getAcceptedImageMap(env, version.id);
   const unresolved = slots.filter((slot) => !acceptedBefore.has(slot.id));
 
@@ -1043,7 +1433,7 @@ async function runSimpleKie(env: Env, body: DriverBody) {
         slots: unresolved,
         provider: new KieV2ImageProvider(env),
         expandToTarget: false,
-        promptRecords: blueprintSlotsToPromptRecords(blueprint),
+        promptRecords: materializeBlueprintPromptRecords(blueprint),
       },
       { stepDo: async <T>(_name: string, fn: () => Promise<T>) => fn(), sleep: driverSleep }
     );
@@ -1069,9 +1459,8 @@ async function runSimpleKie(env: Env, body: DriverBody) {
     // adapter renders its provider request from — hashes are byte-identical
     // to what the provider received (GO §13 evidence trail).
     slotProvenance: await Promise.all(
-      blueprint.imagery.imageSlots.map(async (blueprintSlot) => {
-        const slot = slots.find((candidate) => candidate.id === blueprintSlot.id)!;
-        const record = blueprintSlotsToPromptRecords(blueprint).find((candidate) => candidate.slotId === blueprintSlot.id)!;
+      slots.map(async (slot) => {
+        const record = materializeBlueprintPromptRecords(blueprint).find((candidate) => candidate.slotId === slot.id)!;
         const plan = planKieImageRequest(
           {
             slotId: slot.id,
@@ -1083,7 +1472,7 @@ async function runSimpleKie(env: Env, body: DriverBody) {
           env.KIE_MODEL
         );
         return {
-          slotId: blueprintSlot.id,
+          slotId: slot.id,
           model: plan.model,
           profile: plan.profile,
           compositionAspectRatio: plan.compositionAspectRatio,
@@ -1183,9 +1572,9 @@ async function runSimpleRerenderQa(env: Env, body: DriverBody) {
   }
   const stored = await step("load-site-bundle", () => getBuildStageArtifact<SiteBundle>(env, body.buildVersionId!, "site_bundle"));
   if (!stored) throw new Error(`no stored site_bundle for Build Version ${body.buildVersionId}`);
-  const bpStored = await step("load-blueprint", () => getBuildStageArtifact<DesignBlueprint>(env, body.buildVersionId!, "design_blueprint"));
+  const bpStored = await step("load-blueprint", () => getBuildStageArtifact<DesignBlueprint | DesignBlueprintV2>(env, body.buildVersionId!, "design_blueprint"));
   if (!bpStored) throw new Error(`no stored design_blueprint for Build Version ${body.buildVersionId}`);
-  const blueprint = bpStored.value;
+  const blueprint = storedBlueprintToV2(bpStored.value);
   const facts = await step("load-facts", async () => (await getEffectiveBusinessFacts(env, body.buildId!)).facts);
   const versionRow = await step("load-version", () =>
     env.DB.prepare("SELECT version_number FROM build_versions WHERE id = ?1")
@@ -1273,7 +1662,7 @@ async function runSimpleFullRun(env: Env, body: DriverBody) {  if (!body.siteGen
     if (body.copyBlueprintFromBuildVersionId) {
       const sourceBlueprint = await getBuildStageArtifact<DesignBlueprint>(env, body.copyBlueprintFromBuildVersionId, "design_blueprint");
       if (!sourceBlueprint) throw new Error(`no design_blueprint on source version ${body.copyBlueprintFromBuildVersionId}`);
-      const gate = evaluateBlueprintQualityGate(sourceBlueprint.value);
+      const gate = evaluateBlueprintQualityGateAny(sourceBlueprint.value);
       if (!gate.passed) throw new Error(`source blueprint fails the hero-media quality gate: ${gate.failures.join("; ")}`);
       await storeBuildStageArtifactIdempotent(env, {
         buildId,

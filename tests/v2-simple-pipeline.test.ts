@@ -14,14 +14,12 @@ import { runBuildPipeline } from "../src/domain/build-pipeline";
 import { getObject } from "../src/lib/assets";
 import { buildVersionRoot } from "../src/domain/artifact-keys";
 import { createSimpleScripts, persistSimpleScreenshot, SIMPLE_SCRIPTS_BUSINESS, simpleBlueprintFixture } from "./helpers/simple-scripts";
-import { validateDesignBlueprint } from "../src/simple-design/contracts";
+import { validateDesignBlueprintV2 } from "../src/simple-design/contracts";
 
 const env = providedEnv as unknown as Env;
 
-// SIMPLE suites opt in explicitly: wrangler.test.jsonc pins legacy_v2 so the
-// ~60 legacy suites keep testing the legacy chain; this env spread flips the
-// experiment selector for the simple branch only.
-const simpleEnv = { ...env, DESIGN_PIPELINE_VERSION: "simple_blueprint_v1" } as unknown as Env;
+// SIMPLE is the only pipeline (legacy cleanup 2026-09-10); the test env needs
+// no pipeline override any more.
 
 async function startGeneration(screenshotKey: string): Promise<string> {
   await persistSimpleScreenshot(env, screenshotKey);
@@ -40,6 +38,8 @@ async function startGeneration(screenshotKey: string): Promise<string> {
   return started.siteGenerationId;
 }
 
+// Positive regression guard: a SIMPLE run must record ZERO rows for any
+// retired legacy design stage. If a legacy path ever resurrects, this fails.
 const LEGACY_AI_STAGES = [
   "reference-analyzer",
   "visual-blueprint-generator",
@@ -57,12 +57,12 @@ const LEGACY_AI_STAGES = [
 describe("SIMPLE pipeline end-to-end (experiment/simplified-design-pipeline)", () => {
   it("first-pass success: blueprint → images → build → QA → RELEASE_READY with NO repair", async () => {
     const siteGenerationId = await startGeneration("references/simple/happy.png");
-    const outcome = await runBuildPipeline(simpleEnv, { siteGenerationId, deps: createSimpleScripts() });
+    const outcome = await runBuildPipeline(env, { siteGenerationId, deps: createSimpleScripts() });
 
     expect(outcome.terminal).toBe("RELEASE_READY");
     expect(outcome.reasons).toEqual([]);
     expect(outcome.repairApplied).toBe(false);
-    expect(outcome.builderStrategy).toBe("ONE_CALL");
+    expect(outcome.builderStrategy).toBe("SIX_CALL_FILE_REALIZATION");
     expect(outcome.designBlueprintR2Key).toBeTruthy();
 
     // Release Ready pinned on the exact first Build Version.
@@ -112,12 +112,17 @@ describe("SIMPLE pipeline end-to-end (experiment/simplified-design-pipeline)", (
     const models = await env.DB.prepare("SELECT DISTINCT model FROM ai_stage_runs WHERE build_id = ?")
       .bind(outcome.buildId)
       .all<{ model: string }>();
-    expect(models.results).toEqual([{ model: "glm-5.3-flash" }]);
+    // Builder calls route to the full GLM-5.3 coding model; the vision/design
+    // stages (blueprint, visual QA) stay on Flash (stage routing policy).
+    expect(models.results.sort((a, b) => a.model.localeCompare(b.model))).toEqual([
+      { model: "@cf/zai-org/glm-5.3" },
+      { model: "glm-5.3-flash" },
+    ]);
   });
 
   it("ONE repair: failed first QA → new immutable Build Version v2 → final QA RELEASE_READY", async () => {
     const siteGenerationId = await startGeneration("references/simple/repair.png");
-    const outcome = await runBuildPipeline(simpleEnv, {
+    const outcome = await runBuildPipeline(env, {
       siteGenerationId,
       deps: createSimpleScripts({ firstVisualQaFails: true }),
     });
@@ -157,7 +162,7 @@ describe("SIMPLE pipeline end-to-end (experiment/simplified-design-pipeline)", (
 
   it("final QA still failing after the ONE repair → HUMAN_REVIEW_REQUIRED, no second repair", async () => {
     const siteGenerationId = await startGeneration("references/simple/still-failing.png");
-    const outcome = await runBuildPipeline(simpleEnv, {
+    const outcome = await runBuildPipeline(env, {
       siteGenerationId,
       deps: createSimpleScripts({ allVisualQaFails: true }),
     });
@@ -181,7 +186,7 @@ describe("SIMPLE pipeline end-to-end (experiment/simplified-design-pipeline)", (
 
   it("blueprint that fails the deterministic quality gate escalates to HUMAN_REVIEW_REQUIRED without generating images or a site", async () => {
     const siteGenerationId = await startGeneration("references/simple/gate-fail.png");
-    const outcome = await runBuildPipeline(simpleEnv, {
+    const outcome = await runBuildPipeline(env, {
       siteGenerationId,
       deps: createSimpleScripts({ blueprintFailsGate: true }),
     });
@@ -202,7 +207,7 @@ describe("SIMPLE pipeline end-to-end (experiment/simplified-design-pipeline)", (
 
   it("does not auto-publish: preview deployment only, no published deployment rows", async () => {
     const siteGenerationId = await startGeneration("references/simple/no-publish.png");
-    const outcome = await runBuildPipeline(simpleEnv, { siteGenerationId, deps: createSimpleScripts() });
+    const outcome = await runBuildPipeline(env, { siteGenerationId, deps: createSimpleScripts() });
     expect(outcome.terminal).toBe("RELEASE_READY");
 
     const roles = await env.DB.prepare("SELECT DISTINCT role FROM build_deployments WHERE build_id = ?")
@@ -213,32 +218,8 @@ describe("SIMPLE pipeline end-to-end (experiment/simplified-design-pipeline)", (
     expect(build?.state).toBe("RELEASE_READY");
   });
 
-  it("legacy_v2 env still routes the legacy chain (A/B selector works)", async () => {
-    const siteGenerationId = await startGeneration("references/simple/legacy-route.png");
-    // Run with the UNTOUCHED test env (legacy_v2) and the LEGACY scripted deps.
-    const { createPipelineScripts, persistPipelineScreenshot } = await import("./helpers/pipeline-scripts");
-    await persistPipelineScreenshot(env, "references/simple/legacy-route-ref.png");
-    const legacyStarted = await startSiteGeneration(env, {
-      payload: {
-        buildMode: "REFERENCE_BOUND",
-        facts: { businessName: "Pipeline Wiring Smoke Business", contactEmail: "ops@wazibizwebsites.example" },
-        reference: { screenshotR2Key: "references/simple/legacy-route-ref.png", url: "https://meridian-atelier.example.com/" },
-      },
-    });
-    const legacyOutcome = await runBuildPipeline(env, { siteGenerationId: legacyStarted.siteGenerationId, deps: createPipelineScripts() });
-    expect(legacyOutcome.terminal).toBe("RELEASE_READY");
-    // Legacy chain produced a legacy Visual Blueprint artifact, not a SIMPLE one.
-    const simpleBlueprint = await env.DB.prepare(
-      "SELECT COUNT(*) AS n FROM build_stage_artifacts WHERE build_id = ? AND kind = 'design_blueprint'"
-    )
-      .bind(legacyOutcome.buildId)
-      .first<{ n: number }>();
-    expect(simpleBlueprint?.n).toBe(0);
-    void siteGenerationId;
-  });
-
   it("the fixture blueprint itself satisfies the runtime schema gate", () => {
-    const validated = validateDesignBlueprint(simpleBlueprintFixture());
+    const validated = validateDesignBlueprintV2(simpleBlueprintFixture());
     expect(validated.valid).toBe(true);
   });
 });

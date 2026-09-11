@@ -412,8 +412,8 @@ describe("Reference intake and evidence freeze", () => {
       },
     });
     // Intake rejects on mode before touching Build ids, so no Build is
-    // created here — ORIGINAL_DESIGN builds are proof-gate bound (#24) and
-    // this test must not depend on the gate's state.
+    // created here — ORIGINAL_DESIGN is recognized but NOT ENABLED (deferred
+    // SIMPLE implementation) and this test must not depend on the lock.
     await expect(
       runReferenceIntake(env, {
         siteGenerationId: started.siteGenerationId,

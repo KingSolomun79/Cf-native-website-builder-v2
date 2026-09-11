@@ -24,14 +24,16 @@ import { storeBuildStageArtifactIdempotent, getBuildStageArtifact } from "../dom
 import { putImmutableObjectTolerant } from "../lib/assets";
 import { buildVersionRoot } from "../domain/artifact-keys";
 import {
-  DESIGN_BLUEPRINT_NATIVE_JSON_SCHEMA,
-  DESIGN_BLUEPRINT_SCHEMA_VERSION,
-  DesignBlueprintSchema,
-  evaluateBlueprintQualityGate,
-  validateDesignBlueprint,
-  type DesignBlueprint,
+  DESIGN_BLUEPRINT_V2_SCHEMA_VERSION,
+  DesignBlueprintV2Schema,
+  evaluateBlueprintQualityGateV2,
+  storedBlueprintToV2,
+  validateDesignBlueprintV2,
+  type DesignBlueprintV2,
+  type HeroMediaLinkCanonicalization,
+  type HeroMediaLinkCanonicalizationEntry,
 } from "./contracts";
-import { renderDesignBlueprintMarkdown } from "./render-blueprint";
+import { renderDesignBlueprintV2Markdown } from "./render-blueprint-v2";
 import { bytesToBase64, createSimpleVisionGenerate, mimeForKey } from "./vision";
 
 export class SimpleDesignBlueprintError extends Error {
@@ -65,11 +67,16 @@ export interface RunSimpleDesignBlueprintInput {
 }
 
 export interface SimpleDesignBlueprintResult {
-  blueprint: DesignBlueprint;
+  blueprint: DesignBlueprintV2;
+  schemaVersion: string;
   artifactR2Key: string;
   markdownR2Key: string;
   provenance: AiProvenance | null;
   attempts: AiStageAttemptRecord[];
+  /** v2 artifacts never canonicalize; only the v1 frozen-artifact compat
+   *  path (which runs the retained v1 canonicalizer for safe reading) can
+   *  report applied links here. */
+  heroMediaLinkCanonicalization: HeroMediaLinkCanonicalization;
 }
 
 function buildBlueprintUserPrompt(input: RunSimpleDesignBlueprintInput): string {
@@ -91,15 +98,32 @@ export async function runSimpleDesignBlueprintStage(
   env: Env,
   input: RunSimpleDesignBlueprintInput
 ): Promise<SimpleDesignBlueprintResult> {
-  // Workflow-retry safety: the frozen blueprint IS the stage result.
-  const existing = await getBuildStageArtifact<DesignBlueprint>(env, input.buildVersionId, "design_blueprint");
+  // Workflow-retry safety: the frozen blueprint IS the stage result. Existing
+  // v2 artifacts return as stored; historical design-blueprint/1 artifacts
+  // resume through the read-only compat path (GO section 17) — the stored R2
+  // artifact and D1 row are never rewritten.
+  const existing = await getBuildStageArtifact<unknown>(env, input.buildVersionId, "design_blueprint");
   if (existing) {
+    if (isDesignBlueprintV2Artifact(existing.value)) {
+      return {
+        blueprint: existing.value,
+        schemaVersion: DESIGN_BLUEPRINT_V2_SCHEMA_VERSION,
+        artifactR2Key: existing.artifactR2Key,
+        markdownR2Key: markdownKey(input.buildId, input.buildVersionNumber),
+        provenance: existing.provenance,
+        attempts: [],
+        heroMediaLinkCanonicalization: storedHeroLinkCanonicalization(existing.provenance),
+      };
+    }
+    const { blueprint: adapted, canonicalization } = adaptStoredV1Blueprint(existing.value, existing.provenance);
     return {
-      blueprint: existing.value,
+      blueprint: adapted,
+      schemaVersion: DESIGN_BLUEPRINT_V2_SCHEMA_VERSION,
       artifactR2Key: existing.artifactR2Key,
       markdownR2Key: markdownKey(input.buildId, input.buildVersionNumber),
       provenance: existing.provenance,
       attempts: [],
+      heroMediaLinkCanonicalization: canonicalization,
     };
   }
 
@@ -125,14 +149,18 @@ export async function runSimpleDesignBlueprintStage(
   }
 
   const generate: RawAiGenerate =
-    input.generate ?? createSimpleVisionGenerate(env, images, { buildId: input.buildId, stage: "simple-design-blueprint", buildVersionNumber: input.buildVersionNumber }, { maxTokens: 12288, jsonSchema: DESIGN_BLUEPRINT_NATIVE_JSON_SCHEMA });
+    // Coding Plan transport (GO 2026-09-11): json_object mode; the response
+  // shape travels in the boundary's prose output contract — the Coding Plan
+  // endpoint does NOT enforce native response_format json_schema (live
+  // end-to-end evidence 2026-09-11: schemaignored, v1-shaped output).
+  input.generate ?? createSimpleVisionGenerate(env, images, { buildId: input.buildId, stage: "simple-design-blueprint", buildVersionNumber: input.buildVersionNumber }, { maxTokens: 12288 });
 
   let run;
   try {
     run = await runSchemaValidatedAiStage<unknown>(env, {
       stage: "simple-design-blueprint",
-      schema: DesignBlueprintSchema,
-      schemaVersion: DESIGN_BLUEPRINT_SCHEMA_VERSION,
+      schema: DesignBlueprintV2Schema,
+      schemaVersion: DESIGN_BLUEPRINT_V2_SCHEMA_VERSION,
       userPrompt: buildBlueprintUserPrompt(input),
       buildId: input.buildId,
       siteGenerationId: input.siteGenerationId,
@@ -141,9 +169,8 @@ export async function runSimpleDesignBlueprintStage(
       inputArtifactIds: ordered.map((entry) => entry.sha256),
       maxTokens: 12288,
       generate,
-      // Native structured output: the schema rides response_format (§3), so
-      // no prose output contract in the prompt.
-      nativeJsonSchema: true,
+      // json_object rides response_format; the JSON Schema itself travels in
+      // the boundary's prose output contract (Coding Plan evidence above).
     });
   } catch (error) {
     // The boundary already spent its ONE targeted structural repair (spec
@@ -155,13 +182,19 @@ export async function runSimpleDesignBlueprintStage(
     throw error;
   }
 
-  const validated = validateDesignBlueprint(run.value);
+  const validated = validateDesignBlueprintV2(run.value);
   if (!validated.valid) {
     throw new SimpleDesignBlueprintError("SCHEMA_INVALID", `design blueprint failed schema validation: ${validated.errors}`);
   }
+  // design-blueprint/2 has NO hero-link canonicalization: the schema
+  // structurally requires every page hero and its image brief, and identity
+  // (slot ids, page ownership, priority) is deterministic domain
+  // construction. There is no referential lottery left to repair. The
+  // model's raw output stays preserved in the ai-stage run artifact
+  // (ai_stage_runs.artifact_r2_key).
   const blueprint = validated.value;
 
-  const gate = evaluateBlueprintQualityGate(blueprint);
+  const gate = evaluateBlueprintQualityGateV2(blueprint);
   if (!gate.passed) {
     throw new SimpleDesignBlueprintError(
       "QUALITY_GATE_FAILED",
@@ -174,25 +207,64 @@ export async function runSimpleDesignBlueprintStage(
     buildVersionId: input.buildVersionId,
     siteGenerationId: input.siteGenerationId,
     kind: "design_blueprint",
-    schemaVersion: DESIGN_BLUEPRINT_SCHEMA_VERSION,
+    schemaVersion: DESIGN_BLUEPRINT_V2_SCHEMA_VERSION,
     value: blueprint,
     provenance: run.provenance,
   });
 
   const markdownKeyFinal = markdownKey(input.buildId, input.buildVersionNumber);
-  await putImmutableObjectTolerant(env, markdownKeyFinal, renderDesignBlueprintMarkdown(blueprint), {
+  await putImmutableObjectTolerant(env, markdownKeyFinal, renderDesignBlueprintV2Markdown(blueprint), {
     httpMetadata: { contentType: "text/markdown" },
   });
 
   return {
     blueprint,
+    schemaVersion: DESIGN_BLUEPRINT_V2_SCHEMA_VERSION,
     artifactR2Key: stored.artifactR2Key,
     markdownR2Key: markdownKeyFinal,
     provenance: run.provenance,
     attempts: run.attempts,
+    heroMediaLinkCanonicalization: { applied: false, links: [] },
   };
 }
 
 function markdownKey(buildId: string, buildVersionNumber: number): string {
   return `${buildVersionRoot(buildId, buildVersionNumber)}/design-blueprint/DESIGN-BLUEPRINT.md`;
+}
+
+// Re-narrow the loose provenance record back to the canonicalization type; unknown
+// entries are dropped, never guessed.
+const ROUTED_PAGES = new Set(["home", "about", "services", "contact"]);
+function storedHeroLinkCanonicalization(provenance: AiProvenance | null): HeroMediaLinkCanonicalization {
+  const recorded = provenance?.heroMediaLinkCanonicalization;
+  if (!recorded?.applied || !Array.isArray(recorded.links)) return { applied: false, links: [] };
+  const links: HeroMediaLinkCanonicalizationEntry[] = [];
+  for (const link of recorded.links) {
+    if (typeof link === "object" && link !== null && ROUTED_PAGES.has(link.page) && typeof link.resolved === "string" && link.reason === "UNIQUE_PAGE_HERO_SLOT") {
+      links.push({ page: link.page as HeroMediaLinkCanonicalizationEntry["page"], supplied: link.supplied ?? null, resolved: link.resolved, reason: "UNIQUE_PAGE_HERO_SLOT" });
+    }
+  }
+  return links.length > 0 ? { applied: true, links } : { applied: false, links: [] };
+}
+
+function isDesignBlueprintV2Artifact(value: unknown): value is DesignBlueprintV2 {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    (value as { version?: unknown }).version === "2" &&
+    (value as { imagery?: { pageHeroes?: unknown } }).imagery?.pageHeroes !== undefined
+  );
+}
+
+// Explicit compat seam (GO section 17): historical design-blueprint/1
+// artifacts resume through storedBlueprintToV2; unexpected shapes refuse
+// loudly instead of flowing garbage downstream. The reported canonicalization
+// is the one recorded on the STORED artifact's provenance (v1-era), never a
+// new transformation.
+function adaptStoredV1Blueprint(value: unknown, provenance: AiProvenance | null): { blueprint: DesignBlueprintV2; canonicalization: HeroMediaLinkCanonicalization } {
+  try {
+    return { blueprint: storedBlueprintToV2(value as never), canonicalization: storedHeroLinkCanonicalization(provenance) };
+  } catch (error) {
+    throw new SimpleDesignBlueprintError("QUALITY_GATE_FAILED", `stored design-blueprint/1 artifact could not be resumed: ${(error as Error).message}`);
+  }
 }

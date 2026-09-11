@@ -18,7 +18,7 @@ import { storeBuildStageArtifact, storeBuildStageArtifactIdempotent } from "./st
 import { buildVersionAssetKey, buildVersionManifestKey, buildVersionSourceKey } from "./artifact-keys";
 import { runTechnicalPreflight } from "./technical-preflight";
 import type { PreflightCheck } from "./technical-preflight";
-import type { ImageSlot } from "./site-generator";
+import type { ImageSlot } from "./site-contracts";
 
 export interface AssemblyInput {
   buildId: string;
@@ -122,9 +122,18 @@ export async function buildAssembledCandidate(env: Env, input: AssemblyInput): P
 
   const pages: Record<string, string> = {};
   for (const [pageId, html] of Object.entries(input.pages)) {
-    const resolved = html.replace(/src="IMG:([a-zA-Z0-9_-]+)"/g, (full, slotId: string) =>
-      publicPathBySlot.has(slotId) ? `src="assets/images/${slotId}.webp"` : full
-    );
+    const resolved = html
+      .replace(/src="IMG:([a-zA-Z0-9_-]+)"/g, (full, slotId: string) =>
+        publicPathBySlot.has(slotId) ? `src="assets/images/${slotId}.webp"` : full
+      )
+      // Performance-hint references resolve through the SAME plan map (live
+      // A/B evidence 2026-09-11: the Builder emits
+      // <link rel="preload" as="image" href="IMG:{slot}"> for its heroes;
+      // an unresolved href trips UNRESOLVED_IMAGE_SLOT although the slot is
+      // planned and accepted).
+      .replace(/href="IMG:([a-zA-Z0-9_-]+)"/g, (full, slotId: string) =>
+        publicPathBySlot.has(slotId) ? `href="assets/images/${slotId}.webp"` : full
+      );
     pages[pageId] = injectBuildVersionMarker(resolved, input.buildVersionId);
   }
 
@@ -149,7 +158,9 @@ export async function buildAssembledCandidate(env: Env, input: AssemblyInput): P
     {
       formServiceEndpoint: input.formServiceEndpoint,
       expectedSiteFormId: input.expectedSiteFormId,
-      criticalSlotIds: input.imagePlanSlots.filter((slot) => slot.priority === "CRITICAL").map((slot) => slot.id),
+      criticalSlots: input.imagePlanSlots
+        .filter((slot) => slot.priority === "CRITICAL")
+        .map((slot) => ({ slotId: slot.id, page: slot.page, ...(slot.regionId ? { section: slot.regionId } : {}) })),
     }
   );
 

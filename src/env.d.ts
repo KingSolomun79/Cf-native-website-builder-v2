@@ -45,6 +45,14 @@ export interface Env {
 
   ZHIPU_API_KEY?: string;
   ZHIPU_API_URL?: string;
+  // ZAI GLM Coding Plan — the ONE LLM provider (operator GO 2026-09-11).
+  // Base URL defaults to the Coding Plan endpoint; the key is the Coding
+  // Plan credential (ZHIPU_API_KEY is the accepted legacy name on the
+  // sandbox). NEVER the general API (/api/paas/v4).
+  ZAI_CODING_BASE_URL?: string;
+  ZAI_CODING_API_KEY?: string;
+  ZAI_CODING_MODEL?: string;
+  ZAI_MULTIMODAL_MODEL?: string;
   ZHIPU_GATEWAY_PROVIDER?: string;
   PRIMARY_PROVIDER?: string;
   // One canonical LLM model for every V2 textual/multimodal call (issue
@@ -53,12 +61,8 @@ export interface Env {
   // provider failover must keep serving this exact model.
   LLM_MODEL?: string;
 
-  // EXPERIMENT BRANCH ONLY (experiment/simplified-design-pipeline): internal
-  // A/B selector for the design pipeline. "simple_blueprint_v1" routes Builds
-  // through src/simple-design/ (Design Blueprint → Website Builder → QA →
-  // ONE Repair); "legacy_v2" keeps the canonical chain. Never exposed in
-  // onboarding; the business-facing Build Mode remains REFERENCE_BOUND.
-  DESIGN_PIPELINE_VERSION?: string;
+  // DESIGN_PIPELINE_VERSION was removed with the legacy design pipeline
+  // (cleanup 2026-09-10). Any residual value in a wrangler config is inert.
 
   // EXPERIMENT BRANCH ONLY: live benchmark driver switches (never set in the
   // production config). EXP_BENCHMARK_DRIVER="1" enables the driver route;

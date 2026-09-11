@@ -15,7 +15,7 @@ import {
   validateDesignBlueprint,
 } from "../src/simple-design/contracts";
 import { renderDesignBlueprintMarkdown } from "../src/simple-design/render-blueprint";
-import { resolveDesignPipelineVersion, DEFAULT_DESIGN_PIPELINE_VERSION } from "../src/simple-design/pipeline";
+import { DESIGN_PIPELINE_VERSION } from "../src/simple-design/pipeline";
 import { composeStagePrompt, PROMPT_MANIFEST } from "../src/domain/prompt-contract";
 import { runSchemaValidatedAiStage } from "../src/domain/ai-boundary";
 import { createInitialBuild, startSiteGeneration } from "../src/domain/lifecycle";
@@ -208,122 +208,17 @@ describe("blueprint image slots bridge to KIE (spec sections 20-21)", () => {
   });
 });
 
-describe("DESIGN_PIPELINE_VERSION selector (spec section 4)", () => {
-  it("defaults to simple_blueprint_v1 on the experiment branch", () => {
-    expect(DEFAULT_DESIGN_PIPELINE_VERSION).toBe("simple_blueprint_v1");
-    expect(resolveDesignPipelineVersion({})).toBe("simple_blueprint_v1");
-    expect(resolveDesignPipelineVersion(undefined)).toBe("simple_blueprint_v1");
-  });
-
-  it("honors legacy_v2 for A/B comparison and ignores unknown values", () => {
-    expect(resolveDesignPipelineVersion({ DESIGN_PIPELINE_VERSION: "legacy_v2" })).toBe("legacy_v2");
-    expect(resolveDesignPipelineVersion({ DESIGN_PIPELINE_VERSION: "bogus" as unknown as undefined })).toBe("simple_blueprint_v1");
+describe("design pipeline provenance (no runtime selector)", () => {
+  it("the canonical pipeline is simple_blueprint_v1 and no env selector exists", () => {
+    expect(DESIGN_PIPELINE_VERSION).toBe("simple_blueprint_v1");
+    expect((globalThis as Record<string, unknown>).DESIGN_PIPELINE_VERSION).toBeUndefined();
   });
 
   it("is not exposed as a Build Mode (business-facing mode stays REFERENCE_BOUND)", () => {
-    // The selector is an env var, not a domain mode: the canonical Build Mode
+    // Provenance is a string, not a domain mode: the canonical Build Mode
     // union stays exactly REFERENCE_BOUND | ORIGINAL_DESIGN.
     expect(BUILD_LIFECYCLE_STATES).toBeDefined();
     expect(["REFERENCE_BOUND", "ORIGINAL_DESIGN"]).toContain("REFERENCE_BOUND");
-    expect(DEFAULT_DESIGN_PIPELINE_VERSION).not.toBe("REFERENCE_BOUND");
-  });
-});
-
-describe("SIMPLE prompt contract registration", () => {
-  it("composes all four SIMPLE stages with the domain contract prepended", () => {
-    for (const stage of [
-      "simple-design-blueprint",
-      "simple-website-builder",
-      "simple-visual-qa",
-      "simple-site-repair",
-    ] as const) {
-      const composed = composeStagePrompt(stage);
-      // Versions per the operator GOs: blueprint v4 (four-page hero media),
-      // builder v2 (hero-media hard requirement), visual QA v2 (hero
-      // verification); site repair remains at its original v1.
-      expect(composed.promptVersion).toBe(
-        stage === "simple-design-blueprint"
-          ? "v4"
-          : stage === "simple-site-repair"
-            ? "v1"
-            : "v2"
-      );
-      expect(composed.systemPrompt).toContain("Retained detailed stage prompt body");
-      expect(composed.systemPrompt.length).toBeGreaterThan(2000); // contract + body
-    }
-    const blueprint = composeStagePrompt("simple-design-blueprint");
-    expect(blueprint.systemPrompt).toContain("DESIGN AUTHORITY");
-    expect(blueprint.systemPrompt).toContain("6,000–12,000 output tokens");
-  });
-
-  it("leaves every legacy manifest entry untouched", () => {
-    expect(PROMPT_MANIFEST["reference-analyzer"]).toEqual({
-      promptId: "reference-analyzer",
-      promptVersion: "v3",
-      bodyFile: "01-reference-analyzer-v2.md",
-    });
-    expect(PROMPT_MANIFEST["visual-blueprint-generator"].promptVersion).toBe("v5");
-    expect(Object.keys(PROMPT_MANIFEST).length).toBe(16);
-  });
-
-  it("declares the artifact schema versions the pipeline stores", () => {
-    expect(DESIGN_BLUEPRINT_SCHEMA_VERSION).toBe("design-blueprint/1");
-  });
-});
-
-describe("native json_schema boundary (schema-convergence brief sections 3/16/18)", () => {
-  it("native schema output requires no correction: one attempt, no prose output contract (§18)", async () => {
-    // Real scaffold: ai_stage_runs carries FKs to builds/build_versions.
-    const started = await startSiteGeneration(env, {
-      payload: {
-        buildMode: "REFERENCE_BOUND",
-        facts: {
-          businessName: "Schema Convergence Fixture",
-          contactEmail: "ops@schema-convergence.example",
-        },
-        reference: { screenshotR2Key: "references/simple/schema-convergence.png" },
-      },
-    });
-    const build = await createInitialBuild(env, { siteGenerationId: started.siteGenerationId });
-    const versionRow = await env.DB.prepare("SELECT id, version_number FROM build_versions WHERE build_id = ? ORDER BY version_number DESC LIMIT 1")
-      .bind(build.buildId)
-      .first<{ id: string; version_number: number }>();
-    expect(versionRow).not.toBeNull();
-    if (!versionRow) return;
-
-    const captured: Array<{ system: string; user: string }> = [];
-    const run = await runSchemaValidatedAiStage(env, {
-      stage: "simple-design-blueprint",
-      schema: DesignBlueprintSchema,
-      schemaVersion: DESIGN_BLUEPRINT_SCHEMA_VERSION,
-      userPrompt: "Produce the Design Blueprint (schema arrives via response_format).",
-      buildId: build.buildId,
-      siteGenerationId: started.siteGenerationId,
-      buildVersionId: versionRow.id,
-      buildVersionNumber: versionRow.version_number,
-      maxTokens: 100,
-      generate: async (system, user) => {
-        captured.push({ system, user });
-        return { content: JSON.stringify(FINCH_KNOWN_GOOD_BLUEPRINT), provider: "test", model: "test-model" };
-      },
-      nativeJsonSchema: true,
-    });
-    expect(run.attempts).toHaveLength(1);
-    expect(run.attempts[0].outcome).toBe("valid");
-    expect(captured).toHaveLength(1);
-    expect(captured[0].user).not.toContain("Output contract");
-    expect(captured[0].user).not.toContain("JSON Schema");
-  });
-
-  it("exposes a plain-JSON native schema payload for the Workers AI wrapper (§3)", () => {
-    const schema = DESIGN_BLUEPRINT_NATIVE_JSON_SCHEMA.schema as Record<string, unknown>;
-    expect(schema.type).toBe("object");
-    expect(schema.additionalProperties).toBe(false);
-    const properties = schema.properties as Record<string, unknown>;
-    expect(properties.businessFactsRef).toBeDefined();
-    expect(properties.imagery).toBeDefined();
-    // JSON-serializable with no TypeBox symbol leakage.
-    const round = JSON.parse(JSON.stringify(DESIGN_BLUEPRINT_NATIVE_JSON_SCHEMA));
-    expect(round).toEqual(DESIGN_BLUEPRINT_NATIVE_JSON_SCHEMA);
+    expect(DESIGN_PIPELINE_VERSION).not.toBe("REFERENCE_BOUND");
   });
 });
