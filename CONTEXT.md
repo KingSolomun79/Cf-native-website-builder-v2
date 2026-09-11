@@ -37,8 +37,8 @@ _Avoid_: automated repair iteration.
 **Build Version**: An immutable candidate state within one Build, created by the bounded automated generation or repair lifecycle. Human-requested changes start a new Build rather than another Build Version.
 _Avoid_: Revision Request, human creative iteration.
 
-**Automated Repair**: A bounded machine-directed change that brings a Build Version into compliance with already-fixed Business inputs, Visual Blueprint and Implementation Contract. A material repair creates a new Build Version and cannot change Business Facts, Reference, Build Mode or Visual Blueprint.
-_Avoid_: Revision Request, Blueprint rewrite, new creative direction.
+**Automated Repair**: A bounded machine-directed change that brings a Build Version into compliance with already-fixed Business inputs and the approved Design Blueprint. At most ONE durable Repair is permitted per Build Version; a material repair creates a new immutable Build Version inside the same Build and is re-evaluated in full. It cannot change Business Facts, Reference, Build Mode or the Design Blueprint.
+_Avoid_: Revision Request, Blueprint rewrite, new creative direction, unbounded repair loops.
 
 **Build Record**: The compact retained diagnostic history of a Build, including outcome, QA, failure cause, cost and relevant prompt/model/schema provenance. It may remain after disposable artifacts and Deployments are removed.
 _Avoid_: Deployment, Build Version.
@@ -85,14 +85,11 @@ _Avoid_: inferred intent presented as evidence, treating raw segments as the bin
 **Reference Analysis**: The structured interpretation of Reference Evidence that identifies hierarchy, relationships, signature traits, likely design intent and identity-defining characteristics. It may interpret Evidence but cannot overwrite or fabricate it.
 _Avoid_: raw measurement, invented observation.
 
-**Visual Blueprint**: The binding design contract translating the chosen design origin into the intended Site for the Business. Its ordered canonical region list is the authoritative region topology: Reference Analysis may aggregate raw evidence segments into canonical regions (provenance-preserving), and generation and QA hard composition gates are judged against that canonical topology while measured fidelity still comes from raw Reference Evidence. Automated Repair may correct implementation against it but cannot silently redefine it.
-_Avoid_: Implementation Contract, generated source, mutable repair target, comparing QA topology against raw evidence segmentation.
+**Design Blueprint**: The binding design contract translating the chosen design origin into the intended Site for the Business, produced by ONE multimodal schema-validated call from the captured Reference. Generation and QA hard composition gates are judged against it while measured fidelity still comes from raw Reference Evidence. Automated Repair may correct implementation against it but cannot silently redefine it.
+_Avoid_: generated source as the design contract, mutable repair target, comparing QA against raw evidence segmentation.
 
-**Blueprint Review Required**: `BLUEPRINT_REVIEW_REQUIRED` is the specific escalation signal that the Visual Blueprint itself is materially wrong, contradictory, impossible or inconsistent with the design-origin contract. It leads to human review rather than implementation-only repair.
+**Blueprint Review Required**: `BLUEPRINT_REVIEW_REQUIRED` is the specific escalation signal that the Design Blueprint itself is materially wrong, contradictory, impossible or inconsistent with the design-origin contract. It leads to human review rather than implementation-only repair.
 _Avoid_: normal implementation defect, automatic Blueprint mutation.
-
-**Implementation Contract**: The binding realization plan for expressing the Visual Blueprint and Business content across the four pages. It may choose technical structure and responsive realization but cannot change topology, signature traits, first viewport, image roles or visual thesis.
-_Avoid_: alternate design direction, Blueprint rewrite.
 
 **Image Slot**: A stable visual requirement inside a Build, defined by semantic purpose and compositional role before image generation. Crop, remapping or another generated candidate does not create a new slot; changing the role does.
 _Avoid_: generated image candidate, arbitrary placeholder.
@@ -130,7 +127,7 @@ _Avoid_: moving benchmark target, easier replacement reference.
 **Benchmark Pass**: A Benchmark Site reaching Release Ready through the automated pipeline without manual source-code edits and within the agreed image-generation spend limit. Human Approval and Publication are not required because the benchmark measures automated generation/release quality.
 _Avoid_: manually corrected result, approval as benchmark criterion.
 
-**Design Archetype**: Non-binding inspiration vocabulary only. It must never automatically select or constrain a Visual Blueprint based on industry.
+**Design Archetype**: Non-binding inspiration vocabulary only. It must never automatically select or constrain a Design Blueprint based on industry.
 _Avoid_: industry-to-layout rule, design authority.
 
 **Form Submission**: One visitor-submitted contact message and its processing lifecycle. Browser success or client-side validation alone does not make it accepted.

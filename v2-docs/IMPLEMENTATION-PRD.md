@@ -6,6 +6,9 @@
 **Date:** 2026-08-31  
 **Repository:** `KingSolomun79/Cf-native-website-builder-v2`  
 **Runtime:** Cloudflare-native  
+
+> **SUPERSEDED IN PART — read with FINAL-DECISION-RECORD §16 (decisions 116–121), `MODEL-AND-PROVIDER-POLICY.md` and `DOM-FIRST-VISUAL-FIDELITY-REPORT.md`.** Since this document was frozen, the COMPLEX design chain was removed and the SIMPLE pipeline became the only canonical V2 path: Reference Capture -> Design Blueprint (design-blueprint/2, ONE multimodal call) -> Nano Banana 2 Lite images -> ONE DOM-first/CSS-last Website Builder stage (home, about, services, contact, then site.css against the real four-page DOM, then site.js) -> Technical + Truth + Visual QA -> optional ONE durable Repair -> Release Ready. LLM operations run on the Z.AI Coding Plan only. Clauses naming the removed artifacts — Reference Analysis, Visual Blueprint, Implementation Contract, Craft Preflight, Fix Coordinator / Release Blocker Fix, trait obligation ledger, legacy 3-of-5 proof gate — describe retired behavior; read "Visual Blueprint" as "Design Blueprint" and treat the removed stages as absent. A full clause-by-clause rewrite is tracked follow-up work.
+
 **Generated output:** static/framework-light HTML + CSS + minimal JS  
 **Image generation:** KIE.ai  
 **Browser/reference/QA:** Cloudflare browser infrastructure / Browser Run  

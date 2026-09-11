@@ -53,6 +53,12 @@ Reference Capture
 
 There is no runtime design-pipeline selector and no legacy design path: `src/simple-design/` plus shared infrastructure IS the V2 build pipeline. `DESIGN_PIPELINE_VERSION=simple_blueprint_v1` survives only as a provenance string. (The former COMPLEX chain — Reference Analysis, Visual Blueprint, Implementation Contract, craft/realization repair, Fix Coordinator — was removed; see `v2-docs/FINAL-DECISION-RECORD.md` and `v2-docs/LEGACY-CLEANUP-INVENTORY.md`.)
 
+## LLM provider and image model
+
+Every V2 language-model operation runs on the **Z.AI Coding Plan only** (`https://api.z.ai/api/coding/paas/v4`): Design Blueprint and Visual QA on `glm-5.3-flash`, Website Builder and Site Repair on `glm-5.3`. Never the Z.AI General API, Workers AI inference, Kimi, OpenRouter, Cloudflare AI Gateway, or automatic provider fallback. Canonical policy: `v2-docs/MODEL-AND-PROVIDER-POLICY.md`.
+
+Canonical image generation is **Nano Banana 2 Lite** via the KIE durable lifecycle (`KIE_MODEL: "nano-banana-2-lite"`).
+
 ## Domain model
 
 V2 has no Client Account or Client User domain.
@@ -107,24 +113,23 @@ Generated output is semantic, static/framework-light HTML/CSS/minimal JS. The pl
 
 Reference Screenshot is authoritative for static composition. Reference URL supplements interaction, responsive and computed/runtime evidence.
 
-Pipeline:
+Pipeline (canonical SIMPLE — the former COMPLEX chain was removed):
 
 ```text
 Onboarding Submission
 -> Business Facts
 -> Reference Suitability
 -> Reference Evidence
--> Reference Analysis
--> Visual Blueprint
--> Implementation Contract
--> incremental Site generation
--> Image Plan
--> image waves
+-> Reference Capture
+-> Design Blueprint (design-blueprint/2, ONE multimodal call)
+-> Image Plan / Image Slots -> KIE waves (Nano Banana 2 Lite)
+-> ONE Website Builder stage (home, about, services, contact, then
+   site.css against the real four-page DOM, then site.js)
 -> assembly
 -> Technical Preflight
 -> Preview
--> QA-A + QA-B
--> bounded Automated Repair
+-> Technical + Truth + Visual QA
+-> optional ONE durable Repair
 -> Release Ready OR HUMAN_REVIEW_REQUIRED
 ```
 
@@ -135,6 +140,7 @@ A Blueprint-root defect emits `BLUEPRINT_REVIEW_REQUIRED`; implementation QA mus
 QA-A:
 
 - visual >=90;
+- every critical visual category >=85;
 - content >=90;
 - zero P0/P1;
 - no fabrication;
@@ -149,9 +155,11 @@ QA-B:
 Automation limit:
 
 1. initial generation;
-2. one Fix Coordinator repair batch;
-3. at most one Release Blocker Fix;
-4. then `HUMAN_REVIEW_REQUIRED` if blockers remain.
+2. at most ONE durable automated Repair per Build Version (it creates a new
+   immutable Build Version inside the same Build and is re-evaluated in full);
+3. then `HUMAN_REVIEW_REQUIRED` if blockers remain. There is no Fix
+   Coordinator batch and no separate Release Blocker Fix stage — those were
+   removed with the COMPLEX chain.
 
 ## Images
 

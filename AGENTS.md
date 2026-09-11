@@ -179,7 +179,7 @@ Use narrower contract tests where the primary seam cannot reliably exercise an e
 - Business Fact changes use Fact Update; historical Onboarding Submissions remain immutable.
 - Human new intent creates a new Build.
 - Bounded Automated Repair creates a new immutable Build Version inside the same Build.
-- Automated Repair cannot change Business Facts, Reference, Build Mode or Visual Blueprint.
+- Automated Repair cannot change Business Facts, Reference, Build Mode or the Design Blueprint.
 - Blueprint-root defects emit `BLUEPRINT_REVIEW_REQUIRED` -> `HUMAN_REVIEW_REQUIRED`.
 
 ## Release lifecycle
@@ -213,17 +213,18 @@ Onboarding Submission
 -> Business Fact normalization
 -> Reference Suitability
 -> Reference Evidence
--> Reference Analysis
--> Visual Blueprint
--> Implementation Contract
--> incremental Site generation
+-> Reference Capture
+-> Design Blueprint (design-blueprint/2, ONE multimodal call)
 -> Image Plan / Image Slots
--> KIE waves
+-> KIE waves (Nano Banana 2 Lite)
+-> ONE Website Builder stage
+   (home, about, services, contact, then site.css against the real
+   four-page DOM, then site.js — DOM-first/CSS-last)
 -> assembly
 -> Technical Preflight
 -> Preview
--> QA-A + QA-B
--> bounded Automated Repair
+-> Technical + Truth + Visual QA
+-> optional ONE durable Automated Repair
 -> Release Ready OR HUMAN_REVIEW_REQUIRED
 -> Approval
 -> Publication
@@ -244,7 +245,7 @@ Reference Screenshot controls static composition. Reference URL supplements runt
 - QA-A: rendered visual/content quality + hard composition gates.
 - QA-B: browser/source/DOM/network/accessibility/SEO/form contract.
 - Release Ready requires zero P0/P1 Release Blocker and all mandatory gates.
-- One Fix Coordinator batch + at most one Release Blocker Fix.
+- At most ONE durable Automated Repair per Build Version (no Fix Coordinator batch, no separate Release Blocker Fix — removed with the COMPLEX chain).
 - Every material repair creates a new Build Version that must be re-evaluated.
 - Never create an unbounded retry/mutation loop.
 
