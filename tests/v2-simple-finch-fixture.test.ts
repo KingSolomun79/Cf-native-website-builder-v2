@@ -70,13 +70,10 @@ describe("known-good Blueprint builder test (spec section 61)", () => {
       acceptedImages: materializeAcceptedImageDescriptors(blueprint),
       formServiceEndpoint: ENDPOINT,
       siteFormId: "site:finch-fixture",
-      visualInputs: [
-        { kind: "full-page", artifact: "references/simple/finch-ref.png", sha256: "fixture-sha", width: 1440, height: 3200 },
-      ],
-      visionGenerate: scripts.visionGenerate,
+      generate: scripts.generate,
     });
 
-    expect(built.strategy).toBe("ONE_CALL");
+    expect(built.strategy).toBe("SIX_CALL_FILE_REALIZATION");
     const bundle: SiteBundle = built.bundle;
     expect(Object.keys(bundle.pages).sort()).toEqual(["about", "contact", "home", "services"]);
     expect(bundle.sharedCss).toContain(":focus-visible");
@@ -131,10 +128,7 @@ describe("known-good Blueprint builder test (spec section 61)", () => {
       acceptedImages: materializeAcceptedImageDescriptors(blueprint),
       formServiceEndpoint: ENDPOINT,
       siteFormId: "site:finch-fixture",
-      visualInputs: [
-        { kind: "full-page", artifact: "references/simple/finch-assembly-ref.png", sha256: "fixture-sha", width: 1440, height: 3200 },
-      ],
-      visionGenerate: scripts.visionGenerate,
+      generate: scripts.generate,
     });
 
     // Real image bytes per slot so assembly resolves every placeholder.

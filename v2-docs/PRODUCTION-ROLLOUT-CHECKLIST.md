@@ -1,6 +1,16 @@
 # PRODUCTION ROLLOUT CHECKLIST — SIMPLE V2
 
-Status: **BLOCKED / NOT AUTHORIZED** (as of the 2026-09-10 legacy cleanup).
+Status: **BLOCKED / NOT AUTHORIZED** (as of the 2026-09-11 Coding Plan unification).
+
+## Provider prerequisites (operator GO 2026-09-11: ZAI CODING PLAN UNIFICATION)
+
+- All LLM inference routes through the Z.AI GLM Coding Plan only — see
+  `v2-docs/MODEL-AND-PROVIDER-POLICY.md`. No Workers AI LLM binding is
+  required in production; the previously noted "add Workers AI binding"
+  prerequisite is **CANCELLED**.
+- Production must carry: `ZAI_CODING_API_KEY` (Coding Plan secret),
+  `ZAI_CODING_BASE_URL` (Coding endpoint), and PASSING exact-model canaries
+  (text `glm-5.3`; the multimodal model verified live for Blueprint/Visual QA).
 
 ## HARD BLOCKER — image model configuration
 

@@ -24,7 +24,6 @@ import { storeBuildStageArtifactIdempotent, getBuildStageArtifact } from "../dom
 import { putImmutableObjectTolerant } from "../lib/assets";
 import { buildVersionRoot } from "../domain/artifact-keys";
 import {
-  DESIGN_BLUEPRINT_V2_NATIVE_JSON_SCHEMA,
   DESIGN_BLUEPRINT_V2_SCHEMA_VERSION,
   DesignBlueprintV2Schema,
   evaluateBlueprintQualityGateV2,
@@ -150,7 +149,11 @@ export async function runSimpleDesignBlueprintStage(
   }
 
   const generate: RawAiGenerate =
-    input.generate ?? createSimpleVisionGenerate(env, images, { buildId: input.buildId, stage: "simple-design-blueprint", buildVersionNumber: input.buildVersionNumber }, { maxTokens: 12288, jsonSchema: DESIGN_BLUEPRINT_V2_NATIVE_JSON_SCHEMA });
+    // Coding Plan transport (GO 2026-09-11): json_object mode; the response
+  // shape travels in the boundary's prose output contract — the Coding Plan
+  // endpoint does NOT enforce native response_format json_schema (live
+  // end-to-end evidence 2026-09-11: schemaignored, v1-shaped output).
+  input.generate ?? createSimpleVisionGenerate(env, images, { buildId: input.buildId, stage: "simple-design-blueprint", buildVersionNumber: input.buildVersionNumber }, { maxTokens: 12288 });
 
   let run;
   try {
@@ -166,9 +169,8 @@ export async function runSimpleDesignBlueprintStage(
       inputArtifactIds: ordered.map((entry) => entry.sha256),
       maxTokens: 12288,
       generate,
-      // Native structured output: the schema rides response_format (§3), so
-      // no prose output contract in the prompt.
-      nativeJsonSchema: true,
+      // json_object rides response_format; the JSON Schema itself travels in
+      // the boundary's prose output contract (Coding Plan evidence above).
     });
   } catch (error) {
     // The boundary already spent its ONE targeted structural repair (spec

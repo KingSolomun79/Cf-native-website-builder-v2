@@ -887,6 +887,18 @@ export function materializeBlueprintImageSlots(blueprint: DesignBlueprintV2): Im
   return [...heroes, ...supporting];
 }
 
+/** A frozen Reference visual input (full-page/detail capture descriptor).
+ *  Visual authority flows through Blueprint (design) and Visual QA
+ *  (comparison); the Website Builder itself is text-only (model-routing GO
+ *  §4). Formerly exported from website-builder. */
+export interface SimpleBuilderVisualInput {
+  kind: string;
+  artifact: string;
+  sha256: string;
+  width: number;
+  height: number;
+}
+
 export function materializeBlueprintPromptRecords(blueprint: DesignBlueprintV2): ImagePromptRecord[] {
   const heroes = ROUTED_PAGE_IDS.map((page) => {
     const brief = blueprint.imagery.pageHeroes[page];

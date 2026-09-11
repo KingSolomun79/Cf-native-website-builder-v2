@@ -7,10 +7,10 @@
 //   §5-§7  coverage passes on the declared page; absence and wrong-page
 //          placement each fail with their own finding id
 //   §8     unknown IMG slots still fail deterministically downstream
-//   §9     ONE_CALL schema-valid but coverage-invalid is eligible for the
-//          sanctioned TWO_CALL_SINGLE_STAGE fallback (same stage)
-//   §10-§11 TWO_CALL output still violating coverage fails CLOSED: no
-//          persisted artifact, no engine retry, no third Builder attempt
+//   §9     the canonical SIX_CALL build persists only when every realized
+//          file passes its deterministic validation AND coverage
+//   §10-§11 a six-call output still violating coverage fails CLOSED: no
+//          persisted artifact, no engine retry, no second Builder attempt
 //   §12    the mandatory ledger carries exact slot/page/section/priority
 //          (shared context + per-page grouping for the pages call)
 //   §13    a testimonial-style CRITICAL image ships WITHOUT fabricated
@@ -30,6 +30,7 @@ import {
 } from "../src/simple-design/contracts";
 import { requiredCriticalImageSlots, validateCriticalImageCoverage } from "../src/simple-design/critical-image-coverage";
 import {
+  BUILDER_STRATEGY_NOTE,
   buildCriticalImageLedger,
   buildCriticalImageLedgerByPage,
   CRITICAL_IMAGE_INVARIANT,
@@ -78,11 +79,13 @@ const withNamedCriticalSupporting = (id: string, section: string): DesignBluepri
 const imgTag = (slotId: string) => `<img src="IMG:${slotId}" data-image-id="${slotId}" alt="${slotId} photograph">`;
 
 const pageWith = (pageId: string, slotIds: string[], extraSection = ""): string =>
-  `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${pageId}</title><meta name="description" content="${pageId} page for the coverage fixture bundle, described at length."><meta property="og:title" content="${pageId}"><meta property="og:description" content="${pageId} description"></head><body><header><nav aria-label="Primary"><a href="/">Home</a><a href="/about">About</a><a href="/services">Services</a><a href="/contact">Contact</a></nav></header><main><section class="hero">${slotIds.map(imgTag).join("")}<h1>${pageId}</h1><p>${pageId} body copy long enough for any schema floor the bundle schema applies to its pages.</p></section>${extraSection}</main><footer><p>Footer line for the fixture.</p></footer><script src="site.js" defer></script></body></html>`;
+  `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${pageId}</title><meta name="description" content="${pageId} page for the coverage fixture bundle, described at length."><meta property="og:title" content="${pageId}"><meta property="og:description" content="${pageId} description"><link rel="stylesheet" href="site.css"></head><body><header><nav aria-label="Primary"><a href="/">Home</a><a href="/about">About</a><a href="/services">Services</a><a href="/contact">Contact</a></nav></header><main><section class="hero">${slotIds.map(imgTag).join("")}<h1>${pageId}</h1><p>${pageId} body copy long enough for any schema floor the bundle schema applies to its pages.</p></section>${extraSection}</main><footer><p>Footer line for the fixture.</p></footer><script src="site.js" defer></script></body></html>`;
 
-// Schema-valid shared CSS (site-bundle/1 requires >= 200 chars).
+// Schema-valid shared CSS (site-bundle/1 requires >= 200 chars) that ALSO
+// passes the deterministic file-realization CSS validation (>= 10 rules,
+// token layer, @media, :focus-visible, prefers-reduced-motion).
 const FIXTURE_CSS =
-  ":root { --accent: #7c3aed; --ink: #1a1523; --paper: #faf7f2; }\nbody { margin: 0; background: var(--paper); color: var(--ink); font-family: system-ui, sans-serif; }\n.hero { min-height: 60vh; display: grid; place-items: center; }\na:hover { text-decoration: underline; }\n:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }\n@media (max-width: 767px) { .hero { min-height: 40vh; } }\n@media (prefers-reduced-motion: reduce) { * { animation: none; transition: none; } }";
+  ":root { --accent: #7c3aed; --ink: #1a1523; --paper: #faf7f2; }\nbody { margin: 0; background: var(--paper); color: var(--ink); font-family: system-ui, sans-serif; }\n.hero { min-height: 60vh; display: grid; place-items: center; }\n.site-nav { display: flex; gap: 1.5rem; }\nimg { max-width: 100%; display: block; }\nform { display: grid; gap: 1rem; }\na:hover { text-decoration: underline; }\n:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }\n@media (max-width: 767px) { .hero { min-height: 40vh; } }\n@media (prefers-reduced-motion: reduce) { * { animation: none; transition: none; } }";
 const FIXTURE_JS = "(function(){var t=document.querySelector('.nav-toggle');if(t){t.addEventListener('click',function(){document.body.classList.toggle('nav-open');});}})();";
 
 // Coverage-complete bundle for a blueprint: every page carries its hero;
@@ -236,46 +239,41 @@ describe("unknown IMG slots still fail deterministically", () => {
 
 // ── §9-§11, §14: the stage's strategy budget and fail-closed behavior ────────
 
-const SHELL = { sharedCss: FIXTURE_CSS, sharedJs: FIXTURE_JS };
-
 function scriptedBuilderSeam(handlers: {
-  onOneCall?: (userPrompt: string) => void;
-  onShell?: (userPrompt: string) => void;
-  onPageCall?: (userPrompt: string) => void;
-  oneCallBundle: SiteBundle;
-  pagesBundle: SiteBundle;
+  onCssCall?: (userPrompt: string) => void;
+  onPageCall?: (page: string, userPrompt: string) => void;
+  pages: Record<string, string>;
 }) {
   const calls: string[] = [];
   return {
     calls,
     generate: async (_system: string, user: string) => {
-      if (user.includes("TASK: Build the COMPLETE website in one response")) {
-        calls.push("one-call");
-        handlers.onOneCall?.(user);
-        return { content: JSON.stringify(handlers.oneCallBundle), provider: "test", model: "test" };
+      if (user.includes("call 1 of 6")) {
+        calls.push("site-css");
+        handlers.onCssCall?.(user);
+        return { content: FIXTURE_CSS, provider: "test", model: "@cf/zai-org/glm-5.3" };
       }
-      if (user.includes("TASK (1 of 2")) {
-        calls.push("shell");
-        handlers.onShell?.(user);
-        return { content: JSON.stringify(SHELL), provider: "test", model: "test" };
+      const page = /Realize the "(home|about|services|contact)" page/.exec(user)?.[1];
+      if (page) {
+        calls.push(page);
+        handlers.onPageCall?.(page, user);
+        return { content: handlers.pages[page], provider: "test", model: "@cf/zai-org/glm-5.3" };
       }
-      if (user.includes("TASK (2 of 2")) {
-        calls.push("pages");
-        handlers.onPageCall?.(user);
-        return { content: JSON.stringify({ pages: handlers.pagesBundle.pages }), provider: "test", model: "test" };
+      if (user.includes("call 6 of 6")) {
+        calls.push("site-js");
+        return { content: FIXTURE_JS, provider: "test", model: "@cf/zai-org/glm-5.3" };
       }
       throw new Error(`unexpected builder prompt: ${user.slice(0, 80)}`);
     },
   };
 }
 
-describe("ONE_CALL coverage failure uses the sanctioned TWO_CALL fallback; TWO_CALL failure fails closed", () => {
-  it("§9 a schema-valid ONE_CALL bundle violating coverage is eligible for the TWO_CALL_SINGLE_STAGE fallback, which may validate", async () => {
+describe("the canonical SIX_CALL build: coverage-valid output persists; coverage-invalid output fails closed", () => {
+  it("§9 a six-call build whose every file validates persists the bundle under the canonical strategy", async () => {
     const ctx = await scaffoldBuild("references/simple/critical-coverage-a.png");
     const bp = withCriticalSupporting();
     const valid = coverageBundleFor(bp);
-    const invalid = coverageBundleFor(baseBlueprint()); // missing home-chapters-tents (CRITICAL here)
-    const seam = scriptedBuilderSeam({ oneCallBundle: invalid, pagesBundle: valid });
+    const seam = scriptedBuilderSeam({ pages: valid.pages });
 
     const result = await runSimpleWebsiteBuilderStage(env, {
       siteGenerationId: ctx.siteGenerationId,
@@ -287,28 +285,25 @@ describe("ONE_CALL coverage failure uses the sanctioned TWO_CALL fallback; TWO_C
       acceptedImages: materializeAcceptedImageDescriptors(bp),
       formServiceEndpoint: ENDPOINT,
       siteFormId: "site:critical-coverage",
-      visualInputs: [],
       generate: seam.generate,
     });
 
-    expect(result.strategy).toBe("TWO_CALL_SINGLE_STAGE");
-    expect(seam.calls).toEqual(["one-call", "shell", "pages"]);
+    expect(result.strategy).toBe("SIX_CALL_FILE_REALIZATION");
+    expect(seam.calls).toEqual(["site-css", "home", "about", "services", "contact", "site-js"]);
     expect(result.bundle.pages.home).toContain('src="IMG:home-chapters-tents"');
-    expect(result.bundle.notes).toContain("TWO-CALL SINGLE-STAGE fallback");
-    expect(result.bundle.notes).toContain("CRITICAL image coverage");
+    expect(result.bundle.notes).toBe(BUILDER_STRATEGY_NOTE);
 
-    // §14 (positive half): the PERSISTED artifact is the coverage-valid
-    // fallback bundle — the invalid ONE_CALL output was never frozen.
+    // §14 (positive half): the PERSISTED artifact is the validated bundle.
     const stored = await getBuildStageArtifact<SiteBundle>(env, ctx.buildVersionId, "site_bundle");
     expect(stored?.value.pages.home).toContain('src="IMG:home-chapters-tents"');
     expect(stored?.value.pages.home).toBe(valid.pages.home);
   });
 
-  it("§10+§11 a TWO_CALL output still violating coverage FAILS CLOSED: SimpleWebsiteBuilderError, nothing persisted, no third builder call, no engine retry", async () => {
+  it("§10+§11 a six-call output still violating coverage FAILS CLOSED: SimpleWebsiteBuilderError, nothing persisted, no second builder attempt, no engine retry", async () => {
     const ctx = await scaffoldBuild("references/simple/critical-coverage-b.png");
     const bp = withCriticalSupporting();
     const invalid = coverageBundleFor(baseBlueprint()); // missing the CRITICAL supporting slot
-    const seam = scriptedBuilderSeam({ oneCallBundle: invalid, pagesBundle: invalid });
+    const seam = scriptedBuilderSeam({ pages: invalid.pages });
 
     let thrown: unknown;
     try {
@@ -322,7 +317,6 @@ describe("ONE_CALL coverage failure uses the sanctioned TWO_CALL fallback; TWO_C
         acceptedImages: materializeAcceptedImageDescriptors(bp),
         formServiceEndpoint: ENDPOINT,
         siteFormId: "site:critical-coverage",
-        visualInputs: [],
         generate: seam.generate,
       });
     } catch (error) {
@@ -334,15 +328,15 @@ describe("ONE_CALL coverage failure uses the sanctioned TWO_CALL fallback; TWO_C
     expect(error.code).toBe("CRITICAL_IMAGE_COVERAGE");
     expect(error.findings.map((finding) => finding.slotId)).toContain("home-chapters-tents");
 
-    // exactly ONE_CALL + the sanctioned fallback — never a third attempt
-    expect(seam.calls).toEqual(["one-call", "shell", "pages"]);
+    // exactly the six canonical calls — never a second attempt
+    expect(seam.calls).toEqual(["site-css", "home", "about", "services", "contact", "site-js"]);
     // nothing was frozen as a successful Builder artifact (§14 negative half)
     const stored = await getBuildStageArtifact<SiteBundle>(env, ctx.buildVersionId, "site_bundle");
     expect(stored).toBeNull();
-    // the engine can never turn this into a retry (a retry would be a third attempt)
+    // the engine can never turn this into a retry (a retry would be a second attempt)
     expect(classifyStageFailure(error)).toBe("DETERMINISTIC_REVIEW_REQUIRED");
   });
-});
+})
 
 // ── §12: the deterministic ledger ────────────────────────────────────────────
 
@@ -360,16 +354,17 @@ describe("the mandatory CRITICAL ledger names exact slot/page/section/priority",
     expect(byPage).toContain("- home-testimonial-office — section: Testimonial Band — priority: CRITICAL — REQUIRED");
     expect(byPage).toContain("- about-hero — section: hero — priority: CRITICAL — REQUIRED");
 
-    // and the SAME ledger reaches the model: shared context in the ONE_CALL,
-    // per-page grouping in the TWO_CALL pages call.
+    // and the SAME ledger reaches the model: the full ledger in the shared
+    // context of every call, the page's own slice in each page call.
     const ctx = await scaffoldBuild("references/simple/critical-coverage-c.png");
-    const oneCallPrompts: string[] = [];
-    const pagesPrompts: string[] = [];
+    const cssPrompts: string[] = [];
+    const homePrompts: string[] = [];
     const seam = scriptedBuilderSeam({
-      onOneCall: (user) => oneCallPrompts.push(user),
-      onPageCall: (user) => pagesPrompts.push(user),
-      oneCallBundle: coverageBundleFor(baseBlueprint()),
-      pagesBundle: coverageBundleFor(bp),
+      onCssCall: (user) => cssPrompts.push(user),
+      onPageCall: (page, user) => {
+        if (page === "home") homePrompts.push(user);
+      },
+      pages: coverageBundleFor(bp).pages,
     });
     await runSimpleWebsiteBuilderStage(env, {
       siteGenerationId: ctx.siteGenerationId,
@@ -381,15 +376,13 @@ describe("the mandatory CRITICAL ledger names exact slot/page/section/priority",
       acceptedImages: descriptors,
       formServiceEndpoint: ENDPOINT,
       siteFormId: "site:critical-coverage",
-      visualInputs: [],
       generate: seam.generate,
     });
-    expect(oneCallPrompts[0]).toContain("MANDATORY CRITICAL IMAGE PLACEMENTS");
-    expect(oneCallPrompts[0]).toContain(CRITICAL_IMAGE_INVARIANT);
-    expect(oneCallPrompts[0]).toContain("- home-testimonial-office\n  page: home\n  section: Testimonial Band\n  priority: CRITICAL\n  REQUIRED");
-    expect(pagesPrompts[0]).toContain("MANDATORY CRITICAL IMAGES BY PAGE");
-    expect(pagesPrompts[0]).toContain("HOME REQUIRED IMAGES:");
-    expect(pagesPrompts[0]).toContain("- home-testimonial-office — section: Testimonial Band — priority: CRITICAL — REQUIRED");
+    expect(cssPrompts[0]).toContain("MANDATORY CRITICAL IMAGE PLACEMENTS");
+    expect(cssPrompts[0]).toContain(CRITICAL_IMAGE_INVARIANT);
+    expect(cssPrompts[0]).toContain("- home-testimonial-office\n  page: home\n  section: Testimonial Band\n  priority: CRITICAL\n  REQUIRED");
+    expect(homePrompts[0]).toContain("THIS PAGE'S MANDATORY CRITICAL IMAGES");
+    expect(homePrompts[0]).toContain("- home-testimonial-office — section: Testimonial Band — priority: CRITICAL — REQUIRED");
   });
 });
 
@@ -513,7 +506,7 @@ describe("pipeline: a Builder that cannot satisfy CRITICAL coverage terminates H
     expect(outcome.terminal).toBe("HUMAN_REVIEW_REQUIRED");
     expect(outcome.reasons[0]).toContain("WEBSITE_BUILDER_CRITICAL_IMAGE_COVERAGE");
     expect(outcome.reasons[0]).toContain("about-hero");
-    expect(outcome.reasons[0]).toContain("no third attempt");
+    expect(outcome.reasons[0]).toContain("no further attempt");
     expect(outcome.repairApplied).toBe(false);
     expect(outcome.releaseReadyBuildVersionId).toBeNull();
     expect(outcome.previewUrl).toBeNull();

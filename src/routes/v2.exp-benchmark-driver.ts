@@ -46,12 +46,27 @@ import { buildAssembledCandidate, deployPreview, freezeAssembledCandidate, Assem
 import { storeBuildStageArtifactIdempotent, getBuildStageArtifact } from "../domain/stage-artifacts";
 import { buildStandardEvidenceBundle } from "../domain/qa-evidence";
 import { createProductionQaCapture } from "../domain/qa-capture";
-import { runSimpleWebsiteBuilderStage, runSimpleBuilderTransportDiagnostic } from "../simple-design/website-builder";
+import {
+  runSimpleWebsiteBuilderStage,
+  runSimpleBuilderFileRealizationCore,
+  runSimpleBuilderCssRealization,
+  resolveWebsiteBuilderModel,
+  SimpleWebsiteBuilderError,
+} from "../simple-design/website-builder";
+import {
+  generateZaiCodingPlan,
+  listZaiCodingPlanModels,
+  ZaiCodingPlanOutputExhaustedError,
+  ZaiCodingPlanTransportError,
+} from "../lib/zai-coding-plan";
+import { validateBuilderFileBundle, blueprintMotionExists } from "../simple-design/builder-file-realization";
 import { runSimpleDesignBlueprintStage } from "../simple-design/design-blueprint";
 import { renderDesignBlueprintMarkdown } from "../simple-design/render-blueprint";
 import { renderDesignBlueprintV2Markdown } from "../simple-design/render-blueprint-v2";
 import { runDeterministicBundleQa } from "../simple-design/bundle-qa";
 import { runSimpleVisualQaStage } from "../simple-design/visual-qa";
+import { Value } from "@sinclair/typebox/value";
+import { validateCriticalImageCoverage } from "../simple-design/critical-image-coverage";
 import {
   blueprintSlotsToImageSlots,
   blueprintSlotsToPromptRecords,
@@ -63,13 +78,15 @@ import {
   storedBlueprintToV2,
   DESIGN_BLUEPRINT_NATIVE_JSON_SCHEMA,
   DESIGN_BLUEPRINT_SCHEMA_VERSION,
+  SiteBundleSchema,
   evaluateBlueprintQualityGate,
+  evaluateBlueprintQualityGateV2,
   validateDesignBlueprint,
   type DesignBlueprint,
   type DesignBlueprintV2,
   type SiteBundle,
 } from "../simple-design/contracts";
-import { parseModelJson } from "../domain/ai-boundary";
+import { parseModelJson, parseSingleFileSource, AiStageFileInvalidError } from "../domain/ai-boundary";
 import { composeStagePrompt } from "../domain/prompt-contract";
 import type { BusinessFacts } from "../domain/lifecycle-schema";
 
@@ -79,7 +96,12 @@ interface DriverFixtureImage {
 }
 
 interface DriverBody {
-  op: "health" | "put-fixture" | "finch-builder" | "builder-diagnostic" | "assemble-stored" | "capture" | "blueprint" | "artifact" | "probe" | "fetch-probe" | "sql-probe" | "general-api-canary" | "stream-canary-text" | "stream-canary-vision" | "schema-canary" | "stage-runs" | "simple-kie" | "simple-kie-validation" | "simple-full-run" | "simple-rerender-qa" | "simple-hardening-run" | "simple-final-run";
+  op: "health" | "put-fixture" | "finch-builder" | "coding-plan-models" | "coding-plan-text-canary" | "coding-plan-vision-canary" | "coding-plan-css-qualification" | "file-qualification" | "assemble-stored" | "capture" | "blueprint" | "artifact" | "probe" | "fetch-probe" | "sql-probe" | "general-api-canary" | "stream-canary-text" | "stream-canary-vision" | "schema-canary" | "stage-runs" | "simple-kie" | "simple-kie-validation" | "simple-full-run" | "simple-rerender-qa" | "simple-hardening-run" | "simple-final-run";
+  maxCompletionTokens?: number;
+  model?: string;
+  imageBase64?: string;
+  imageMimeType?: string;
+  question?: string;
   key?: string;
   base64?: string;
   facts?: BusinessFacts;
@@ -175,8 +197,20 @@ export async function expBenchmarkDriver(c: Context<{ Bindings: Env }>): Promise
       case "finch-builder":
         return c.json(await runFinchBuilder(c.env, body));
 
-      case "builder-diagnostic":
-        return c.json(await runBuilderDiagnostic(c.env, body));
+      case "coding-plan-models":
+        return c.json(await runCodingPlanModels(c.env));
+
+      case "coding-plan-text-canary":
+        return c.json(await runCodingPlanTextCanary(c.env, body));
+
+      case "coding-plan-vision-canary":
+        return c.json(await runCodingPlanVisionCanary(c.env, body));
+
+      case "coding-plan-css-qualification":
+        return c.json(await runCodingPlanCssQualification(c.env, body));
+
+      case "file-qualification":
+        return c.json(await runFileQualification(c.env, body));
 
       case "assemble-stored":
         return c.json(await runAssembleStored(c.env, body));
@@ -387,9 +421,6 @@ async function runFinchBuilder(env: Env, body: DriverBody) {
     acceptedImages: materializeAcceptedImageDescriptors(blueprintV2),
     formServiceEndpoint,
     siteFormId,
-    visualInputs: [
-      { kind: "full-page", artifact: referenceScreenshotKey, sha256: "exp-fixture", width: 1440, height: 3200 } as const,
-    ],
   };
   const built = await runSimpleWebsiteBuilderStage(env, stageInput);
   const result = await assembleAndJudge(env, ctx, built.bundle, { ...body, blueprint: blueprintV2 }, acceptedKeys);
@@ -448,58 +479,305 @@ function sanitizeDiagnosticBundle(bundle: SiteBundle): { bundle: SiteBundle; nor
   return { bundle: { ...bundle, pages, sharedCss, sharedJs }, normalizations };
 }
 
-// EXPERIMENT DIAGNOSTIC ONLY: measures design-transfer quality under a forced
-// small-call decomposition (see website-builder.ts). Not a pipeline strategy.
-async function runBuilderDiagnostic(env: Env, body: DriverBody) {
+// ── CODING PLAN CANARIES + QUALIFICATION (operator GO 2026-09-11 §8/§9/§12) ─
+
+// Model allowlist — the driver never becomes a generic model runner.
+const CODING_PLAN_CANARY_MODELS = ["glm-5.3", "glm-5.3-flash"];
+
+async function runCodingPlanModels(env: Env) {
+  const result = await listZaiCodingPlanModels(env);
+  return {
+    op: "coding-plan-models",
+    verdict: result.listed ? "LISTED" : "NOT_LISTED",
+    modelCount: result.models.length,
+    models: result.models,
+    relevant: result.models.filter((m) => /^glm/i.test(m)),
+    ...(result.raw ? { raw: result.raw } : {}),
+  };
+}
+
+// §8 TEXT CANARY: tiny glm-5.3 completion through the Coding Plan endpoint.
+// Records provider, exact model, finish reason, duration, usage and request
+// id. No fallback.
+async function runCodingPlanTextCanary(env: Env, body: DriverBody) {
+  const requestedModel = body.model && CODING_PLAN_CANARY_MODELS.includes(body.model) ? body.model : "glm-5.3";
+  const stream = body.stream ?? false;
+  const started = Date.now();
+  try {
+    const result = await generateZaiCodingPlan(env, {
+      model: requestedModel,
+      messages: [
+        { role: "system", content: "You are a transport canary. Reply with exactly the requested text and nothing else." },
+        { role: "user", content: "Reply with exactly: ok" },
+      ],
+      maxTokens: body.maxCompletionTokens ?? 256,
+      stream,
+      label: "coding-plan-text-canary",
+    });
+    const contentOk = result.content.trim() === "ok";
+    return {
+      op: "coding-plan-text-canary",
+      verdict: contentOk && result.providerModel === requestedModel ? "PASS" : "CONTENT_OR_MODEL_FAIL",
+      model: result.model,
+      providerModel: result.providerModel,
+      modelSubstitution: result.providerModel !== null && result.providerModel !== requestedModel,
+      stream,
+      finishReason: result.finishReason,
+      durationMs: result.durationMs,
+      usage: result.usage,
+      requestId: result.requestId,
+      contentChars: result.contentChars,
+      contentHead: result.content.slice(0, 120),
+      contentOk,
+    };
+  } catch (error) {
+    return {
+      op: "coding-plan-text-canary",
+      verdict: "FAIL",
+      stream,
+      durationMs: Date.now() - started,
+      errorClass:
+        error instanceof ZaiCodingPlanOutputExhaustedError
+          ? "OUTPUT_EXHAUSTED"
+          : error instanceof ZaiCodingPlanTransportError
+            ? "TRANSPORT"
+            : "UNKNOWN",
+      error: (error as Error).message,
+    };
+  }
+}
+
+// §9 MULTIMODAL CANARY: tiny image+text call through the SAME Coding Plan
+// endpoint. Determines the Blueprint / Visual QA model. Multimodal support is
+// never inferred from the model name alone.
+async function runCodingPlanVisionCanary(env: Env, body: DriverBody) {
+  const requestedModel = body.model && CODING_PLAN_CANARY_MODELS.includes(body.model) ? body.model : "glm-5.3-flash";
+  if (!body.imageBase64) {
+    return { op: "coding-plan-vision-canary", verdict: "FAILED", error: "imageBase64 required" };
+  }
+  const mimeType = body.imageMimeType ?? "image/png";
+  const question = body.question ?? "What single word is written in this image? Answer with the word only.";
+  const started = Date.now();
+  try {
+    const result = await generateZaiCodingPlan(env, {
+      model: requestedModel,
+      messages: [{
+        role: "user",
+        content: [
+          { type: "image_url", image_url: { url: `data:${mimeType};base64,${body.imageBase64}` } },
+          { type: "text", text: question },
+        ],
+      }],
+      maxTokens: body.maxCompletionTokens ?? 512,
+      stream: body.stream ?? false,
+      label: "coding-plan-vision-canary",
+    });
+    return {
+      op: "coding-plan-vision-canary",
+      verdict: result.providerModel === requestedModel ? "PASS" : "MODEL_FAIL",
+      model: result.model,
+      providerModel: result.providerModel,
+      modelSubstitution: result.providerModel !== null && result.providerModel !== requestedModel,
+      imageAccepted: true,
+      finishReason: result.finishReason,
+      durationMs: result.durationMs,
+      usage: result.usage,
+      requestId: result.requestId,
+      contentChars: result.contentChars,
+      contentHead: result.content.slice(0, 200),
+    };
+  } catch (error) {
+    // A 4xx that names the image/multimodal capability is the decisive
+    // "image input NOT accepted" evidence (GO §9: never infer from the name).
+    const message = (error as Error).message;
+    const imageRejected = /image|multimodal|vision|not support/i.test(message) && error instanceof ZaiCodingPlanTransportError;
+    return {
+      op: "coding-plan-vision-canary",
+      verdict: imageRejected ? "IMAGE_INPUT_REJECTED" : "FAIL",
+      imageAccepted: false,
+      durationMs: Date.now() - started,
+      error: message,
+    };
+  }
+}
+
+// §12/§21 CSS-ONLY QUALIFICATION: the FIRST qualification bar — one site.css
+// realization through the canonical Coding Plan Builder seam on the VALID
+// fixture, judged by the already-accepted source-completeness validator. No
+// KIE / capture / preview / QA. Persists the frozen per-file artifact.
+async function runCodingPlanCssQualification(env: Env, body: DriverBody) {
   if (!body.facts || !body.blueprint) throw new Error("facts and blueprint required");
   const blueprintV2 = storedBlueprintToV2(body.blueprint);
+  const gate = evaluateBlueprintQualityGateV2(blueprintV2);
+  if (!gate.passed) {
+    return { op: "coding-plan-css-qualification", verdict: "FIXTURE_INVALID", gateFailures: gate.failures };
+  }
+  const requestedModel = resolveWebsiteBuilderModel(env);
+  if (body.model && body.model !== requestedModel) {
+    return { op: "coding-plan-css-qualification", verdict: "FAILED", error: `model '${body.model}' is not the routed Website Builder model ('${requestedModel}') — stage routing forbids substitution` };
+  }
   const referenceScreenshotKey = body.referenceScreenshotKey ?? "references/simple/exp-finch-ref.png";
   const ctx = await scaffold(env, body.facts, { screenshotR2Key: referenceScreenshotKey });
-  const acceptedKeys = await storeFixtureImages(env, ctx, body.fixtureImages ?? []);
-
-  const formServiceEndpoint = `${env.PUBLIC_APP_URL}/api/v2/forms/submit`;
-  const siteFormId = `site:${ctx.siteId}`;
-  const diagnostic = await runSimpleBuilderTransportDiagnostic(env, {
-    siteGenerationId: ctx.siteGenerationId,
-    buildId: ctx.buildId,
-    buildVersionId: ctx.buildVersionId,
-    buildVersionNumber: ctx.buildVersionNumber,
-    blueprint: blueprintV2,
-    facts: body.facts,
-    acceptedImages: materializeAcceptedImageDescriptors(blueprintV2),
-    formServiceEndpoint,
-    siteFormId,
-    visualInputs: [
-      { kind: "full-page", artifact: referenceScreenshotKey, sha256: "exp-fixture", width: 1440, height: 3200 } as const,
-    ],
-  });
-  // Persist BEFORE assembly so the (expensive) generated bundle survives a
-  // preflight rejection for inspection.
-  const { bundle: cleanBundle, normalizations } = sanitizeDiagnosticBundle(diagnostic.bundle);
-  await storeBuildStageArtifactIdempotent(env, {
-    buildId: ctx.buildId,
-    siteGenerationId: ctx.siteGenerationId,
-    buildVersionId: ctx.buildVersionId,
-    kind: "site_bundle",
-    schemaVersion: "site-bundle/1",
-    value: cleanBundle,
-  });
+  const acceptedImages = materializeAcceptedImageDescriptors(blueprintV2);
+  const started = Date.now();
   try {
-    const result = await assembleAndJudge(env, ctx, cleanBundle, { ...body, blueprint: blueprintV2 }, acceptedKeys);
-    return { ...result, builderStrategy: "TRANSPORT_DIAGNOSTIC", calls: diagnostic.calls, normalizations };
+    const outcome = await runSimpleBuilderCssRealization(env, {
+      siteGenerationId: ctx.siteGenerationId,
+      buildId: ctx.buildId,
+      buildVersionId: ctx.buildVersionId,
+      buildVersionNumber: ctx.buildVersionNumber,
+      blueprint: blueprintV2,
+      facts: body.facts,
+      acceptedImages,
+      formServiceEndpoint: `${env.PUBLIC_APP_URL}/api/v2/forms/submit`,
+      siteFormId: `site:${ctx.siteId}`,
+    });
+    const css = outcome.css;
+    // Decisive content checks (GO §21): actual CSS, no meta-stub, no
+    // reasoning debris, normal completion, no exhaustion.
+    const ruleCount = (css.match(/\{[^{}]*\}/g) ?? []).length;
+    const looksLikeCss = /(^|[^-])--[\w-]+\s*:/.test(css) || css.includes(":root");
+    const hasMedia = css.includes("@media");
+    const completed = outcome.metrics.finishReason !== "length" && outcome.metrics.finishReason !== null ? outcome.metrics.finishReason === "stop" || outcome.metrics.finishReason === null : outcome.metrics.finishReason !== "length";
+    const qualified =
+      outcome.validationFailures.length === 0 &&
+      looksLikeCss &&
+      hasMedia &&
+      ruleCount >= 10 &&
+      completed &&
+      outcome.metrics.reused !== true;
+    return {
+      op: "coding-plan-css-qualification",
+      verdict: qualified ? "QUALIFIED" : "FAILED",
+      model: requestedModel,
+      totalDurationMs: Date.now() - started,
+      css: {
+        chars: css.length,
+        ruleCount,
+        tokenLayer: looksLikeCss,
+        mediaQueries: hasMedia,
+        outputTokens: outcome.metrics.outputTokens,
+        inputTokens: outcome.metrics.inputTokens,
+        finishReason: outcome.metrics.finishReason,
+        durationMs: outcome.metrics.durationMs,
+        estimatedCostUsd: outcome.metrics.estimatedCostUsd,
+        requestId: null,
+        runId: outcome.metrics.runId,
+        reused: outcome.metrics.reused === true,
+      },
+      sourceCompleteness: outcome.validationFailures.length === 0 ? "PASS" : "FAIL",
+      completenessFailures: outcome.validationFailures.slice(0, 12),
+      head: css.slice(0, 240),
+    };
   } catch (error) {
-    if (error instanceof AssemblyPreflightError) {
-      return {
-        ...ctx,
-        builderStrategy: "TRANSPORT_DIAGNOSTIC",
-        calls: diagnostic.calls,
-        normalizations,
-        bundle: cleanBundle,
-        preflightBlockers: error.blockers.map((blocker) => ({ id: blocker.id, detail: blocker.detail ?? blocker.id })),
-        previewUrl: null,
-      };
-    }
-    throw error;
+    return {
+      op: "coding-plan-css-qualification",
+      verdict: "FAILED",
+      totalDurationMs: Date.now() - started,
+      errorClass:
+        error instanceof ZaiCodingPlanOutputExhaustedError
+          ? "OUTPUT_EXHAUSTED"
+          : error instanceof ZaiCodingPlanTransportError
+            ? "TRANSPORT_FAILED"
+            : "UNKNOWN",
+      error: (error as Error).message,
+    };
+  }
+}
+
+// QUALIFICATION: the six file-sized realization calls of the canonical
+// Builder core on a VALID design-blueprint/2 fixture — zero KIE / zero
+// preview / zero QA. Persists no site_bundle. NEVER raises budgets, never
+// retries the qualification inside the op.
+async function runFileQualification(env: Env, body: DriverBody) {
+  if (!body.facts || !body.blueprint) throw new Error("facts and blueprint required");
+  const blueprintV2 = storedBlueprintToV2(body.blueprint);
+  // The fixture must be a VALID v2 artifact — rejected BEFORE any Builder call.
+  const gate = evaluateBlueprintQualityGateV2(blueprintV2);
+  if (!gate.passed) {
+    return { op: "file-qualification", verdict: "FIXTURE_INVALID", gateFailures: gate.failures };
+  }
+  // The qualification always runs the ROUTED Builder model (stage policy:
+  // never substituted); a caller-supplied value is accepted only if it matches.
+  const routedModel = resolveWebsiteBuilderModel(env);
+  const requestedModel = !body.model || body.model === routedModel ? routedModel : null;
+  if (!requestedModel) {
+    return { op: "file-qualification", verdict: "FAILED", error: `model '${body.model}' is not the routed Website Builder model — stage routing forbids substitution` };
+  }
+  const referenceScreenshotKey = body.referenceScreenshotKey ?? "references/simple/exp-finch-ref.png";
+  const ctx = await scaffold(env, body.facts, { screenshotR2Key: referenceScreenshotKey });
+  await storeFixtureImages(env, ctx, body.fixtureImages ?? []);
+  const acceptedImages = materializeAcceptedImageDescriptors(blueprintV2);
+  const started = Date.now();
+  try {
+    const core = await runSimpleBuilderFileRealizationCore(env, {
+      siteGenerationId: ctx.siteGenerationId,
+      buildId: ctx.buildId,
+      buildVersionId: ctx.buildVersionId,
+      buildVersionNumber: ctx.buildVersionNumber,
+      blueprint: blueprintV2,
+      facts: body.facts,
+      acceptedImages,
+      formServiceEndpoint: `${env.PUBLIC_APP_URL}/api/v2/forms/submit`,
+      siteFormId: `site:${ctx.siteId}`,
+    });
+    const bundleSchemaPass = Value.Check(SiteBundleSchema, core.bundle);
+    const completeness = validateBuilderFileBundle(core.bundle, {
+      blueprintMotionExists: blueprintMotionExists(blueprintV2),
+    });
+    const coverage = validateCriticalImageCoverage(core.pages, acceptedImages, "placeholder");
+    const unusedCritical = coverage.filter((f) => f.id === "MISSING_CRITICAL_IMAGE").length;
+    const wrongPageCritical = coverage.filter((f) => f.id === "WRONG_PAGE_CRITICAL_IMAGE").length;
+    const noExhaustion = core.calls.every((call) => call.finishReason !== "length");
+    const qualified = bundleSchemaPass && completeness.passed && coverage.length === 0 && noExhaustion;
+    const totalCost = core.calls.reduce((sum, call) => sum + (call.estimatedCostUsd ?? 0), 0);
+    return {
+      op: "file-qualification",
+      verdict: qualified ? "QUALIFIED" : "FAILED",
+      model: requestedModel,
+      totalDurationMs: Date.now() - started,
+      totalEstimatedCostUsd: Math.round(totalCost * 10000) / 10000,
+      calls: core.calls.map((call) => ({
+        call: call.call,
+        model: call.model,
+        outputChars: call.outputChars,
+        outputTokens: call.outputTokens,
+        inputTokens: call.inputTokens,
+        finishReason: call.finishReason,
+        durationMs: call.durationMs,
+        estimatedCostUsd: call.estimatedCostUsd,
+        runId: call.runId,
+      })),
+      cssChars: core.css.length,
+      pageChars: Object.fromEntries(Object.entries(core.pages).map(([page, html]) => [page, html.length])),
+      jsChars: core.js.length,
+      sourceCompleteness: completeness.passed ? "PASS" : "FAIL",
+      completenessFailures: completeness.failures.slice(0, 12),
+      siteBundleSchema: bundleSchemaPass ? "PASS" : "FAIL",
+      criticalCoverage: {
+        unusedCritical,
+        wrongPageCritical,
+        findings: coverage.map((f) => `${f.id}: ${f.detail}`.slice(0, 300)),
+      },
+      bundleNotes: core.bundle.notes,
+    };
+  } catch (error) {
+    return {
+      op: "file-qualification",
+      verdict: "FAILED",
+      totalDurationMs: Date.now() - started,
+      errorClass:
+        error instanceof ZaiCodingPlanOutputExhaustedError
+          ? "OUTPUT_EXHAUSTED"
+          : error instanceof ZaiCodingPlanTransportError
+            ? "TRANSPORT_FAILED"
+            : error instanceof AiStageFileInvalidError
+              ? "SOURCE_INCOMPLETE"
+              : error instanceof SimpleWebsiteBuilderError
+                ? `BUILDER_${error.code}`
+                : "UNKNOWN",
+      error: (error as Error).message,
+    };
   }
 }
 

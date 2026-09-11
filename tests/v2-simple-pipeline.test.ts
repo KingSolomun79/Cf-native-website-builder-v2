@@ -62,7 +62,7 @@ describe("SIMPLE pipeline end-to-end (experiment/simplified-design-pipeline)", (
     expect(outcome.terminal).toBe("RELEASE_READY");
     expect(outcome.reasons).toEqual([]);
     expect(outcome.repairApplied).toBe(false);
-    expect(outcome.builderStrategy).toBe("ONE_CALL");
+    expect(outcome.builderStrategy).toBe("SIX_CALL_FILE_REALIZATION");
     expect(outcome.designBlueprintR2Key).toBeTruthy();
 
     // Release Ready pinned on the exact first Build Version.
@@ -112,7 +112,12 @@ describe("SIMPLE pipeline end-to-end (experiment/simplified-design-pipeline)", (
     const models = await env.DB.prepare("SELECT DISTINCT model FROM ai_stage_runs WHERE build_id = ?")
       .bind(outcome.buildId)
       .all<{ model: string }>();
-    expect(models.results).toEqual([{ model: "glm-5.3-flash" }]);
+    // Builder calls route to the full GLM-5.3 coding model; the vision/design
+    // stages (blueprint, visual QA) stay on Flash (stage routing policy).
+    expect(models.results.sort((a, b) => a.model.localeCompare(b.model))).toEqual([
+      { model: "@cf/zai-org/glm-5.3" },
+      { model: "glm-5.3-flash" },
+    ]);
   });
 
   it("ONE repair: failed first QA → new immutable Build Version v2 → final QA RELEASE_READY", async () => {

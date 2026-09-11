@@ -49,6 +49,10 @@ export interface AiProvenance {
     applied: boolean;
     links: Array<{ page: string; supplied: string | null; resolved: string; reason: string }>;
   };
+  /** Stage-routed model policy provenance: the exact reasoning-control
+   *  setting the Builder transport sent for the routed model (model-routing
+   *  GO §8; carried into the file-realization transport). */
+  reasoningControl?: string;
 }
 
 export interface RawAiGenerateResult {
@@ -56,6 +60,12 @@ export interface RawAiGenerateResult {
   provider: string;
   model: string;
   tokenUsage?: unknown;
+  /** Provider finish reason when the transport reports one; null/absent when
+   *  the provider omits it. */
+  finishReason?: string | null;
+  /** Exact reasoning-control setting the transport sent (model-routing GO §8:
+   *  e.g. "chat_template_kwargs.enable_thinking=false") — provenance only. */
+  reasoningControl?: string;
 }
 
 export type RawAiGenerate = (systemPrompt: string, userPrompt: string, attempt: number) => Promise<RawAiGenerateResult>;
@@ -87,6 +97,23 @@ export class AiStageSchemaInvalidError extends Error {
   }
 }
 
+/** Raw file-realization stages: ONE semantic generation whose payload fails
+ *  the deterministic per-file validation. Never retried here, never persisted
+ *  as a stage value. */
+export class AiStageFileInvalidError extends Error {
+  constructor(
+    readonly stage: string,
+    readonly runId: string,
+    readonly attempts: AiStageAttemptRecord[],
+    readonly failures: string[]
+  ) {
+    super(
+      `AI file stage '${stage}' failed deterministic file validation after ${attempts.length} attempt(s) (run ${runId}): ${failures.join("; ").slice(0, 600)}`
+    );
+    this.name = "AiStageFileInvalidError";
+  }
+}
+
 // ── Parsing ─────────────────────────────────────────────────────────────────
 
 export function parseModelJson(raw: string): { ok: true; value: unknown } | { ok: false; error: string } {
@@ -95,7 +122,22 @@ export function parseModelJson(raw: string): { ok: true; value: unknown } | { ok
   if (fence) text = fence[1].trim();
   try {
     return { ok: true, value: JSON.parse(text) };
-  } catch {
+  } catch (error) {
+    // GLM framing (live Coding Plan evidence 2026-09-11): a COMPLETE JSON
+    // value followed by trailing non-whitespace content. The parser's own
+    // error names the exact position where the value ended — that boundary
+    // is deterministic, so the leading value is extracted and parsed.
+    const position = /position (\d+)/.exec((error as Error).message);
+    if (position) {
+      const start = text.indexOf("{");
+      if (start !== -1 && Number(position[1]) > start) {
+        try {
+          return { ok: true, value: JSON.parse(text.slice(start, Number(position[1]))) };
+        } catch {
+          // fall through to the brace-span extraction
+        }
+      }
+    }
     // fall through to prose/markdown extraction
   }
   // Models frequently wrap the JSON object in headings or prose (a markdown
@@ -120,6 +162,44 @@ export function parseModelJson(raw: string): { ok: true; value: unknown } | { ok
   } catch (error) {
     return { ok: false, error: `unparseable JSON: ${(error as Error).message}` };
   }
+}
+
+// Deterministic single-file normalization (file-realization GO §6): a raw
+// file realization is accepted as-is; models sometimes add exactly one
+// surrounding Markdown code fence despite instructions, so that ONE fence
+// pair is tolerated and stripped. Anything else fence-shaped (an unterminated
+// opening fence, or a closing fence without an opening one where content
+// ends mid-fence) is refused — never heuristic-repaired.
+export function parseSingleFileSource(raw: string): { ok: true; value: string } | { ok: false; error: string } {
+  let text = raw.trim();
+  // The GLM chat template on this provider prepends the model's reasoning to
+  // the answer in sync output, terminated by the template's FIXED `</think>`
+  // delimiter (observed live 2026-09-11 even with enable_thinking=false; the
+  // same template behavior leaked `</think>` debris into structured output in
+  // the 1af7cc5 qualification). The answer is everything after the LAST
+  // delimiter; a payload without one is already the pure answer. Deterministic
+  // framing tolerance — never content surgery.
+  const thinkEnd = text.lastIndexOf("</think>");
+  if (thinkEnd !== -1) text = text.slice(thinkEnd + "</think>".length).trim();
+  if (text.length === 0) return { ok: false, error: "empty file realization" };
+  if (!text.startsWith("```")) return { ok: true, value: text };
+  // The content opens with a fence: it must open on a line of its own
+  // (optional language tag), have a newline, and terminate with a fence on
+  // the final line.
+  const firstLineEnd = text.indexOf("\n");
+  if (firstLineEnd === -1) return { ok: false, error: "fence opened but never closed" };
+  const opening = text.slice(0, firstLineEnd).trim();
+  if (!/^```[\w-]*$/.test(opening)) return { ok: false, error: `malformed opening fence: '${opening.slice(0, 16)}'` };
+  if (!text.endsWith("```")) return { ok: false, error: "fence opened but never closed" };
+  const inner = text.slice(firstLineEnd + 1, text.length - 3);
+  // Exactly ONE surrounding fence is tolerated: interior fences mean the
+  // framing is ambiguous and the payload is refused, never heuristic-split.
+  if (inner.includes("```")) return { ok: false, error: "more than one code fence in the realization" };
+  // The closing fence must sit on its own line.
+  if (inner.endsWith("\n")) {
+    return { ok: true, value: inner.slice(0, -1).trimEnd() };
+  }
+  return { ok: false, error: "malformed closing fence" };
 }
 
 // Models render absent optional properties as explicit nulls; the V2 stage
@@ -190,6 +270,43 @@ export interface RunSchemaValidatedAiStageOptions {
    *  transport enforces structure. The ONE targeted structural repair stays
    *  available for genuine residual errors. */
   nativeJsonSchema?: boolean;
+}
+
+export // Schema-aware normalization (live Coding Plan evidence 2026-09-11): models
+// write descriptive strings that occasionally exceed a schema's maxLength by
+// a sentence. A single over-long string is a formatting violation, not a
+// semantic one — the value is truncated to the schema's cap (the same
+// normalization philosophy as stripping nulls/empty strings) and
+// re-validated, instead of spending the ONE structural repair on it.
+function truncateOverLongStrings(schema: TSchema, value: unknown): { value: unknown; truncated: boolean } {
+  let current = value;
+  let truncated = false;
+  for (let pass = 0; pass < 3; pass++) {
+    let changed = false;
+    for (const error of Value.Errors(schema, current)) {
+      const match = /Expected string length less or equal to (\d+)/.exec(error.message);
+      if (!match) continue;
+      const segments = error.path.split("/").filter((segment) => segment.length > 0).map((segment) => (/^\d+$/.test(segment) ? Number(segment) : segment));
+      if (segments.length === 0) continue;
+      let parent = current as Record<string | number, unknown>;
+      let resolvable = true;
+      for (let i = 0; i < segments.length - 1; i++) {
+        const next = parent[segments[i]];
+        if (next === null || typeof next !== "object") { resolvable = false; break; }
+        parent = next as Record<string | number, unknown>;
+      }
+      if (!resolvable) continue;
+      const last = segments[segments.length - 1];
+      const target = parent[last];
+      if (typeof target === "string" && target.length > Number(match[1])) {
+        parent[last] = target.slice(0, Number(match[1]));
+        truncated = true;
+        changed = true;
+      }
+    }
+    if (!changed) break;
+  }
+  return { value: current, truncated };
 }
 
 export async function runSchemaValidatedAiStage<T>(
@@ -268,7 +385,7 @@ Return ONLY the corrected JSON object. Do not change the semantic content beyond
       outcome = "invalid";
       errorSummary = parsed.error;
     } else {
-      const candidate = stripEmptyStrings(stripNulls(parsed.value));
+      const candidate = truncateOverLongStrings(options.schema, stripEmptyStrings(stripNulls(parsed.value))).value;
       if (!Value.Check(options.schema, candidate)) {
         outcome = "invalid";
         errorSummary = schemaErrorSummary(options.schema, candidate);
@@ -350,4 +467,136 @@ Return ONLY the corrected JSON object. Do not change the semantic content beyond
   );
 
   return { value: accepted.value, runId, artifactR2Key, provenance, attempts };
+}
+
+// ── Raw file-realization boundary (file-realization GO §5) ──────────────────
+//
+// Generated source files are NOT JSON: each Builder call realizes exactly one
+// file as plain model output. This runner keeps the boundary discipline of
+// runSchemaValidatedAiStage — provenance, ai_stage_runs persistence, immutable
+// run artifacts — while replacing schema validation with the caller's
+// deterministic per-file validation. ONE semantic generation per call: a
+// validation failure fails the stage closed (the file never re-enters a
+// "rewrite the whole thing" loop); the stage-failure classifier routes it to
+// deterministic review.
+
+export interface RunAiFileStageOptions {
+  stage: PromptStageKey;
+  /** Versioned file contract id, e.g. "builder-file/site-css/1". */
+  schemaVersion: string;
+  userPrompt: string;
+  buildId: string;
+  siteGenerationId?: string;
+  buildVersionId: string;
+  buildVersionNumber: number;
+  inputArtifactIds?: string[];
+  /** Deterministic per-file validation (structural completeness). Empty
+   *  array = valid. Failures fail the stage closed. */
+  validate?: (value: string) => string[];
+  generate: RawAiGenerate;
+}
+
+export interface AiFileStageRunResult {
+  value: string;
+  runId: string;
+  artifactR2Key: string;
+  provenance: AiProvenance;
+  attempts: AiStageAttemptRecord[];
+  /** Provider finish reason of the accepted attempt (transport reporting;
+   *  null when the provider omitted it). */
+  finishReason: string | null;
+}
+
+export async function runAiFileStage(
+  env: Env,
+  options: RunAiFileStageOptions
+): Promise<AiFileStageRunResult> {
+  const composed = composeStagePrompt(options.stage);
+  const runId = generateId();
+  const inputArtifactIds = options.inputArtifactIds ?? [];
+  const createdAt = nowIso();
+  const attempts: AiStageAttemptRecord[] = [];
+
+  const raw = await options.generate(composed.systemPrompt, options.userPrompt, 1);
+  const parsed = parseSingleFileSource(raw.content);
+  let outcome: AiStageAttemptRecord["outcome"];
+  let errorSummary: string | null = null;
+  let value: string | null = null;
+
+  if (!parsed.ok) {
+    outcome = "invalid";
+    errorSummary = `file normalization refused the payload: ${parsed.error}`;
+  } else {
+    const failures = options.validate ? options.validate(parsed.value) : [];
+    if (failures.length > 0) {
+      outcome = "invalid";
+      errorSummary = `file validation failed: ${failures.join("; ").slice(0, 500)}`;
+    } else {
+      value = parsed.value;
+      outcome = "valid";
+    }
+  }
+
+  attempts.push({ attempt: 1, outcome, errorSummary });
+
+  await env.DB.prepare(
+    `INSERT INTO ai_stage_runs (
+       id, run_id, build_id, build_version_id, stage, prompt_id, prompt_version,
+       prompt_domain_contract_version, model, provider, schema_version, attempt, outcome,
+       token_usage_json, estimated_cost_usd, input_artifact_ids_json, artifact_r2_key, error_summary, created_at
+     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+  )
+    .bind(
+      generateId(),
+      runId,
+      options.buildId,
+      options.buildVersionId,
+      options.stage,
+      composed.promptId,
+      composed.promptVersion,
+      composed.promptDomainContractVersion,
+      raw.model,
+      raw.provider,
+      options.schemaVersion,
+      1,
+      outcome,
+      raw.tokenUsage === undefined ? null : JSON.stringify(raw.tokenUsage),
+      null,
+      JSON.stringify(inputArtifactIds),
+      value !== null ? aiStageArtifactKey(options.buildId, options.buildVersionNumber, options.stage, runId) : null,
+      errorSummary,
+      createdAt
+    )
+    .run();
+
+  if (value === null) {
+    throw new AiStageFileInvalidError(options.stage, runId, attempts, errorSummary ? [errorSummary] : ["file validation failed"]);
+  }
+
+  const provenance: AiProvenance = {
+    promptId: composed.promptId,
+    promptVersion: composed.promptVersion,
+    promptDomainContractVersion: composed.promptDomainContractVersion,
+    model: raw.model,
+    schemaVersion: options.schemaVersion,
+    attempt: 1,
+    inputArtifactIds,
+    tokenUsage: raw.tokenUsage,
+    ...(raw.reasoningControl ? { reasoningControl: raw.reasoningControl } : {}),
+  };
+
+  const artifactR2Key = aiStageArtifactKey(options.buildId, options.buildVersionNumber, options.stage, runId);
+  await putImmutableObject(
+    env,
+    artifactR2Key,
+    JSON.stringify({
+      schemaVersion: options.schemaVersion,
+      stage: options.stage,
+      value,
+      provenance,
+      createdAt,
+    })
+  );
+
+  return { value, runId, artifactR2Key, provenance, attempts, finishReason: raw.finishReason ?? null };
 }
