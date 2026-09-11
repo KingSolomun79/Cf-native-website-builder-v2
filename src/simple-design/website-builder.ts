@@ -314,12 +314,13 @@ export function extractSharedChrome(homeHtml: string): SharedChrome {
 }
 
 /** Deterministic chrome match: every non-home page carries the frozen header
- *  and footer. Comparison is whitespace-NORMALIZED (insignificant HTML
- *  formatting variance is not redesign) and otherwise EXACT — any different
- *  tag, attribute, class or text fails. Returns failure ids — empty = PASS. */
+ *  and footer. Comparison strips ALL whitespace on both sides (insignificant
+ *  HTML formatting variance is not redesign) and is otherwise EXACT — any
+ *  different tag, attribute, class or text fails. Returns failure ids —
+ *  empty = PASS. */
 export function validateSharedChrome(pages: Record<PageId, string>): string[] {
   const chrome = extractSharedChrome(pages.home);
-  const normalize = (html: string): string => html.replace(/\s+/g, " ").trim();
+  const normalize = (html: string): string => html.replace(/\s+/g, "");
   const failures: string[] = [];
   for (const page of ["about", "services", "contact"] as const) {
     if (chrome.header && !normalize(pages[page]).includes(normalize(chrome.header))) {
