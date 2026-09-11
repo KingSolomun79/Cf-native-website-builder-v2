@@ -155,7 +155,16 @@ export function parseModelJson(raw: string): { ok: true; value: unknown } | { ok
 // opening fence, or a closing fence without an opening one where content
 // ends mid-fence) is refused — never heuristic-repaired.
 export function parseSingleFileSource(raw: string): { ok: true; value: string } | { ok: false; error: string } {
-  const text = raw.trim();
+  let text = raw.trim();
+  // The GLM chat template on this provider prepends the model's reasoning to
+  // the answer in sync output, terminated by the template's FIXED `</think>`
+  // delimiter (observed live 2026-09-11 even with enable_thinking=false; the
+  // same template behavior leaked `</think>` debris into structured output in
+  // the 1af7cc5 qualification). The answer is everything after the LAST
+  // delimiter; a payload without one is already the pure answer. Deterministic
+  // framing tolerance — never content surgery.
+  const thinkEnd = text.lastIndexOf("</think>");
+  if (thinkEnd !== -1) text = text.slice(thinkEnd + "</think>".length).trim();
   if (text.length === 0) return { ok: false, error: "empty file realization" };
   if (!text.startsWith("```")) return { ok: true, value: text };
   // The content opens with a fence: it must open on a line of its own

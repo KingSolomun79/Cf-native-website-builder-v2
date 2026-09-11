@@ -496,6 +496,8 @@ async function runFileCanary(env: Env, body: DriverBody) {
       usage: result.usage,
       contentChars: result.contentChars,
       contentHead: result.content.slice(0, 120),
+      // canary diagnostic: the full raw payload up to 2000 chars
+      contentFull: result.content.slice(0, 2000),
       fileOk,
     };
   } catch (error) {

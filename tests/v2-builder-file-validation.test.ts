@@ -82,6 +82,21 @@ describe("parseSingleFileSource: raw source in, file out (GO §6)", () => {
     const parsed = parseSingleFileSource("```css\nbody { margin: 0; }```");
     expect(parsed.ok).toBe(false);
   });
+
+  it("§7b the GLM think-template delimiter is stripped deterministically: the answer is everything after the LAST </think>", () => {
+    // observed live 2026-09-11: reasoning prose + </think> + answer, even with
+    // enable_thinking=false
+    const wrapped = "The user wants me to output only canary.css.</think>/* ok */";
+    expect(parseSingleFileSource(wrapped)).toEqual({ ok: true, value: "/* ok */" });
+    // a quoted delimiter inside the reasoning does not confuse the split
+    const quoted = 'The template emits </think> at the end.</think>' + TOKENS_CSS;
+    expect(parseSingleFileSource(quoted)).toEqual({ ok: true, value: TOKENS_CSS });
+    // think-wrapped AND fenced: both layers strip
+    const both = "reasoning here</think>```css\n" + TOKENS_CSS + "\n```";
+    expect(parseSingleFileSource(both)).toEqual({ ok: true, value: TOKENS_CSS });
+    // reasoning with NO answer after the delimiter is refused
+    expect(parseSingleFileSource("only reasoning</think>").ok).toBe(false);
+  });
 });
 
 // ── §8-§13: per-file structural validation ───────────────────────────────────
