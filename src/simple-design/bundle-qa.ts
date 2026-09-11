@@ -284,7 +284,12 @@ export function findInnerPageHeroMediaFinding(
   const heroStart = heroElement.index;
   const nextSection = html.indexOf("<section", heroStart + heroElement[0].length);
   const heroRegionEnd = nextSection === -1 ? html.length : nextSection;
-  const imgIndex = html.indexOf(`IMG:${heroSlotId}`);
+  // Reference FORM matters (live A/B evidence 2026-09-11): the Builder emits
+  // <link rel="preload" as="image" href="IMG:{slot}"> hints in <head> — those
+  // are performance hints, not media placement, and must not position the
+  // hero reference. Only the img idioms count: src="IMG:…" and the
+  // contract-required data-image-id attribute.
+  const imgIndex = html.indexOf(`src="IMG:${heroSlotId}"`);
   const dataIdIndex = html.indexOf(`data-image-id="${heroSlotId}"`);
   const referenceIndex = [imgIndex, dataIdIndex].filter((index) => index >= 0).sort((a, b) => a - b)[0] ?? -1;
   if (referenceIndex < 0) {

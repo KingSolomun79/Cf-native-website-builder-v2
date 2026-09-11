@@ -250,6 +250,17 @@ describe("Deterministic QA: INNER_PAGE_HERO_MEDIA_MISSING", () => {
     const html = `<!DOCTYPE html><html lang="en"><head><title>t</title></head><body><main><section class="hero about-hero"><img src="IMG:about-hero" data-image-id="about-hero" alt="x"></section></main></body></html>`;
     expect(findInnerPageHeroMediaFinding("about", html, "about-hero")).toBeNull();
   });
+
+  it("a <link rel=\"preload\"> performance hint does NOT position the hero reference (live A/B evidence 2026-09-11)", () => {
+    // The preload hint in <head> precedes the hero section; the actual media
+    // sits inside it. The hint is not placement — the page must PASS.
+    const html = `<!DOCTYPE html><html lang="en"><head><title>t</title><link rel="preload" as="image" href="IMG:about-hero" fetchpriority="high"></head><body><main><section class="hero about-hero"><img src="IMG:about-hero" data-image-id="about-hero" alt="x"></section></main></body></html>`;
+    expect(findInnerPageHeroMediaFinding("about", html, "about-hero")).toBeNull();
+    // ...while a page whose ONLY hero-slot reference is the hint still FAILS:
+    // a hint is not a photographic hero.
+    const hintOnly = `<!DOCTYPE html><html lang="en"><head><title>t</title><link rel="preload" as="image" href="IMG:about-hero"></head><body><main><section class="hero about-hero"><h1>About</h1></section></main></body></html>`;
+    expect(findInnerPageHeroMediaFinding("about", hintOnly, "about-hero")).toContain("is not referenced");
+  });
 });
 
 describe("Builder: hero invariant ships in every builder call", () => {
