@@ -44,7 +44,9 @@ export function resolveCodingMultimodalModel(env: Env): string {
 }
 
 function baseUrlOf(env: Env): string {
-  return (env.ZAI_CODING_BASE_URL || env.ZHIPU_API_URL || ZAI_CODING_PLAN_DEFAULT_BASE_URL).replace(/\/$/, "");
+  // The configured base URL wins; the default IS the canonical Coding Plan
+  // endpoint, so production never needs a legacy alias var for it.
+  return (env.ZAI_CODING_BASE_URL || ZAI_CODING_PLAN_DEFAULT_BASE_URL).replace(/\/$/, "");
 }
 
 function apiKeyOf(env: Env): string | undefined {
