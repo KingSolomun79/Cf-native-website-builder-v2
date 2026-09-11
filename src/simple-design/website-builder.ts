@@ -597,8 +597,10 @@ async function realizeFile(
 // reorder exists to prevent). JS-quoted tokens are deliberately included in
 // the accepted set: state classes site.js toggles (e.g. "nav-open") are
 // legitimate CSS hooks that cannot exist in the static markup. Selector
-// extraction reads ONLY selector preludes — text before each `{` — so
-// declarations (hex colors, custom properties) never false-positive.
+// extraction reads ONLY selector preludes — text before each `{` — after
+// stripping comments (live A/B evidence: a `/* … site.css */` header comment
+// otherwise pollutes the first prelude and false-positives), so declarations
+// (hex colors, custom properties) and prose never flag.
 export function cssSelectorFailures(
   css: string,
   pages: Record<PageId, string>,
@@ -614,15 +616,16 @@ export function cssSelectorFailures(
   for (const page of PAGE_IDS) addTokens(pages[page] ?? "");
   for (const match of js.matchAll(/['"`]([a-zA-Z_-][\w-]*)['"`]/g)) accepted.add(match[1]);
 
+  const scanned = css.replace(/\/\*[\s\S]*?\*\//g, " ");
   const missing = new Set<string>();
   // Walk the stylesheet structurally: track the text preceding each "{".
   let preludeStart = 0;
   let depth = 0;
-  for (let index = 0; index < css.length; index++) {
-    const char = css[index];
+  for (let index = 0; index < scanned.length; index++) {
+    const char = scanned[index];
     if (char === "{") {
       if (depth === 0) {
-        const prelude = css.slice(preludeStart, index);
+        const prelude = scanned.slice(preludeStart, index);
         if (!prelude.trimStart().startsWith("@")) {
           const cleaned = prelude.replace(/::?[a-zA-Z-]+(\([^)]*\))?/g, "").replace(/\[[^\]]*\]/g, "");
           for (const match of cleaned.matchAll(/\.([a-zA-Z_-][\w-]*)/g)) {

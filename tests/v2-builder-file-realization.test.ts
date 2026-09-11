@@ -389,6 +389,11 @@ describe("site.css cannot invent structure absent from the realized DOM (GO §26
     expect(failures).toEqual([]);
   });
 
+  it("§19c' comments are not selectors (live A/B evidence: a `/* … site.css */` header must not flag .css)", () => {
+    const css = `/* RankForge Kenya — site.css */\n${TOKENS_CSS}\n/* the .hero wraps the first viewport */\n.section { padding: 2rem; }`;
+    expect(cssSelectorFailures(css, pages(), CODE_JS)).toEqual([]);
+  });
+
   it("§19d an id selector must exist in the markup", () => {
     const css = `${TOKENS_CSS}\n#year { font-variant-numeric: tabular-nums; }`;
     expect(cssSelectorFailures(css, pages(), CODE_JS)).toEqual([]);
