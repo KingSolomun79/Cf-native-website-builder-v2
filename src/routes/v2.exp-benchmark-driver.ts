@@ -51,6 +51,7 @@ import {
   runSimpleBuilderFileRealizationCore,
   runSimpleBuilderCssRealization,
   resolveWebsiteBuilderModel,
+  SimpleWebsiteBuilderError,
 } from "../simple-design/website-builder";
 import {
   generateZaiCodingPlan,
@@ -772,7 +773,9 @@ async function runFileQualification(env: Env, body: DriverBody) {
             ? "TRANSPORT_FAILED"
             : error instanceof AiStageFileInvalidError
               ? "SOURCE_INCOMPLETE"
-              : "UNKNOWN",
+              : error instanceof SimpleWebsiteBuilderError
+                ? `BUILDER_${error.code}`
+                : "UNKNOWN",
       error: (error as Error).message,
     };
   }

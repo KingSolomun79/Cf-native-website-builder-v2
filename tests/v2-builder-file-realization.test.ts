@@ -285,6 +285,19 @@ describe("frozen shared chrome (GO §18)", () => {
     expect(await getBuildStageArtifact<SiteBundle>(env, ctx.buildVersionId, "site_bundle")).toBeNull();
     expect(classifyStageFailure(error)).toBe("DETERMINISTIC_REVIEW_REQUIRED");
   });
+
+  it("§8b insignificant whitespace variance is NOT redesign — normalized chrome still matches", async () => {
+    const ctx = await scaffoldBuild("references/simple/coding-plan-chrome-ws.png");
+    // services reflows the header across lines — the same semantic chrome,
+    // different insignificant whitespace
+    const reflowed = FULL_PAGE("services").replace(
+      HEADER,
+      HEADER.replace("><a", `>\n  <a`).replace("</nav>", "\n  </nav>")
+    );
+    const seam = scriptedSixCallSeam({ pages: { services: reflowed } });
+    const result = await runSimpleWebsiteBuilderStage(env, stageInput(ctx, blueprint(), seam.generate) as Parameters<typeof runSimpleWebsiteBuilderStage>[1]);
+    expect(result.bundle.pages.services).toBe(reflowed);
+  });
 });
 
 // ── §10-§12: fail-closed paths ───────────────────────────────────────────────

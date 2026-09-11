@@ -313,16 +313,19 @@ export function extractSharedChrome(homeHtml: string): SharedChrome {
   };
 }
 
-/** Deterministic chrome match: every non-home page carries the exact frozen
- *  header and footer. Returns human-readable failure ids — empty = PASS. */
+/** Deterministic chrome match: every non-home page carries the frozen header
+ *  and footer. Comparison is whitespace-NORMALIZED (insignificant HTML
+ *  formatting variance is not redesign) and otherwise EXACT — any different
+ *  tag, attribute, class or text fails. Returns failure ids — empty = PASS. */
 export function validateSharedChrome(pages: Record<PageId, string>): string[] {
   const chrome = extractSharedChrome(pages.home);
+  const normalize = (html: string): string => html.replace(/\s+/g, " ").trim();
   const failures: string[] = [];
   for (const page of ["about", "services", "contact"] as const) {
-    if (chrome.header && !pages[page].includes(chrome.header)) {
+    if (chrome.header && !normalize(pages[page]).includes(normalize(chrome.header))) {
       failures.push(`${page} page header does not match the frozen shared chrome`);
     }
-    if (chrome.footer && !pages[page].includes(chrome.footer)) {
+    if (chrome.footer && !normalize(pages[page]).includes(normalize(chrome.footer))) {
       failures.push(`${page} page footer does not match the frozen shared chrome`);
     }
   }
