@@ -342,14 +342,26 @@ export function extractSharedChrome(homeHtml: string): SharedChrome {
 }
 
 /** Deterministic chrome match: every non-home page carries the frozen header
- *  and footer. Comparison strips ALL whitespace and the `aria-current`
- *  attribute — which accessibility REQUIRES to move to the current page's nav
- *  link (live qualification evidence: identical chrome otherwise) — and is
- *  otherwise EXACT: any different tag, attribute, class or text fails.
- *  Returns failure ids — empty = PASS. */
+ *  and footer. Comparison strips ALL whitespace, the `aria-current`
+ *  attribute, and the bounded current-page marker class idioms — which
+ *  accessibility REQUIRES to move to the current page's nav link (live
+ *  qualification evidence 2026-09-11: the Builder moves
+ *  `aria-current="page" class="nav-link is-active"` to each page's own link;
+ *  everything else is byte-exact) — and is otherwise EXACT: any different
+ *  tag, attribute, class or text fails. Returns failure ids — empty = PASS. */
 export function validateSharedChrome(pages: Record<PageId, string>): string[] {
   const chrome = extractSharedChrome(pages.home);
-  const normalize = (html: string): string => html.replace(/\s+/g, "").replace(/aria-current="(page|true)"/gi, "");
+  const normalize = (html: string): string =>
+    html
+      // marker strips run BEFORE the whitespace collapse: collapsing first
+      // would fuse the class tokens ("nav-link is-active" → "nav-linkis-active")
+      .replace(/aria-current="(page|true)"/gi, "")
+      .replace(/class="([^"]*)"/gi, (_match, classes: string) => {
+        const tokens = classes.trim().split(/\s+/);
+        const kept = tokens.filter((token) => !/^(is-)?(active|current)$/i.test(token));
+        return kept.length === tokens.length ? `class="${classes}"` : `class="${kept.join(" ")}"`;
+      })
+      .replace(/\s+/g, "");
   const failures: string[] = [];
   for (const page of ["about", "services", "contact"] as const) {
     if (chrome.header && !normalize(pages[page]).includes(normalize(chrome.header))) {

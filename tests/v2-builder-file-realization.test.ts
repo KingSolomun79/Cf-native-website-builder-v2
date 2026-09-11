@@ -359,6 +359,27 @@ describe("frozen shared chrome (GO §6/§18)", () => {
     const result = await runSimpleWebsiteBuilderStage(env, stageInput(ctx, blueprint(), seam.generate) as Parameters<typeof runSimpleWebsiteBuilderStage>[1]);
     expect(result.bundle.pages.services).toBe(reflowed);
   });
+
+  it("§8d the current-page marker CLASS moves with aria-current — required accessibility, not redesign (live A/B evidence: class=\"nav-link is-active\")", async () => {
+    const ctx = await scaffoldBuild("references/simple/dom-first-chrome-active.png");
+    const headerWithMarker = (markerHref: string) => HEADER
+      .replace('<nav class="site-nav"', '<nav class="site-nav" id="siteNav"')
+      .replace('<a href="/">Home</a>', markerHref === "/" ? '<a href="/" aria-current="page" class="nav-link is-active">Home</a>' : '<a href="/" class="nav-link">Home</a>')
+      .replace('<a href="/about">About</a>', markerHref === "/about" ? '<a href="/about" aria-current="page" class="nav-link is-active">About</a>' : '<a href="/about" class="nav-link">About</a>')
+      .replace('<a href="/services">Services</a>', markerHref === "/services" ? '<a href="/services" aria-current="page" class="nav-link is-active">Services</a>' : '<a href="/services" class="nav-link">Services</a>')
+      .replace('<a href="/contact">Contact</a>', markerHref === "/contact" ? '<a href="/contact" aria-current="page" class="nav-link is-active">Contact</a>' : '<a href="/contact" class="nav-link">Contact</a>');
+    const seam = scriptedSixCallSeam({
+      pages: {
+        home: FULL_PAGE("home").replace(HEADER, headerWithMarker("/")),
+        about: FULL_PAGE("about").replace(HEADER, headerWithMarker("/about")),
+        services: FULL_PAGE("services").replace(HEADER, headerWithMarker("/services")),
+        contact: FULL_PAGE("contact").replace(HEADER, headerWithMarker("/contact")),
+      },
+    });
+    const result = await runSimpleWebsiteBuilderStage(env, stageInput(ctx, blueprint(), seam.generate) as Parameters<typeof runSimpleWebsiteBuilderStage>[1]);
+    expect(result.bundle.pages.about).toContain('aria-current="page" class="nav-link is-active"');
+    expect(result.bundle.pages.contact).toContain('aria-current="page" class="nav-link is-active"');
+  });
 });
 
 // ── §18: home structural vocabulary ──────────────────────────────────────────

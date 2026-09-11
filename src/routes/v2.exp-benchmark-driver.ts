@@ -86,6 +86,7 @@ import {
   type SiteBundle,
 } from "../simple-design/contracts";
 import { parseModelJson, parseSingleFileSource, AiStageFileInvalidError } from "../domain/ai-boundary";
+import { AI_BOUNDARY_BUILD } from "../domain/ai-boundary";
 import { composeStagePrompt } from "../domain/prompt-contract";
 import type { BusinessFacts } from "../domain/lifecycle-schema";
 
@@ -177,7 +178,7 @@ export async function expBenchmarkDriver(c: Context<{ Bindings: Env }>): Promise
   try {
     switch (body.op) {
       case "health":
-        return c.json({ ok: true, driver: "exp-benchmark/1" });
+        return c.json({ ok: true, driver: "exp-benchmark/1", aiBoundaryBuild: AI_BOUNDARY_BUILD });
 
       case "put-fixture": {
         if (!body.key || !body.base64) return c.json({ error: "key and base64 required" }, 400);

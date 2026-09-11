@@ -170,6 +170,10 @@ export function parseModelJson(raw: string): { ok: true; value: unknown } | { ok
 // pair is tolerated and stripped. Anything else fence-shaped (an unterminated
 // opening fence, or a closing fence without an opening one where content
 // ends mid-fence) is refused — never heuristic-repaired.
+// Deploy diagnostics: identify the boundary build seen at runtime (the A/B
+// harness must be able to PROVE which normalizer logic the sandbox runs).
+export const AI_BOUNDARY_BUILD = "jsonwrap-1";
+
 export function parseSingleFileSource(raw: string): { ok: true; value: string } | { ok: false; error: string } {
   let text = raw.trim();
   // The GLM chat template on this provider prepends the model's reasoning to
