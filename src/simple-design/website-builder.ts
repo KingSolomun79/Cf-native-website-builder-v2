@@ -87,7 +87,7 @@ import {
 
 export class SimpleWebsiteBuilderError extends Error {
   constructor(
-    readonly code: "SOURCE_INCOMPLETE" | "OUTPUT_EXHAUSTED" | "CRITICAL_IMAGE_COVERAGE",
+    readonly code: "SOURCE_INCOMPLETE" | "OUTPUT_EXHAUSTED" | "CRITICAL_IMAGE_COVERAGE" | "INVENTED_STRUCTURE",
     message: string,
     readonly findings: CriticalCoverageFinding[] = []
   ) {
@@ -451,6 +451,9 @@ function fileBuilderGenerate(env: Env, config: { maxCompletionTokens: number; la
         { role: "user", content: userPrompt },
       ],
       maxTokens: config.maxCompletionTokens,
+      // Structured six-call coding against deterministic downstream gates —
+      // pinned below the provider default (0.7) like the blueprint stage.
+      temperature: 0.3,
       stream: true,
       label: config.label,
     });
@@ -773,7 +776,7 @@ export async function runSimpleBuilderFileRealizationCore(
   const selectorFailures = cssSelectorFailures(css, pages, js);
   if (selectorFailures.length > 0) {
     throw new SimpleWebsiteBuilderError(
-      "SOURCE_INCOMPLETE",
+      "INVENTED_STRUCTURE",
       `Website Builder stylesheet invented structure absent from the realized DOM (${selectorFailures.join("; ").slice(0, 400)})`
     );
   }

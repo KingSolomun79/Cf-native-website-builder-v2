@@ -453,7 +453,7 @@ describe("site.css cannot invent structure absent from the realized DOM (GO §26
     }
     expect(thrown).toBeInstanceOf(SimpleWebsiteBuilderError);
     const error = thrown as SimpleWebsiteBuilderError;
-    expect(error.code).toBe("SOURCE_INCOMPLETE");
+    expect(error.code).toBe("INVENTED_STRUCTURE");
     expect(error.message).toContain("invented structure");
     expect(seam.calls).toEqual(["home", "about", "services", "contact", "site-css", "site-js"]);
     expect(await getBuildStageArtifact<SiteBundle>(env, ctx.buildVersionId, "site_bundle")).toBeNull();

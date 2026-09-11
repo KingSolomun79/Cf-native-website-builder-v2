@@ -530,3 +530,48 @@ describe("pipeline: a Builder that cannot satisfy CRITICAL coverage terminates H
     expect(event).not.toBeNull();
   });
 });
+
+describe("pipeline: a Builder whose stylesheet invents structure terminates HUMAN_REVIEW_REQUIRED in-step", () => {
+  it("the DOM-first selector gate fails closed to review — no engine retry, no instance-killing escape", async () => {
+    const referenceKey = "references/simple/invented-structure-pipeline.png";
+    await persistSimpleScreenshot(env, referenceKey);
+    const started = await startSiteGeneration(env, {
+      payload: {
+        buildMode: "REFERENCE_BOUND",
+        facts: FACTS as unknown as typeof FACTS & Record<string, never>,
+        reference: { screenshotR2Key: referenceKey, url: "https://reference.example.com/" },
+      },
+    });
+    const outcome = await runBuildPipeline(env, {
+      siteGenerationId: started.siteGenerationId,
+      deps: createSimpleScripts({ builderInventsCssSelectors: true }),
+    });
+
+    expect(outcome.terminal).toBe("HUMAN_REVIEW_REQUIRED");
+    expect(outcome.reasons[0]).toContain("WEBSITE_BUILDER_INVENTED_STRUCTURE");
+    // the gate names the invented selectors themselves
+    expect(outcome.reasons[0]).toContain(".field-error");
+    expect(outcome.reasons[0]).toContain(".js-reveal");
+    expect(outcome.repairApplied).toBe(false);
+    expect(outcome.releaseReadyBuildVersionId).toBeNull();
+    expect(outcome.previewUrl).toBeNull();
+
+    // exactly one Build Version: no repair version was ever created
+    const versionCount = await env.DB.prepare("SELECT COUNT(*) AS n FROM build_versions WHERE build_id = ?").bind(outcome.buildId).first<{ n: number }>();
+    expect(versionCount?.n).toBe(1);
+    // no site bundle was frozen, nothing assembled
+    const version = await env.DB.prepare("SELECT id FROM build_versions WHERE build_id = ? ORDER BY version_number DESC LIMIT 1")
+      .bind(outcome.buildId)
+      .first<{ id: string }>();
+    expect(await getBuildStageArtifact<SiteBundle>(env, version!.id, "site_bundle")).toBeNull();
+    expect(await getBuildStageArtifact(env, version!.id, "assembled_manifest")).toBeNull();
+    expect(await getBuildStageArtifact(env, version!.id, "qa_package")).toBeNull();
+    // the audit trail carries the review terminal
+    const event = await env.DB.prepare(
+      "SELECT to_state FROM build_workflow_events WHERE build_id = ? AND stage = 'simple_website_build' AND to_state = 'HUMAN_REVIEW_REQUIRED'"
+    )
+      .bind(outcome.buildId)
+      .first<{ to_state: string }>();
+    expect(event).not.toBeNull();
+  });
+});

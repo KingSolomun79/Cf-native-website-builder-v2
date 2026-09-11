@@ -143,6 +143,9 @@ export interface SimpleScriptsOptions {
   /** The builder omits the CRITICAL about-hero on its page call — the
    *  Builder coverage fail-closed path. */
   builderOmitsAboutHero?: boolean;
+  /** The builder stylesheet anchors selectors on structure absent from the
+   *  four pages and site.js — the DOM-first invented-structure gate. */
+  builderInventsCssSelectors?: boolean;
 }
 
 export function createSimpleScripts(options: SimpleScriptsOptions = {}): SimplePipelineDeps {
@@ -172,7 +175,11 @@ export function createSimpleScripts(options: SimpleScriptsOptions = {}): SimpleP
     // DOM-first order (v8 GO): the four page calls are 1-4, the stylesheet is
     // call 5, site.js stays call 6.
     if (user.includes("call 5 of 6")) {
-      return respondRaw(SIMPLE_CSS);
+      return respondRaw(
+        options.builderInventsCssSelectors
+          ? `${SIMPLE_CSS}\n.field-error, .form-success, .js-reveal { color: red; }\n`
+          : SIMPLE_CSS
+      );
     }
     if (user.includes("call 6 of 6")) {
       return respondRaw(SIMPLE_JS);

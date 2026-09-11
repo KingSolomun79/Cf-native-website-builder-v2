@@ -499,12 +499,16 @@ export async function runSimpleBuildPipeline(
           });
           return { kind: "ok" as const, strategy: built.strategy };
         } catch (error) {
-          // The Builder's CRITICAL image coverage contract failed after the
-          // canonical SIX_CALL_FILE_REALIZATION build: fail closed IN-STEP
-          // (the #62 §7 terminal-result pattern) — no engine retry, no second
-          // Builder attempt, no bundle handed to downstream QA.
-          if (error instanceof SimpleWebsiteBuilderError && error.code === "CRITICAL_IMAGE_COVERAGE") {
-            return { kind: "review" as const, reason: `WEBSITE_BUILDER_CRITICAL_IMAGE_COVERAGE: ${error.message}` };
+          // The Builder's deterministic post-build gates (CRITICAL image
+          // coverage contract; DOM-first invented-structure selector gate)
+          // failed after the canonical SIX_CALL_FILE_REALIZATION build: fail
+          // closed IN-STEP (the #62 §7 terminal-result pattern) — no engine
+          // retry, no second Builder attempt, no bundle handed to downstream
+          // QA. Unmapped codes would escape as non-transient step failures
+          // and terminate the whole instance (live evidence 2026-09-11).
+          if (error instanceof SimpleWebsiteBuilderError && (error.code === "CRITICAL_IMAGE_COVERAGE" || error.code === "INVENTED_STRUCTURE")) {
+            const reasonTag = error.code === "CRITICAL_IMAGE_COVERAGE" ? "WEBSITE_BUILDER_CRITICAL_IMAGE_COVERAGE" : "WEBSITE_BUILDER_INVENTED_STRUCTURE";
+            return { kind: "review" as const, reason: `${reasonTag}: ${error.message}` };
           }
           throw error;
         }

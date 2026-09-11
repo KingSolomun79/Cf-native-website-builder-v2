@@ -44,3 +44,44 @@ any use; the change alters sampling randomness only, not validation strength.
 ## Verdict
 
 **SECURITY OK WITH WATCH ITEMS**
+
+---
+
+# Addendum: builder invented-structure review mapping (2026-09-11, later)
+
+## What was audited
+
+Second production smoke exposed a second defect class: the Website Builder's
+DOM-first selector gate (`cssSelectorFailures`) threw
+`SimpleWebsiteBuilderError("SOURCE_INCOMPLETE")`, which the pipeline did not
+map in-step — the non-transient error escaped, killed the Workflow instance,
+and the build was recorded `FAILED`/`WORKFLOW_EXECUTION_EXHAUSTED` instead of
+reaching a domain terminal. Changes:
+
+- `website-builder.ts` — the invented-structure gate throws a dedicated
+  `INVENTED_STRUCTURE` code; the builder's six Coding Plan coding calls pin
+  `temperature: 0.3` (same rationale as the blueprint fix).
+- `pipeline.ts` — deterministic builder gates (`CRITICAL_IMAGE_COVERAGE`,
+  `INVENTED_STRUCTURE`) now return the in-step review terminal (the #62 §7
+  pattern); other codes unchanged.
+- Tests: stale §19e assertion updated to the new code; new pipeline-level
+  test proves the review terminal with one Build Version, no repair, no
+  bundle.
+
+## Security scope
+
+No auth, secrets, webhooks, routes, or data-access changes. The gate itself
+(validated selector anchors) is unchanged — only its failure ROUTING, which
+moves from an instance-level error to the domain's designed
+HUMAN_REVIEW_REQUIRED terminal. Human review of a review-required build is
+already capability-gated (`OPERATOR_CAPABILITY_SECRET`).
+
+## Findings
+
+None blocking. Watch items from the main note stand (sampling params in
+provenance).
+
+## Verdict
+
+**SECURITY OK WITH WATCH ITEMS**
+
