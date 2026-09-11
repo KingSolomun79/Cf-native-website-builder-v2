@@ -193,7 +193,7 @@ export function runDeterministicBundleQa(input: BundleQaInput): BundleQaResult {
   // bundle whose script animates via IntersectionObserver must not define
   // reveal/fade content hidden (opacity 0 / visibility hidden) as its
   // resting CSS state outside prefers-reduced-motion blocks.
-  const hiddenRevealSelectors = findHiddenByDefaultRevealRules(css);
+  const hiddenRevealSelectors = findHiddenByDefaultRevealRules(css, bundle.pages);
   if (hiddenRevealSelectors.length > 0) {
     technical(
       "CONTENT_HIDDEN_WITHOUT_JS",
@@ -284,7 +284,12 @@ export function findInnerPageHeroMediaFinding(
   const heroStart = heroElement.index;
   const nextSection = html.indexOf("<section", heroStart + heroElement[0].length);
   const heroRegionEnd = nextSection === -1 ? html.length : nextSection;
-  const imgIndex = html.indexOf(`IMG:${heroSlotId}`);
+  // Reference FORM matters (live A/B evidence 2026-09-11): the Builder emits
+  // <link rel="preload" as="image" href="IMG:{slot}"> hints in <head> — those
+  // are performance hints, not media placement, and must not position the
+  // hero reference. Only the img idioms count: src="IMG:…" and the
+  // contract-required data-image-id attribute.
+  const imgIndex = html.indexOf(`src="IMG:${heroSlotId}"`);
   const dataIdIndex = html.indexOf(`data-image-id="${heroSlotId}"`);
   const referenceIndex = [imgIndex, dataIdIndex].filter((index) => index >= 0).sort((a, b) => a - b)[0] ?? -1;
   if (referenceIndex < 0) {
@@ -334,18 +339,43 @@ function flattenMediaBlocks(css: string): string {
 
 // Reports reveal/fade-style selectors whose resting state HIDES content
 // (opacity 0 or visibility hidden) — content that would vanish without
-// JavaScript or before any scroll event fires.
-export function findHiddenByDefaultRevealRules(css: string): string[] {
+// JavaScript or before any scroll event fires. Two contract-endorsed idioms
+// are NOT violations (live §28 evidence 2026-09-11): (1) a JS-GATED selector
+// (html.js / .js ancestor) — the hidden state requires a class only JS sets;
+// (2) a JS-APPLIED class — the hidden class ships in NO page markup and is
+// applied by site.js at runtime ("site.js adds a class that animates from a
+// small offset to the resting state"). When pages are not supplied the
+// legacy conservative behavior stands.
+export function findHiddenByDefaultRevealRules(css: string, pages?: Record<string, string>): string[] {
   const flattened = flattenMediaBlocks(css);
+  const markupClasses = new Set<string>();
+  if (pages) {
+    for (const html of Object.values(pages)) {
+      for (const classMatch of html.matchAll(/class\s*=\s*(?:"([^"]*)"|'([^']*)')/gi)) {
+        for (const token of (classMatch[1] ?? classMatch[2] ?? "").trim().split(/\s+/)) {
+          if (token) markupClasses.add(token);
+        }
+      }
+    }
+  }
   const offenders: string[] = [];
   for (const match of flattened.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
     const selector = match[1].trim();
     if (!/reveal|fade|animate|entrance|appear/i.test(selector)) continue;
     if (selector.includes("@")) continue;
     const declarations = match[2].toLowerCase();
-    if (/(^|[;{\s])opacity\s*:\s*0\s*(!important)?\s*(;|$)/.test(declarations) || /visibility\s*:\s*hidden/.test(declarations)) {
-      offenders.push(selector.slice(0, 120));
-    }
+    if (!/(^|[;{\s])opacity\s*:\s*0\s*(!important)?\s*(;|$)/.test(declarations) && !/visibility\s*:\s*hidden/.test(declarations)) continue;
+    const classTokens = [...selector.matchAll(/\.([a-zA-Z_-][\w-]*)/g)].map((m) => m[1]);
+    // JS-GATED selector: a `.js` class token (html.js / .js ancestor) means
+    // the hidden state requires a class that only JavaScript sets — without
+    // JS the rule never matches.
+    if (classTokens.includes("js")) continue;
+    // JS-APPLIED class: every class token of the selector is absent from the
+    // page markup, so without JavaScript nothing can match. (When the markup
+    // check is unavailable — pages not supplied — the legacy conservative
+    // behavior stands.)
+    if (pages && classTokens.length > 0 && classTokens.every((token) => !markupClasses.has(token))) continue;
+    offenders.push(selector.slice(0, 120));
   }
   return offenders;
 }

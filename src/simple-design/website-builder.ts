@@ -4,19 +4,31 @@
 // screenshots stay visual authority at BOTH ends through the Blueprint
 // (implementation-ready design) and Visual QA — never as Builder input.
 //
-// Architecture (operator GO 2026-09-11: WEBSITE BUILDER V7 — ONE SHARED
-// BUILDER STAGE, FILE-SIZED REALIZATION CALLS): there is still exactly ONE
-// logical WEBSITE BUILDER STAGE owning one website realization, but inside
-// that stage the site is realized through SIX bounded coding calls —
+// Architecture (operator GO 2026-09-11: VISUAL FIDELITY ITERATION — DOM-FIRST,
+// CSS-LAST BUILDER): there is still exactly ONE logical WEBSITE BUILDER STAGE
+// owning one website realization, but inside that stage the site is realized
+// through SIX bounded coding calls —
 //
-//   1. site.css   2. home HTML   3. about HTML
-//   4. services   5. contact     6. site.js
+//   1. home HTML   2. about HTML  3. services HTML
+//   4. contact     5. site.css    6. site.js
 //
+// DOM-FIRST, CSS-LAST (this GO §3/§4/§9): the old CSS-first order forced the
+// stylesheet call to PREDICT the final markup — sections, class vocabulary,
+// hero structures, wrappers — and the later HTML had to adapt to that
+// speculative stylesheet. That is the tested root cause of the 82-score
+// realization failures (first viewport, silhouette, text/image mass,
+// signature traits, mobile identity). Now the HOME call defines the semantic
+// DOM and the structural class vocabulary, the inner pages are realized on
+// the FROZEN home chrome + vocabulary, and the CSS call STYLES THE ACTUAL
+// FINAL MARKUP of all four completed documents. CSS later controls size,
+// position, spacing, crop, surface and responsive behavior; it can no longer
+// be written against markup that does not exist.
+
 // All calls share the SAME immutable context (Design Blueprint, Business
 // Facts, materialized image plan, Accepted Images, CRITICAL image ledger,
 // form contract, design tokens, global chrome specification); later calls
-// additionally receive the FROZEN outputs of earlier ones (the stylesheet,
-// then the pages) so the files interlock. These are NOT six independent
+// additionally receive the FROZEN outputs of earlier ones (the pages, then
+// the stylesheet) so the files interlock. These are NOT six independent
 // agents — they are six file-compilation steps inside one frozen Website
 // Builder job. The old "whole site in one/two large completions" constraint
 // is RETIRED: four output envelopes across two models failed on payload
@@ -132,15 +144,16 @@ export function estimateBuilderCallCostUsd(
   return (input / 1_000_000) * GLM53_INPUT_USD_PER_MTOK + (output / 1_000_000) * GLM53_OUTPUT_USD_PER_MTOK;
 }
 
-// The six file-compilation steps, in their fixed deterministic order (GO §2):
-// the design system first, then the four pages on that frozen stylesheet,
-// then the script that enhances the frozen markup.
+// The six file-compilation steps, in their fixed deterministic order (GO §4,
+// DOM-first): the four HTML documents first — home defines the shared chrome
+// and the structural class vocabulary — then the stylesheet written AGAINST
+// the final markup, then the script that enhances it.
 export const BUILDER_FILE_CALL_ORDER: BuilderFileKind[] = [
-  "site-css",
   "page-home",
   "page-about",
   "page-services",
   "page-contact",
+  "site-css",
   "site-js",
 ];
 
@@ -196,7 +209,7 @@ export interface SimpleWebsiteBuilderResult {
 // Deterministic provenance note constructed by the system — never model
 // output.
 export const BUILDER_STRATEGY_NOTE =
-  "Built via the canonical SIX_CALL_FILE_REALIZATION Builder (simple-website-builder/v7, model-routed to glm-5.3 on the Z.AI Coding Plan): six sequential file-sized realization calls — site.css, home, about, services, contact, site.js — each ONE raw single-file completion on the same frozen context, with the home header/footer frozen as the shared chrome for the remaining pages.";
+  "Built via the canonical SIX_CALL_FILE_REALIZATION Builder (simple-website-builder/v8, DOM-first/CSS-last, model-routed to glm-5.3 on the Z.AI Coding Plan): six sequential file-sized realization calls — home, about, services, contact (DOM + shared chrome + structural class vocabulary defined by home), then site.css styled against the final four documents, then site.js — each ONE raw single-file completion on the same frozen context.";
 
 // ── CRITICAL image ledger (deterministic; derived from the materialized plan) ─
 
@@ -279,7 +292,7 @@ FOUR-PAGE HERO MEDIA (hard rule): EVERY routed page — home, about, services AN
 
 PROGRESSIVE ENHANCEMENT (hard rule): every section's content must be fully visible in plain HTML+CSS with JavaScript disabled and before any scroll event. All content must be visible in the base HTML/CSS state. JavaScript may animate from/to presentation states, but content visibility may never depend on JavaScript execution. Do not ship .reveal { opacity: 0 } or equivalent hidden-by-default content — use progressive enhancement. Scroll/entrance animation is an ENHANCEMENT applied by site.js to already-visible elements (site.js adds a class that animates from a small offset to the resting state; the resting CSS state is fully visible). Never define content hidden by default (opacity:0, visibility:hidden, transform off-screen) as its CSS resting state, and never require IntersectionObserver for content to appear. prefers-reduced-motion: reduce must keep every element fully visible with all animation disabled.
 
-CONSISTENCY CONTRACT: the six files are compiled by sibling calls of this one Builder job from the SAME blueprint — keep the global chrome (header/nav/footer markup, class naming vocabulary, section idioms) EXACTLY consistent across files, using the blueprint's global chrome specification and design tokens.`;
+CONSISTENCY CONTRACT: the six files are compiled by sibling calls of this one Builder job from the SAME blueprint — the home call defines the global chrome (header/nav/footer markup) and the structural class vocabulary; the inner pages reproduce that chrome exactly and reuse the same component/class language; the stylesheet is written against the final markup those calls produced.`;
 }
 
 // OUTPUT MODE block (GO §5): identical discipline appended to every call —
@@ -288,18 +301,35 @@ function outputModeBlock(fileName: string, firstLine: string): string {
   return `OUTPUT MODE (hard rule): this call produces exactly ONE source file, "${fileName}", as plain output. Return ONLY the complete contents of ${fileName} — raw source starting directly with ${firstLine}. No Markdown fences, no explanation before or after, no JSON, no surrounding prose, no TODO, no "rest unchanged", no source summaries or descriptions of the file.`;
 }
 
-function cssCallUserPrompt(input: RunSimpleWebsiteBuilderInput): string {
+function cssCallUserPrompt(input: RunSimpleWebsiteBuilderInput, pages: Record<PageId, string>): string {
+  const frozenPages = PAGE_IDS.map((page) => `FROZEN ${page}.html (call ${PAGE_IDS.indexOf(page) + 1} of this stage — complete, final):\n${pages[page]}`).join("\n\n");
   return `${buildSharedContext(input)}
 
-TASK (call 1 of 6 — this call): Realize the shared stylesheet. The full "site.css" implements the blueprint's entire design system: tokens as CSS custom properties, the complete type scale with clamp() sizes, layout for every planned section — including the sections that carry the MANDATORY CRITICAL IMAGE PLACEMENTS — responsive breakpoints, hover states, :focus-visible, and a prefers-reduced-motion block whenever the blueprint defines motion. ${outputModeBlock("site.css", "the first CSS rule.")}`;
+THE FINAL HTML DOCUMENTS THIS STYLESHEET MUST STYLE (do not invent alternate markup; do not assume sections or classes that are absent):
+${frozenPages}
+
+TASK (call 5 of 6 — this call): Realize the shared stylesheet AGAINST THE REAL DOM ABOVE. The full "site.css" styles exactly the elements, classes, ids and structures the four completed documents actually contain, implementing the blueprint's entire design system: tokens as CSS custom properties, the complete type scale with clamp() sizes, layout for every section present in the markup — including the sections that carry the MANDATORY CRITICAL IMAGE PLACEMENTS — responsive breakpoints, hover states, :focus-visible, and a prefers-reduced-motion block whenever the blueprint defines motion.
+
+FIDELITY PRIORITIES (in order): (1) the first viewport materially matches the Reference composition carried by the Blueprint; (2) page silhouette and region order; (3) dominant text/image mass; (4) typography scale and measure; (5) photographic mass, crop and treatment; (6) surface/color sequence; (7) signature design traits; (8) mobile preservation of the visual identity.
+
+NUMERIC BLUEPRINT VALUES ARE BINDING: where the Blueprint provides measurable guidance — clamp() sizes, section mass, container width, viewport-height hero, image ratios, max text measure, spacing, radius, surface sequence — IMPLEMENT those values rather than reinterpreting them loosely.
+
+IMAGE TREATMENT IS INTENTIONAL: for every CRITICAL image, decide from the Blueprint and the actual DOM — full-bleed vs contained, image/text split ratio, object-fit, object-position, crop, overlay/wash, border radius, visual height/mass, desktop treatment, mobile treatment. Never default imagery to width:100%;height:auto; or generic card crops.
+
+TYPOGRAPHY CONTROLS THE SILHOUETTE: implement the Blueprint typography literally — font-family character, weights, clamp sizes, line-height, tracking, headline measure. Large display type stays large; use max-width, controlled wrapping and responsive clamps to preserve the Reference mass instead of shrinking type to fit replacement copy.
+
+RESPONSIVE IS NOT "STACK EVERYTHING": mobile CSS preserves hero visual mass, signature element treatment, image prominence, headline hierarchy and surface rhythm. Do not reduce every desktop composition to display:block;width:100%; — use the Blueprint's mobile behavior intentionally.
+
+STATE CLASSES ARE SHARED VOCABULARY (live A/B evidence 2026-09-11: site.css styled .faq-collapsed while site.js toggled .is-collapsed — a rule that can never activate): interaction state classes you introduce for JavaScript (menu open, accordion state, reveal states) are part of the site's class vocabulary. site.js is written AFTER you and adopts YOUR state class names exactly — keep them minimal, conventional (is-open, is-active, is-collapsed, nav-open) and identical wherever a rule repeats, and never hide content by default under a state class. ${outputModeBlock("site.css", "the first CSS rule.")}`;
 }
 
-// ── FROZEN SHARED CHROME (GO §18) ───────────────────────────────────────────
+// ── FROZEN SHARED CHROME (GO §6/§18) ────────────────────────────────────────
 //
-// site.css is frozen first; home is realized next; home's header (with its
-// navigation) and footer are then extracted DETERMINISTICALLY and frozen as
-// the shared chrome. About / Services / Contact receive the exact chrome and
-// must reproduce it exactly — no redesign between pages.
+// home is realized FIRST; home's header (with its navigation) and footer are
+// extracted DETERMINISTICALLY and frozen as the shared chrome, alongside the
+// deterministic HOME STRUCTURAL VOCABULARY. About / Services / Contact
+// receive the exact chrome and vocabulary and must reproduce the chrome
+// exactly — no redesign between pages.
 
 export interface SharedChrome {
   header: string | null;
@@ -314,14 +344,26 @@ export function extractSharedChrome(homeHtml: string): SharedChrome {
 }
 
 /** Deterministic chrome match: every non-home page carries the frozen header
- *  and footer. Comparison strips ALL whitespace and the `aria-current`
- *  attribute — which accessibility REQUIRES to move to the current page's nav
- *  link (live qualification evidence: identical chrome otherwise) — and is
- *  otherwise EXACT: any different tag, attribute, class or text fails.
- *  Returns failure ids — empty = PASS. */
+ *  and footer. Comparison strips ALL whitespace, the `aria-current`
+ *  attribute, and the bounded current-page marker class idioms — which
+ *  accessibility REQUIRES to move to the current page's nav link (live
+ *  qualification evidence 2026-09-11: the Builder moves
+ *  `aria-current="page" class="nav-link is-active"` to each page's own link;
+ *  everything else is byte-exact) — and is otherwise EXACT: any different
+ *  tag, attribute, class or text fails. Returns failure ids — empty = PASS. */
 export function validateSharedChrome(pages: Record<PageId, string>): string[] {
   const chrome = extractSharedChrome(pages.home);
-  const normalize = (html: string): string => html.replace(/\s+/g, "").replace(/aria-current="(page|true)"/gi, "");
+  const normalize = (html: string): string =>
+    html
+      // marker strips run BEFORE the whitespace collapse: collapsing first
+      // would fuse the class tokens ("nav-link is-active" → "nav-linkis-active")
+      .replace(/aria-current="(page|true)"/gi, "")
+      .replace(/class="([^"]*)"/gi, (_match, classes: string) => {
+        const tokens = classes.trim().split(/\s+/);
+        const kept = tokens.filter((token) => !/^(is-)?(active|current)$/i.test(token));
+        return kept.length === tokens.length ? `class="${classes}"` : `class="${kept.join(" ")}"`;
+      })
+      .replace(/\s+/g, "");
   const failures: string[] = [];
   for (const page of ["about", "services", "contact"] as const) {
     if (chrome.header && !normalize(pages[page]).includes(normalize(chrome.header))) {
@@ -344,28 +386,55 @@ function chromePromptBlock(chrome: SharedChrome): string {
   return `FROZEN SHARED CHROME (extracted from home — your header and footer elements must be EXACTLY these strings, byte-for-byte, including class names, attributes, text and the enclosing <header>/<footer> tags; do not restyle, reorder or reword them. The ONE permitted difference: the aria-current="page" attribute moves to the CURRENT page's nav link):\n${parts.join("\n")}`;
 }
 
-function pageCallUserPrompt(input: RunSimpleWebsiteBuilderInput, page: PageId, css: string, chrome: SharedChrome | null): string {
+// HOME STRUCTURAL VOCABULARY (GO §6): the literal class vocabulary already
+// present in the home markup — extracted deterministically (first-appearance
+// order, deduplicated, bounded) so the inner-page calls reuse the existing
+// structural conventions. Deliberately NOT an ontology — no interpretation,
+// just the tokens.
+export function extractHomeStructuralVocabulary(homeHtml: string): string {
+  const seen = new Set<string>();
+  const classes: string[] = [];
+  for (const match of homeHtml.matchAll(/class\s*=\s*(?:"([^"]*)"|'([^']*)')/gi)) {
+    for (const token of (match[1] ?? match[2] ?? "").trim().split(/\s+/)) {
+      if (token && !seen.has(token)) {
+        seen.add(token);
+        classes.push(token);
+      }
+    }
+  }
+  return classes.slice(0, 200).join(" ");
+}
+
+function pageCallUserPrompt(
+  input: RunSimpleWebsiteBuilderInput,
+  page: PageId,
+  chrome: SharedChrome | null,
+  homeVocabulary: string | null
+): string {
+  const vocabularyBlock = homeVocabulary
+    ? `HOME STRUCTURAL VOCABULARY (the literal class tokens home already uses — reuse these structural conventions where appropriate: containers, hero/section idioms, buttons, media wrappers, grids, cards; introduce page-specific classes ONLY where this page's Blueprint genuinely needs them; do not invent an independent design system):\n${homeVocabulary}\n\n`
+    : "";
+  const homeOwnership = page === "home"
+    ? " This call DEFINES the site's structural vocabulary and the shared chrome: its DOM hierarchy, section order, image/text relationships, wrappers, component/class vocabulary and its header (with navigation) and footer become the frozen chrome every remaining page reproduces exactly. It does NOT own final visual CSS values — the stylesheet is written later, against your markup."
+    : "";
   return `${buildSharedContext(input)}
 
-FROZEN site.css (call 1 of this stage — the page MUST use its vocabulary, selectors and custom properties; do not restyle):
-${css}
-
-${chrome ? `${chromePromptBlock(chrome)} The header and footer are the FROZEN SHARED CHROME — reproduce them exactly; only <main> (and the page-specific <head> metadata) is this page's own.\n\n` : ""}THIS PAGE'S MANDATORY CRITICAL IMAGES (part of the ledger above — every listed slot MUST appear on this page, in its section, by exact slot id):
+${vocabularyBlock}${chrome ? `${chromePromptBlock(chrome)} The header and footer are the FROZEN SHARED CHROME — reproduce them exactly; only <main> (and the page-specific <head> metadata) is this page's own.\n\n` : ""}THIS PAGE'S MANDATORY CRITICAL IMAGES (part of the ledger above — every listed slot MUST appear on this page, in its section, by exact slot id):
 ${criticalLedgerForPage(input.acceptedImages, page)}
 
-TASK (call ${PAGE_IDS.indexOf(page) + 2} of 6 — this call): Realize the "${page}" page as one complete HTML document, realizing the blueprint's "${page}" spec section-by-section on that frozen stylesheet. Production-grade, no placeholders. The document opens with the page's blueprint hero section (FOUR-PAGE HERO MEDIA above) and satisfies the FORM CONTRACT when the page is contact.${page === "home" ? " This call DEFINES the shared chrome: its header (with navigation) and footer become the frozen chrome every remaining page reproduces exactly." : ""} ${outputModeBlock(`${page}.html`, "<!DOCTYPE html>.")}`;
+TASK (call ${PAGE_IDS.indexOf(page) + 1} of 6 — this call): Realize the "${page}" page as one complete HTML document, realizing the blueprint's "${page}" spec section-by-section. Production-grade, no placeholders. The document opens with the page's blueprint hero section (FOUR-PAGE HERO MEDIA above) and satisfies the FORM CONTRACT when the page is contact. No stylesheet exists yet — ENCODE COMPOSITION STRUCTURALLY: where the Blueprint says a large split hero, the markup contains a hero text region and a hero media region; where it says an asymmetric band, the markup structurally exposes those regions; where it says a full-width photographic interruption, the image is placed INSIDE that section, never appended at the end. CSS comes later and cannot rescue the wrong semantic DOM.${homeOwnership} ${outputModeBlock(`${page}.html`, "<!DOCTYPE html>.")}`;
 }
 
 function jsCallUserPrompt(input: RunSimpleWebsiteBuilderInput, css: string, pages: Record<PageId, string>): string {
   const frozenPages = PAGE_IDS.map((page) => `FROZEN ${page}.html (already produced in this stage):\n${pages[page]}`).join("\n\n");
   return `${buildSharedContext(input)}
 
-FROZEN site.css (call 1 of this stage):
+FROZEN site.css (call 5 of this stage):
 ${css}
 
 ${frozenPages}
 
-TASK (call 6 of 6 — this call): Realize the shared script. The "site.js" implements only the blueprint's interactions — navigation toggle, scroll/entrance reveals that enhance ALREADY-VISIBLE content, header states — small, defensive (querySelector null checks), dependency-free. Its selectors must match the frozen markup and stylesheet above exactly. ${outputModeBlock("site.js", "the first JavaScript statement.")}`;
+TASK (call 6 of 6 — this call): Realize the shared script. The "site.js" implements only the blueprint's interactions — navigation toggle, scroll/entrance reveals that enhance ALREADY-VISIBLE content, header states — small, defensive (querySelector null checks), dependency-free. Its selectors must match the frozen markup and stylesheet above exactly, INCLUDING the state classes the stylesheet already defines — reuse site.css's state class names verbatim (live evidence: CSS said .faq-collapsed while the script toggled .is-collapsed; that drift kills the build). ${outputModeBlock("site.js", "the first JavaScript statement.")}`;
 }
 
 // The Builder's DEFAULT seam: the ONE Coding Plan provider, streaming
@@ -487,7 +556,7 @@ async function realizeFile(
       // defensive shape for legacy rows stored without one.
       provenance: existing.provenance ?? {
         promptId: "simple-website-builder",
-        promptVersion: "v7",
+        promptVersion: "v8",
         promptDomainContractVersion: "1",
         model: resolveWebsiteBuilderModel(env),
         schemaVersion: schemaVersionOfKind(kind),
@@ -536,47 +605,82 @@ async function realizeFile(
   };
 }
 
-// CSS-only realization (qualification GO §12/§21): the FIRST qualification
-// bar — one site.css realization through the canonical seam, validated by the
-// same deterministic file gate, frozen as the same per-file artifact. No KIE,
-// no preview, no QA, no pages.
-export async function runSimpleBuilderCssRealization(
-  env: Env,
-  input: RunSimpleWebsiteBuilderInput
-): Promise<{ css: string; metrics: BuilderCallMetrics; provenance: AiProvenance; artifactR2Key: string; validationFailures: string[] }> {
-  const motionExists = blueprintMotionExists(input.blueprint);
-  const validator = (kind: BuilderFileKind) => (source: string) =>
-    validateBuilderFile(kind, source, { blueprintMotionExists: motionExists }).failures;
-  const outcome = await realizeFile(env, {
-    input,
-    kind: "site-css",
-    userPrompt: cssCallUserPrompt(input),
-    inputArtifactIds: [input.blueprint.businessFactsRef],
-    stageArtifactBase: {
-      buildId: input.buildId,
-      siteGenerationId: input.siteGenerationId,
-      buildVersionId: input.buildVersionId,
-      buildVersionNumber: input.buildVersionNumber,
-    },
-    validator,
-    seamFor: (kind) => input.generate ?? fileBuilderGenerate(env, { maxCompletionTokens: budgetOfKind(kind), label: `simple-website-builder:${kind}` }),
-  });
-  return {
-    css: outcome.file,
-    metrics: outcome.metrics,
-    provenance: outcome.provenance,
-    artifactR2Key: outcome.artifactR2Key,
-    validationFailures: validateBuilderFile("site-css", outcome.file, { blueprintMotionExists: motionExists }).failures,
+// DOM-FIRST GATE (GO §26): the stylesheet was written AGAINST the real DOM —
+// a selector is invented structure when NONE of its class/id tokens appears
+// in the four documents or site.js (CSS styling markup that does not exist —
+// the exact defect class the reorder exists to prevent). A selector ANCHORED
+// by one real token is accepted: its remaining tokens are conditional state/
+// variant hooks on real structure (`.form-status.is-success`) — dead rules at
+// worst, not "absent selectors used as required structure" (live evidence
+// 2026-09-11, two fresh runs: inventing whole-component selectors is the
+// structural failure; anchored state hooks are harmless conditionals).
+// JS-quoted tokens are deliberately included in the accepted set: state
+// classes site.js toggles (e.g. "nav-open") are legitimate hooks that cannot
+// exist in the static markup. Selector extraction reads ONLY selector
+// preludes — text before each `{` — after stripping comments (live A/B
+// evidence: a `/* … site.css */` header comment otherwise pollutes the first
+// prelude and false-positives), so declarations (hex colors, custom
+// properties) and prose never flag.
+export function cssSelectorFailures(
+  css: string,
+  pages: Record<PageId, string>,
+  js: string
+): string[] {
+  const accepted = new Set<string>();
+  const addTokens = (text: string) => {
+    for (const match of text.matchAll(/class\s*=\s*(?:"([^"]*)"|'([^']*)')/gi)) {
+      for (const token of (match[1] ?? match[2] ?? "").trim().split(/\s+/)) if (token) accepted.add(token);
+    }
+    for (const match of text.matchAll(/\bid\s*=\s*(?:"([^"]*)"|'([^']*)')/gi)) if (match[1] ?? match[2]) accepted.add(match[1] ?? match[2]!);
   };
+  for (const page of PAGE_IDS) addTokens(pages[page] ?? "");
+  for (const match of js.matchAll(/['"`]([a-zA-Z_-][\w-]*)['"`]/g)) accepted.add(match[1]);
+
+  const scanned = css.replace(/\/\*[\s\S]*?\*\//g, " ");
+  const missing: string[] = [];
+  // Walk the stylesheet structurally: track the text preceding each "{".
+  let preludeStart = 0;
+  let depth = 0;
+  for (let index = 0; index < scanned.length; index++) {
+    const char = scanned[index];
+    if (char === "{") {
+      if (depth === 0) {
+        const prelude = scanned.slice(preludeStart, index);
+        if (!prelude.trimStart().startsWith("@")) {
+          const cleaned = prelude.replace(/::?[a-zA-Z-]+(\([^)]*\))?/g, "").replace(/\[[^\]]*\]/g, "");
+          const tokens = [
+            ...[...cleaned.matchAll(/\.([a-zA-Z_-][\w-]*)/g)].map((match) => `.${match[1]}`),
+            ...[...cleaned.matchAll(/#([a-zA-Z_-][\w-]*)/g)].map((match) => `#${match[1]}`),
+          ];
+          // Anchor rule: at least one token must exist in the DOM/JS
+          // vocabulary; otherwise the whole selector is invented structure.
+          const anchored = tokens.some((token) => accepted.has(token.slice(1)));
+          if (tokens.length > 0 && !anchored) missing.push(...tokens);
+        }
+      }
+      depth++;
+      preludeStart = index + 1;
+    } else if (char === "}") {
+      depth = Math.max(0, depth - 1);
+      preludeStart = index + 1;
+    } else if (char === ";" && depth === 0) {
+      preludeStart = index + 1;
+    }
+  }
+  return [...new Set(missing)].map(
+    (selector) => `site.css selector ${selector} is anchored on NO class or id that appears in any page document or site.js (invented structure)`
+  );
 }
 
-// The SIX_CALL_FILE_REALIZATION core (GO §10/§18): ONE Website Builder stage,
-// six bounded coding calls in fixed order. Every call shares the same frozen
-// context; the page calls receive the FROZEN site.css (home first, defining
-// the shared chrome) and the JS call receives the FROZEN stylesheet and
-// pages. Each call is validated deterministically per file IMMEDIATELY and
-// frozen as a per-file artifact (GO §20); the stage wraps this core with
-// chrome + SiteBundleSchema + CRITICAL coverage validation + persistence.
+// The SIX_CALL_FILE_REALIZATION core (GO §4, DOM-first/CSS-last): ONE Website
+// Builder stage, six bounded coding calls in fixed order. The four page calls
+// run first (home defines the shared chrome + structural class vocabulary;
+// the inner pages receive both FROZEN, GO §6/§7), then the CSS call styles
+// the FOUR FINAL DOCUMENTS (GO §9), then the JS call binds to the frozen
+// stylesheet and pages. Each call is validated deterministically per file
+// IMMEDIATELY and frozen as a per-file artifact (GO §20); the stage wraps
+// this core with chrome + selector + SiteBundleSchema + CRITICAL coverage
+// validation + persistence.
 export async function runSimpleBuilderFileRealizationCore(
   env: Env,
   input: RunSimpleWebsiteBuilderInput
@@ -592,32 +696,22 @@ export async function runSimpleBuilderFileRealizationCore(
     validateBuilderFile(kind, source, { blueprintMotionExists: motionExists }).failures;
   const factsRef = input.blueprint.businessFactsRef;
 
-  // Call 1 — site.css (the design system). ONE semantic generation.
-  const cssOutcome = await realizeFile(env, {
-    input,
-    kind: "site-css",
-    userPrompt: cssCallUserPrompt(input),
-    inputArtifactIds: [factsRef],
-    stageArtifactBase,
-    validator,
-    seamFor: (kind) => input.generate ?? fileBuilderGenerate(env, { maxCompletionTokens: budgetOfKind(kind), label: `simple-website-builder:${kind}` }),
-  });
-  const css = cssOutcome.file;
-
-  // Calls 2-5 — home defines the shared chrome; the remaining pages receive
-  // the FROZEN chrome and must reproduce it exactly (GO §18).
+  // Calls 1-4 — the four HTML documents. On resume these come from the
+  // per-file artifacts, so a resumed CSS call still receives ALL FOUR final
+  // documents (GO §26: resumed CSS waits for the four page files).
   const pages = {} as Record<PageId, string>;
-  const provenance = { "site-css": cssOutcome.provenance } as Partial<Record<BuilderFileKind, AiProvenance>>;
-  const calls: BuilderCallMetrics[] = [cssOutcome.metrics];
+  const provenance = {} as Partial<Record<BuilderFileKind, AiProvenance>>;
+  const calls: BuilderCallMetrics[] = [];
   const pageArtifactKeys: string[] = [];
   let chrome: SharedChrome | null = null;
+  let homeVocabulary: string | null = null;
+  let homeArtifactKey: string | null = null;
   for (const page of PAGE_IDS) {
-    if (page === "home") chrome = null;
     const outcome = await realizeFile(env, {
       input,
       kind: `page-${page}`,
-      userPrompt: pageCallUserPrompt(input, page, css, page === "home" ? null : chrome),
-      inputArtifactIds: [factsRef, cssOutcome.artifactR2Key],
+      userPrompt: pageCallUserPrompt(input, page, page === "home" ? null : chrome, page === "home" ? null : homeVocabulary),
+      inputArtifactIds: page === "home" ? [factsRef] : [factsRef, homeArtifactKey!],
       stageArtifactBase,
       validator,
       seamFor: (kind) => input.generate ?? fileBuilderGenerate(env, { maxCompletionTokens: budgetOfKind(kind), label: `simple-website-builder:${kind}` }),
@@ -626,7 +720,11 @@ export async function runSimpleBuilderFileRealizationCore(
     pageArtifactKeys.push(outcome.artifactR2Key);
     provenance[`page-${page}`] = outcome.provenance;
     calls.push(outcome.metrics);
-    if (page === "home") chrome = extractSharedChrome(pages.home);
+    if (page === "home") {
+      chrome = extractSharedChrome(pages.home);
+      homeVocabulary = extractHomeStructuralVocabulary(pages.home);
+      homeArtifactKey = outcome.artifactR2Key;
+    }
   }
 
   // §18 FAIL CLOSED: the frozen chrome is a Builder contract — a page that
@@ -638,6 +736,21 @@ export async function runSimpleBuilderFileRealizationCore(
       `Website Builder violated the frozen shared chrome contract (${chromeFailures.join("; ").slice(0, 400)})`
     );
   }
+
+  // Call 5 — site.css, styled against the FOUR FINAL documents. ONE semantic
+  // generation.
+  const cssOutcome = await realizeFile(env, {
+    input,
+    kind: "site-css",
+    userPrompt: cssCallUserPrompt(input, pages),
+    inputArtifactIds: [factsRef, ...pageArtifactKeys],
+    stageArtifactBase,
+    validator,
+    seamFor: (kind) => input.generate ?? fileBuilderGenerate(env, { maxCompletionTokens: budgetOfKind(kind), label: `simple-website-builder:${kind}` }),
+  });
+  const css = cssOutcome.file;
+  provenance["site-css"] = cssOutcome.provenance;
+  calls.push(cssOutcome.metrics);
 
   // Call 6 — site.js, binding to the FROZEN markup and stylesheet. ONE
   // semantic generation.
@@ -653,6 +766,17 @@ export async function runSimpleBuilderFileRealizationCore(
   const js = jsOutcome.file;
   provenance["site-js"] = jsOutcome.provenance;
   calls.push(jsOutcome.metrics);
+
+  // DOM-FIRST GATE: the stylesheet must reference only structure that exists
+  // in the four documents or the script (fail closed after ALL six files, so
+  // JS state-class hooks are known).
+  const selectorFailures = cssSelectorFailures(css, pages, js);
+  if (selectorFailures.length > 0) {
+    throw new SimpleWebsiteBuilderError(
+      "SOURCE_INCOMPLETE",
+      `Website Builder stylesheet invented structure absent from the realized DOM (${selectorFailures.join("; ").slice(0, 400)})`
+    );
+  }
 
   // The SYSTEM constructs the SiteBundle — deterministic provenance note,
   // never model output.

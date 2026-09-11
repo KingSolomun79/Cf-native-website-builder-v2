@@ -23,7 +23,7 @@ contradictory clauses inside the retained detailed body.
 | Stage | prompt id/version | Detailed body |
 |---|---|---|
 | Design Blueprint Generator (multimodal — Reference screenshots attached) | `simple-design-blueprint/v5` | `simple/01-design-blueprint.md` |
-| Website Builder — the ONE visual owner | `simple-website-builder/v7` | `simple/02-website-builder.md` |
+| Website Builder — the ONE visual owner | `simple-website-builder/v8` | `simple/02-website-builder.md` |
 | Visual QA | `simple-visual-qa/v2` | `simple/03-visual-qa.md` |
 | Site Repair — the ONE repair | `simple-site-repair/v1` | `simple/04-site-repair.md` |
 

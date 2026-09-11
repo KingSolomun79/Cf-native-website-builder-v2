@@ -39,18 +39,21 @@ export const PROMPT_MANIFEST: Record<PromptStageKey, PromptManifestEntry> = {
     promptVersion: "v5",
     bodyFile: "simple/01-design-blueprint.md",
   },
-  // v7 (operator GO 2026-09-11, FILE-SIZED REALIZATION): the ONE Builder
-  // stage realizes the site through six bounded coding calls, each producing
-  // exactly ONE source file as RAW model output (stream=false, NO
-  // response_format, one tolerated Markdown fence) on full GLM-5.3 — the
-  // Blueprint is the complete, implementation-ready design authority (no
-  // Reference screenshots attached). v3 (2026-09-10): CRITICAL image coverage
-  // is a Builder contract — every CRITICAL Accepted Image is mandatory on its
-  // declared page/section (deterministic ledger in the context; truth-safe
-  // usage guidance).
+  // v8 (operator GO 2026-09-11, DOM-FIRST/CSS-LAST VISUAL FIDELITY): the SIX
+  // calls reorder to home → about → services → contact → site.css → site.js.
+  // Home defines the semantic DOM, the shared chrome and the structural class
+  // vocabulary; the inner pages are realized on the frozen chrome +
+  // vocabulary; the CSS call STYLES THE ACTUAL FINAL MARKUP of all four
+  // completed documents (the CSS-first order made the stylesheet predict
+  // markup that did not exist yet — the tested root cause of the 82-score
+  // realization failures); site.js stays last. Per-file raw output, no
+  // response_format, one tolerated Markdown fence, full GLM-5.3, no
+  // Reference screenshots attached — all unchanged. The Blueprint remains the
+  // complete, implementation-ready design authority; NO new geometry
+  // ontology, region graph, trait ledger or second design-analysis call.
   "simple-website-builder": {
     promptId: "simple-website-builder",
-    promptVersion: "v7",
+    promptVersion: "v8",
     bodyFile: "simple/02-website-builder.md",
   },
   // v2 (operator GO, 2026-09-09): visual QA verifies photographic hero

@@ -79,7 +79,7 @@ const withNamedCriticalSupporting = (id: string, section: string): DesignBluepri
 const imgTag = (slotId: string) => `<img src="IMG:${slotId}" data-image-id="${slotId}" alt="${slotId} photograph">`;
 
 const pageWith = (pageId: string, slotIds: string[], extraSection = ""): string =>
-  `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${pageId}</title><meta name="description" content="${pageId} page for the coverage fixture bundle, described at length."><meta property="og:title" content="${pageId}"><meta property="og:description" content="${pageId} description"><link rel="stylesheet" href="site.css"></head><body><header><nav aria-label="Primary"><a href="/">Home</a><a href="/about">About</a><a href="/services">Services</a><a href="/contact">Contact</a></nav></header><main><section class="hero">${slotIds.map(imgTag).join("")}<h1>${pageId}</h1><p>${pageId} body copy long enough for any schema floor the bundle schema applies to its pages.</p></section>${extraSection}</main><footer><p>Footer line for the fixture.</p></footer><script src="site.js" defer></script></body></html>`;
+  `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${pageId}</title><meta name="description" content="${pageId} page for the coverage fixture bundle, described at length."><meta property="og:title" content="${pageId}"><meta property="og:description" content="${pageId} description"><link rel="stylesheet" href="site.css"></head><body><header><nav class="site-nav" aria-label="Primary"><a href="/">Home</a><a href="/about">About</a><a href="/services">Services</a><a href="/contact">Contact</a></nav></header><main><section class="hero">${slotIds.map(imgTag).join("")}<h1>${pageId}</h1><p>${pageId} body copy long enough for any schema floor the bundle schema applies to its pages.</p></section>${extraSection}</main><footer><p>Footer line for the fixture.</p></footer><script src="site.js" defer></script></body></html>`;
 
 // Schema-valid shared CSS (site-bundle/1 requires >= 200 chars) that ALSO
 // passes the deterministic file-realization CSS validation (>= 10 rules,
@@ -248,7 +248,7 @@ function scriptedBuilderSeam(handlers: {
   return {
     calls,
     generate: async (_system: string, user: string) => {
-      if (user.includes("call 1 of 6")) {
+      if (user.includes("call 5 of 6")) {
         calls.push("site-css");
         handlers.onCssCall?.(user);
         return { content: FIXTURE_CSS, provider: "test", model: "@cf/zai-org/glm-5.3" };
@@ -289,7 +289,7 @@ describe("the canonical SIX_CALL build: coverage-valid output persists; coverage
     });
 
     expect(result.strategy).toBe("SIX_CALL_FILE_REALIZATION");
-    expect(seam.calls).toEqual(["site-css", "home", "about", "services", "contact", "site-js"]);
+    expect(seam.calls).toEqual(["home", "about", "services", "contact", "site-css", "site-js"]);
     expect(result.bundle.pages.home).toContain('src="IMG:home-chapters-tents"');
     expect(result.bundle.notes).toBe(BUILDER_STRATEGY_NOTE);
 
@@ -329,7 +329,7 @@ describe("the canonical SIX_CALL build: coverage-valid output persists; coverage
     expect(error.findings.map((finding) => finding.slotId)).toContain("home-chapters-tents");
 
     // exactly the six canonical calls — never a second attempt
-    expect(seam.calls).toEqual(["site-css", "home", "about", "services", "contact", "site-js"]);
+    expect(seam.calls).toEqual(["home", "about", "services", "contact", "site-css", "site-js"]);
     // nothing was frozen as a successful Builder artifact (§14 negative half)
     const stored = await getBuildStageArtifact<SiteBundle>(env, ctx.buildVersionId, "site_bundle");
     expect(stored).toBeNull();

@@ -381,7 +381,7 @@ describe("builder progressive-enhancement instruction (#4)", () => {
     // placed on its declared page) returned by the injected seam
     const longPage = (pageId: "home" | "about" | "services" | "contact") => {
       const title = pageId[0].toUpperCase() + pageId.slice(1);
-      return `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${title}</title><meta name="description" content="${title} page with a full descriptive body for the fixture bundle."><meta property="og:title" content="${title}"><meta property="og:description" content="${title} description"><link rel="stylesheet" href="site.css"></head><body><header><nav aria-label="Primary"><a href="/">Home</a><a href="/about">About</a><a href="/services">Services</a><a href="/contact">Contact</a></nav></header><main><section class="hero"><img src="IMG:${pageId}-hero" data-image-id="${pageId}-hero" alt="${title} hero photograph"><h1>${title}</h1><p>${title} hero copy for the fixture bundle, long enough to satisfy the schema floor and describe the section honestly.</p></section></main><footer><p>Business footer line for the fixture.</p></footer><script src="site.js" defer></script></body></html>`;
+      return `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${title}</title><meta name="description" content="${title} page with a full descriptive body for the fixture bundle."><meta property="og:title" content="${title}"><meta property="og:description" content="${title} description"><link rel="stylesheet" href="site.css"></head><body><header><nav class="site-nav" aria-label="Primary"><a href="/">Home</a><a href="/about">About</a><a href="/services">Services</a><a href="/contact">Contact</a></nav></header><main><section class="hero"><img src="IMG:${pageId}-hero" data-image-id="${pageId}-hero" alt="${title} hero photograph"><h1>${title}</h1><p>${title} hero copy for the fixture bundle, long enough to satisfy the schema floor and describe the section honestly.</p></section></main><footer><p>Business footer line for the fixture.</p></footer><script src="site.js" defer></script></body></html>`;
     };
     const builderBundle: SiteBundle = {
       version: "1",
@@ -408,7 +408,7 @@ describe("builder progressive-enhancement instruction (#4)", () => {
       generate: async (system, user) => {
         seen.push({ system, user });
         // Canonical SIX_CALL shapes: one RAW file per call, in order.
-        if (user.includes("call 1 of 6")) {
+        if (user.includes("call 5 of 6")) {
           return { content: builderBundle.sharedCss, provider: "test", model: "@cf/zai-org/glm-5.3" };
         }
         if (user.includes("call 6 of 6")) {
