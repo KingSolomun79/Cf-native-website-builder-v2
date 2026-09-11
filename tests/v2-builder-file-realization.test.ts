@@ -298,6 +298,15 @@ describe("frozen shared chrome (GO §18)", () => {
     const result = await runSimpleWebsiteBuilderStage(env, stageInput(ctx, blueprint(), seam.generate) as Parameters<typeof runSimpleWebsiteBuilderStage>[1]);
     expect(result.bundle.pages.services).toBe(reflowed);
   });
+
+  it("§8c the aria-current marker MOVES to the current page's nav link — required accessibility, not redesign (live qualification evidence)", async () => {
+    const ctx = await scaffoldBuild("references/simple/coding-plan-chrome-aria.png");
+    const servicesNav = HEADER.replace('<a href="/services">Services</a>', '<a href="/services" aria-current="page">Services</a>').replace('<a href="/">Home</a></li>', '<a href="/">Home</a>');
+    const reflowed = FULL_PAGE("services").replace(HEADER, servicesNav);
+    const seam = scriptedSixCallSeam({ pages: { services: reflowed } });
+    const result = await runSimpleWebsiteBuilderStage(env, stageInput(ctx, blueprint(), seam.generate) as Parameters<typeof runSimpleWebsiteBuilderStage>[1]);
+    expect(result.bundle.pages.services).toBe(reflowed);
+  });
 });
 
 // ── §10-§12: fail-closed paths ───────────────────────────────────────────────

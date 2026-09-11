@@ -314,13 +314,14 @@ export function extractSharedChrome(homeHtml: string): SharedChrome {
 }
 
 /** Deterministic chrome match: every non-home page carries the frozen header
- *  and footer. Comparison strips ALL whitespace on both sides (insignificant
- *  HTML formatting variance is not redesign) and is otherwise EXACT — any
- *  different tag, attribute, class or text fails. Returns failure ids —
- *  empty = PASS. */
+ *  and footer. Comparison strips ALL whitespace and the `aria-current`
+ *  attribute — which accessibility REQUIRES to move to the current page's nav
+ *  link (live qualification evidence: identical chrome otherwise) — and is
+ *  otherwise EXACT: any different tag, attribute, class or text fails.
+ *  Returns failure ids — empty = PASS. */
 export function validateSharedChrome(pages: Record<PageId, string>): string[] {
   const chrome = extractSharedChrome(pages.home);
-  const normalize = (html: string): string => html.replace(/\s+/g, "");
+  const normalize = (html: string): string => html.replace(/\s+/g, "").replace(/aria-current="(page|true)"/gi, "");
   const failures: string[] = [];
   for (const page of ["about", "services", "contact"] as const) {
     if (chrome.header && !normalize(pages[page]).includes(normalize(chrome.header))) {
@@ -340,7 +341,7 @@ function chromePromptBlock(chrome: SharedChrome): string {
   if (parts.length === 0) {
     return "FROZEN SHARED CHROME: home produced no extractable header/footer — keep the global chrome EXACTLY consistent with the blueprint's global chrome specification.";
   }
-  return `FROZEN SHARED CHROME (extracted from home — your header and footer elements must be EXACTLY these strings, byte-for-byte, including class names, attributes, text and the enclosing <header>/<footer> tags; do not restyle, reorder or reword them):\n${parts.join("\n")}`;
+  return `FROZEN SHARED CHROME (extracted from home — your header and footer elements must be EXACTLY these strings, byte-for-byte, including class names, attributes, text and the enclosing <header>/<footer> tags; do not restyle, reorder or reword them. The ONE permitted difference: the aria-current="page" attribute moves to the CURRENT page's nav link):\n${parts.join("\n")}`;
 }
 
 function pageCallUserPrompt(input: RunSimpleWebsiteBuilderInput, page: PageId, css: string, chrome: SharedChrome | null): string {
