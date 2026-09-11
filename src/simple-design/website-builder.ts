@@ -318,7 +318,9 @@ IMAGE TREATMENT IS INTENTIONAL: for every CRITICAL image, decide from the Bluepr
 
 TYPOGRAPHY CONTROLS THE SILHOUETTE: implement the Blueprint typography literally — font-family character, weights, clamp sizes, line-height, tracking, headline measure. Large display type stays large; use max-width, controlled wrapping and responsive clamps to preserve the Reference mass instead of shrinking type to fit replacement copy.
 
-RESPONSIVE IS NOT "STACK EVERYTHING": mobile CSS preserves hero visual mass, signature element treatment, image prominence, headline hierarchy and surface rhythm. Do not reduce every desktop composition to display:block;width:100%; — use the Blueprint's mobile behavior intentionally. ${outputModeBlock("site.css", "the first CSS rule.")}`;
+RESPONSIVE IS NOT "STACK EVERYTHING": mobile CSS preserves hero visual mass, signature element treatment, image prominence, headline hierarchy and surface rhythm. Do not reduce every desktop composition to display:block;width:100%; — use the Blueprint's mobile behavior intentionally.
+
+STATE CLASSES ARE SHARED VOCABULARY (live A/B evidence 2026-09-11: site.css styled .faq-collapsed while site.js toggled .is-collapsed — a rule that can never activate): interaction state classes you introduce for JavaScript (menu open, accordion state, reveal states) are part of the site's class vocabulary. site.js is written AFTER you and adopts YOUR state class names exactly — keep them minimal, conventional (is-open, is-active, is-collapsed, nav-open) and identical wherever a rule repeats, and never hide content by default under a state class. ${outputModeBlock("site.css", "the first CSS rule.")}`;
 }
 
 // ── FROZEN SHARED CHROME (GO §6/§18) ────────────────────────────────────────
@@ -432,7 +434,7 @@ ${css}
 
 ${frozenPages}
 
-TASK (call 6 of 6 — this call): Realize the shared script. The "site.js" implements only the blueprint's interactions — navigation toggle, scroll/entrance reveals that enhance ALREADY-VISIBLE content, header states — small, defensive (querySelector null checks), dependency-free. Its selectors must match the frozen markup and stylesheet above exactly. ${outputModeBlock("site.js", "the first JavaScript statement.")}`;
+TASK (call 6 of 6 — this call): Realize the shared script. The "site.js" implements only the blueprint's interactions — navigation toggle, scroll/entrance reveals that enhance ALREADY-VISIBLE content, header states — small, defensive (querySelector null checks), dependency-free. Its selectors must match the frozen markup and stylesheet above exactly, INCLUDING the state classes the stylesheet already defines — reuse site.css's state class names verbatim (live evidence: CSS said .faq-collapsed while the script toggled .is-collapsed; that drift kills the build). ${outputModeBlock("site.js", "the first JavaScript statement.")}`;
 }
 
 // The Builder's DEFAULT seam: the ONE Coding Plan provider, streaming
