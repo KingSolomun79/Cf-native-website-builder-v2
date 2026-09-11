@@ -272,6 +272,43 @@ export interface RunSchemaValidatedAiStageOptions {
   nativeJsonSchema?: boolean;
 }
 
+export // Schema-aware normalization (live Coding Plan evidence 2026-09-11): models
+// write descriptive strings that occasionally exceed a schema's maxLength by
+// a sentence. A single over-long string is a formatting violation, not a
+// semantic one — the value is truncated to the schema's cap (the same
+// normalization philosophy as stripping nulls/empty strings) and
+// re-validated, instead of spending the ONE structural repair on it.
+function truncateOverLongStrings(schema: TSchema, value: unknown): { value: unknown; truncated: boolean } {
+  let current = value;
+  let truncated = false;
+  for (let pass = 0; pass < 3; pass++) {
+    let changed = false;
+    for (const error of Value.Errors(schema, current)) {
+      const match = /Expected string length less or equal to (\d+)/.exec(error.message);
+      if (!match) continue;
+      const segments = error.path.split("/").filter((segment) => segment.length > 0).map((segment) => (/^\d+$/.test(segment) ? Number(segment) : segment));
+      if (segments.length === 0) continue;
+      let parent = current as Record<string | number, unknown>;
+      let resolvable = true;
+      for (let i = 0; i < segments.length - 1; i++) {
+        const next = parent[segments[i]];
+        if (next === null || typeof next !== "object") { resolvable = false; break; }
+        parent = next as Record<string | number, unknown>;
+      }
+      if (!resolvable) continue;
+      const last = segments[segments.length - 1];
+      const target = parent[last];
+      if (typeof target === "string" && target.length > Number(match[1])) {
+        parent[last] = target.slice(0, Number(match[1]));
+        truncated = true;
+        changed = true;
+      }
+    }
+    if (!changed) break;
+  }
+  return { value: current, truncated };
+}
+
 export async function runSchemaValidatedAiStage<T>(
   env: Env,
   options: RunSchemaValidatedAiStageOptions
@@ -348,7 +385,7 @@ Return ONLY the corrected JSON object. Do not change the semantic content beyond
       outcome = "invalid";
       errorSummary = parsed.error;
     } else {
-      const candidate = stripEmptyStrings(stripNulls(parsed.value));
+      const candidate = truncateOverLongStrings(options.schema, stripEmptyStrings(stripNulls(parsed.value))).value;
       if (!Value.Check(options.schema, candidate)) {
         outcome = "invalid";
         errorSummary = schemaErrorSummary(options.schema, candidate);
