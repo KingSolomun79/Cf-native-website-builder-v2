@@ -24,7 +24,7 @@ import {
   type SiteBundle,
 } from "./contracts";
 import { bytesToBase64, mimeForKey } from "./vision";
-import { generateZaiCodingPlan, resolveCodingModel, type ZaiCodingPlanContentPart } from "../lib/zai-coding-plan";
+import { generateZaiCodingPlan, resolveCodingModel } from "../lib/zai-coding-plan";
 import { SIMPLE_PAGE_FILES } from "./bundle-qa";
 import type { SimpleBuilderVisualInput } from "./contracts";
 
@@ -130,33 +130,26 @@ export interface SimpleSiteRepairResult {
 }
 
 // SIMPLE repair seam (operator GO 2026-09-11, ZAI CODING PLAN UNIFICATION
-// §26): the repair runs on the ONE Coding Plan provider with the coding model
-// (glm-5.3) — stream: true, thinking disabled, json_object mode. Text-only
-// when no candidate renders exist, multimodal when they do. Whether visual
-// inputs exist is INDEPENDENT of provider selection: a preflight-rejected
-// candidate has no renders. No Workers AI, no AI Gateway, no provider
-// fallback.
+// §26; live §28 evidence 2026-09-11): the repair runs on the ONE Coding Plan
+// provider with the coding model (glm-5.3) — stream: true, thinking disabled,
+// json_object mode. TEXT-ONLY, always: on the Coding Plan endpoint glm-5.3
+// rejects non-text content parts with 400 "messages.content.type is invalid,
+// allowed values: ['text']" (multimodal on this endpoint is glm-5.3-flash per
+// the §9 canary; the repair's model routing is glm-5.3 per GO §27). The
+// repair's visual context is carried by the QA package's textual findings and
+// the prompt's textual image manifest. No Workers AI, no AI Gateway, no
+// provider fallback.
 function simpleRepairGenerate(
   env: Env,
-  images: Array<{ base64: string; mimeType: string }>,
+  _images: Array<{ base64: string; mimeType: string }>,
   meta: { stage: string; buildId: string }
 ): RawAiGenerate {
   const model = resolveCodingModel(env);
   return async (systemPrompt, userPrompt, attempt) => {
-    const messages = images.length > 0
-      ? [{
-          role: "user" as const,
-          content: [
-            ...images.map((image) => ({ type: "image_url" as const, image_url: { url: `data:${image.mimeType};base64,${image.base64}` } })),
-            { type: "text" as const, text: `${systemPrompt}
-
-${userPrompt}` },
-          ] as ZaiCodingPlanContentPart[],
-        }]
-      : [
-          { role: "system" as const, content: systemPrompt },
-          { role: "user" as const, content: userPrompt },
-        ];
+    const messages = [
+      { role: "system" as const, content: systemPrompt },
+      { role: "user" as const, content: userPrompt },
+    ];
     const result = await generateZaiCodingPlan(env, {
       model,
       messages,
