@@ -606,15 +606,21 @@ async function realizeFile(
 }
 
 // DOM-FIRST GATE (GO §26): the stylesheet was written AGAINST the real DOM —
-// a class or id selector that appears in site.css but in NEITHER the four
-// documents NOR site.js is invented structure (the exact defect class the
-// reorder exists to prevent). JS-quoted tokens are deliberately included in
-// the accepted set: state classes site.js toggles (e.g. "nav-open") are
-// legitimate CSS hooks that cannot exist in the static markup. Selector
-// extraction reads ONLY selector preludes — text before each `{` — after
-// stripping comments (live A/B evidence: a `/* … site.css */` header comment
-// otherwise pollutes the first prelude and false-positives), so declarations
-// (hex colors, custom properties) and prose never flag.
+// a selector is invented structure when NONE of its class/id tokens appears
+// in the four documents or site.js (CSS styling markup that does not exist —
+// the exact defect class the reorder exists to prevent). A selector ANCHORED
+// by one real token is accepted: its remaining tokens are conditional state/
+// variant hooks on real structure (`.form-status.is-success`) — dead rules at
+// worst, not "absent selectors used as required structure" (live evidence
+// 2026-09-11, two fresh runs: inventing whole-component selectors is the
+// structural failure; anchored state hooks are harmless conditionals).
+// JS-quoted tokens are deliberately included in the accepted set: state
+// classes site.js toggles (e.g. "nav-open") are legitimate hooks that cannot
+// exist in the static markup. Selector extraction reads ONLY selector
+// preludes — text before each `{` — after stripping comments (live A/B
+// evidence: a `/* … site.css */` header comment otherwise pollutes the first
+// prelude and false-positives), so declarations (hex colors, custom
+// properties) and prose never flag.
 export function cssSelectorFailures(
   css: string,
   pages: Record<PageId, string>,
@@ -631,7 +637,7 @@ export function cssSelectorFailures(
   for (const match of js.matchAll(/['"`]([a-zA-Z_-][\w-]*)['"`]/g)) accepted.add(match[1]);
 
   const scanned = css.replace(/\/\*[\s\S]*?\*\//g, " ");
-  const missing = new Set<string>();
+  const missing: string[] = [];
   // Walk the stylesheet structurally: track the text preceding each "{".
   let preludeStart = 0;
   let depth = 0;
@@ -642,12 +648,14 @@ export function cssSelectorFailures(
         const prelude = scanned.slice(preludeStart, index);
         if (!prelude.trimStart().startsWith("@")) {
           const cleaned = prelude.replace(/::?[a-zA-Z-]+(\([^)]*\))?/g, "").replace(/\[[^\]]*\]/g, "");
-          for (const match of cleaned.matchAll(/\.([a-zA-Z_-][\w-]*)/g)) {
-            if (!accepted.has(match[1])) missing.add(`.${match[1]}`);
-          }
-          for (const match of cleaned.matchAll(/#([a-zA-Z_-][\w-]*)/g)) {
-            if (!accepted.has(match[1])) missing.add(`#${match[1]}`);
-          }
+          const tokens = [
+            ...[...cleaned.matchAll(/\.([a-zA-Z_-][\w-]*)/g)].map((match) => `.${match[1]}`),
+            ...[...cleaned.matchAll(/#([a-zA-Z_-][\w-]*)/g)].map((match) => `#${match[1]}`),
+          ];
+          // Anchor rule: at least one token must exist in the DOM/JS
+          // vocabulary; otherwise the whole selector is invented structure.
+          const anchored = tokens.some((token) => accepted.has(token.slice(1)));
+          if (tokens.length > 0 && !anchored) missing.push(...tokens);
         }
       }
       depth++;
@@ -659,7 +667,9 @@ export function cssSelectorFailures(
       preludeStart = index + 1;
     }
   }
-  return [...missing].map((selector) => `site.css uses selector ${selector} that appears in NO page document or site.js (invented structure)`);
+  return [...new Set(missing)].map(
+    (selector) => `site.css selector ${selector} is anchored on NO class or id that appears in any page document or site.js (invented structure)`
+  );
 }
 
 // The SIX_CALL_FILE_REALIZATION core (GO §4, DOM-first/CSS-last): ONE Website

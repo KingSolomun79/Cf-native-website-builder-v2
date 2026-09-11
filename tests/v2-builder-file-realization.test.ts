@@ -436,6 +436,11 @@ describe("site.css cannot invent structure absent from the realized DOM (GO §26
     expect(cssSelectorFailures(invented, pages(), CODE_JS).length).toBe(1);
   });
 
+  it("§19d' a state hook ANCHORED on a real component class is a conditional, not invented structure (live fresh-run evidence: .form-status.is-success)", () => {
+    const anchored = `${TOKENS_CSS}\n.section.is-success { color: var(--accent); }\n.site-nav .is-error { color: #c0392b; }`;
+    expect(cssSelectorFailures(anchored, pages(), CODE_JS)).toEqual([]);
+  });
+
   it("§19e the gate fails the STAGE closed: invented CSS structure never persists", async () => {
     const ctx = await scaffoldBuild("references/simple/dom-first-cssgate.png");
     const inventingCss = `.marketing-unicorn-band { display: grid; }\n${TOKENS_CSS}`;
