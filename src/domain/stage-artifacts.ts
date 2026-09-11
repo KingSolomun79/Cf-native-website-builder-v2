@@ -30,7 +30,10 @@ export type StageArtifactKind =
   // SIMPLE design pipeline artifacts. Never produced by the legacy pipeline.
   | "design_blueprint"
   | "site_bundle"
-  | "qa_package";
+  | "qa_package"
+  // Per-file Builder resume artifacts (operator GO 2026-09-11 §20): one
+  // immutable validated file per kind (site-css, page-home, ..., site-js).
+  | `builder_file/${string}`;
 
 export class StageArtifactError extends Error {
   readonly code: "ARTIFACT_ALREADY_EXISTS" | "BUILD_VERSION_NOT_FOUND" | "REPAIR_ARTIFACT_MISMATCH";

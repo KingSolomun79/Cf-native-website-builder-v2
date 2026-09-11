@@ -50,10 +50,10 @@ import {
 import { getBuildStageArtifact, storeBuildStageArtifactIdempotent } from "../domain/stage-artifacts";
 import type { BusinessFacts } from "../domain/lifecycle-schema";
 import {
-  generateWorkersAiFile,
-  WorkersAiFileOutputExhaustedError,
-  WORKERS_AI_GLM_5_3,
-} from "../lib/workers-ai-file";
+  generateZaiCodingPlan,
+  resolveCodingModel,
+  ZaiCodingPlanOutputExhaustedError,
+} from "../lib/zai-coding-plan";
 import {
   ROUTED_PAGE_IDS,
   SITE_BUNDLE_SCHEMA_VERSION,
@@ -103,18 +103,22 @@ export const BUILDER_CSS_MAX_COMPLETION_TOKENS = 18_000;
 export const BUILDER_PAGE_MAX_COMPLETION_TOKENS = 16_000;
 export const BUILDER_JS_MAX_COMPLETION_TOKENS = 6_000;
 
-// §4 stage routing: the Website Builder's routed model. Full GLM-5.3 is the
-// model intended for the Builder's coding workload; vision/design reasoning
-// (Blueprint, Visual QA) stays on glm-5.3-flash elsewhere in the pipeline.
-export const WEBSITE_BUILDER_MODEL = WORKERS_AI_GLM_5_3;
+// §4 model routing through the ONE Coding Plan provider (operator GO
+// 2026-09-11, ZAI CODING PLAN UNIFICATION): every Builder call runs glm-5.3
+// on the Z.AI Coding Plan endpoint — an explicit stage policy, never
+// fallback/substitution. Override surface is the ZAI_CODING_MODEL var only.
+export function resolveWebsiteBuilderModel(env: Env): string {
+  return resolveCodingModel(env);
+}
 
-// §8 reasoning control — the exact setting the transport sends (GLM-5.3
-// schema-verified 2026-09-10: chat_template_kwargs.enable_thinking, default
-// TRUE, is explicitly supported; priority 1 applies). Recorded in provenance.
-export const BUILDER_REASONING_CONTROL = "chat_template_kwargs.enable_thinking=false";
+// §8 reasoning control — the exact setting the Coding Plan transport sends
+// (live production evidence, issue #30: reasoning draws from the same output
+// budget). Recorded in provenance.
+export const BUILDER_REASONING_CONTROL = "thinking.type=disabled";
 
-// §17/§25 cost telemetry — Cloudflare Workers AI pricing for full GLM-5.3
-// (USD per million tokens). Estimated per Builder call from provider usage.
+// §17/§25 cost telemetry — estimated at GLM list per-million-token rates
+// (Coding Plan usage itself is quota-based; this remains a comparable
+// per-call estimate from provider usage).
 export const GLM53_INPUT_USD_PER_MTOK = 1.4;
 export const GLM53_OUTPUT_USD_PER_MTOK = 4.4;
 
@@ -122,7 +126,7 @@ export function estimateBuilderCallCostUsd(
   model: string,
   usage: { prompt_tokens?: number; completion_tokens?: number } | null
 ): number | null {
-  if (model !== WEBSITE_BUILDER_MODEL || !usage) return null;
+  if (!model.startsWith("glm-") || !usage) return null;
   const input = typeof usage.prompt_tokens === "number" ? usage.prompt_tokens : 0;
   const output = typeof usage.completion_tokens === "number" ? usage.completion_tokens : 0;
   return (input / 1_000_000) * GLM53_INPUT_USD_PER_MTOK + (output / 1_000_000) * GLM53_OUTPUT_USD_PER_MTOK;
@@ -192,7 +196,7 @@ export interface SimpleWebsiteBuilderResult {
 // Deterministic provenance note constructed by the system — never model
 // output.
 export const BUILDER_STRATEGY_NOTE =
-  "Built via the canonical SIX_CALL_FILE_REALIZATION Builder (simple-website-builder/v7, model-routed to @cf/zai-org/glm-5.3): six sequential file-sized realization calls — site.css, home, about, services, contact, site.js — each ONE raw single-file completion (stream=false, no response_format) on the same frozen context.";
+  "Built via the canonical SIX_CALL_FILE_REALIZATION Builder (simple-website-builder/v7, model-routed to glm-5.3 on the Z.AI Coding Plan): six sequential file-sized realization calls — site.css, home, about, services, contact, site.js — each ONE raw single-file completion on the same frozen context, with the home header/footer frozen as the shared chrome for the remaining pages.";
 
 // ── CRITICAL image ledger (deterministic; derived from the materialized plan) ─
 
@@ -290,16 +294,61 @@ function cssCallUserPrompt(input: RunSimpleWebsiteBuilderInput): string {
 TASK (call 1 of 6 — this call): Realize the shared stylesheet. The full "site.css" implements the blueprint's entire design system: tokens as CSS custom properties, the complete type scale with clamp() sizes, layout for every planned section — including the sections that carry the MANDATORY CRITICAL IMAGE PLACEMENTS — responsive breakpoints, hover states, :focus-visible, and a prefers-reduced-motion block whenever the blueprint defines motion. ${outputModeBlock("site.css", "the first CSS rule.")}`;
 }
 
-function pageCallUserPrompt(input: RunSimpleWebsiteBuilderInput, page: PageId, css: string): string {
+// ── FROZEN SHARED CHROME (GO §18) ───────────────────────────────────────────
+//
+// site.css is frozen first; home is realized next; home's header (with its
+// navigation) and footer are then extracted DETERMINISTICALLY and frozen as
+// the shared chrome. About / Services / Contact receive the exact chrome and
+// must reproduce it exactly — no redesign between pages.
+
+export interface SharedChrome {
+  header: string | null;
+  footer: string | null;
+}
+
+export function extractSharedChrome(homeHtml: string): SharedChrome {
+  return {
+    header: /<header\b[\s\S]*?<\/header>/i.exec(homeHtml)?.[0] ?? null,
+    footer: /<footer\b[\s\S]*?<\/footer>/i.exec(homeHtml)?.[0] ?? null,
+  };
+}
+
+/** Deterministic chrome match: every non-home page carries the exact frozen
+ *  header and footer. Returns human-readable failure ids — empty = PASS. */
+export function validateSharedChrome(pages: Record<PageId, string>): string[] {
+  const chrome = extractSharedChrome(pages.home);
+  const failures: string[] = [];
+  for (const page of ["about", "services", "contact"] as const) {
+    if (chrome.header && !pages[page].includes(chrome.header)) {
+      failures.push(`${page} page header does not match the frozen shared chrome`);
+    }
+    if (chrome.footer && !pages[page].includes(chrome.footer)) {
+      failures.push(`${page} page footer does not match the frozen shared chrome`);
+    }
+  }
+  return failures;
+}
+
+function chromePromptBlock(chrome: SharedChrome): string {
+  const parts: string[] = [];
+  if (chrome.header) parts.push(`${chrome.header}`);
+  if (chrome.footer) parts.push(`${chrome.footer}`);
+  if (parts.length === 0) {
+    return "FROZEN SHARED CHROME: home produced no extractable header/footer — keep the global chrome EXACTLY consistent with the blueprint's global chrome specification.";
+  }
+  return `FROZEN SHARED CHROME (extracted from home — your header and footer elements must be EXACTLY these strings, byte-for-byte, including class names, attributes, text and the enclosing <header>/<footer> tags; do not restyle, reorder or reword them):\n${parts.join("\n")}`;
+}
+
+function pageCallUserPrompt(input: RunSimpleWebsiteBuilderInput, page: PageId, css: string, chrome: SharedChrome | null): string {
   return `${buildSharedContext(input)}
 
 FROZEN site.css (call 1 of this stage — the page MUST use its vocabulary, selectors and custom properties; do not restyle):
 ${css}
 
-THIS PAGE'S MANDATORY CRITICAL IMAGES (part of the ledger above — every listed slot MUST appear on this page, in its section, by exact slot id):
+${chrome ? `${chromePromptBlock(chrome)} The header and footer are the FROZEN SHARED CHROME — reproduce them exactly; only <main> (and the page-specific <head> metadata) is this page's own.\n\n` : ""}THIS PAGE'S MANDATORY CRITICAL IMAGES (part of the ledger above — every listed slot MUST appear on this page, in its section, by exact slot id):
 ${criticalLedgerForPage(input.acceptedImages, page)}
 
-TASK (call ${PAGE_IDS.indexOf(page) + 2} of 6 — this call): Realize the "${page}" page as one complete HTML document, realizing the blueprint's "${page}" spec section-by-section on that frozen stylesheet. Production-grade, no placeholders. The document opens with the page's blueprint hero section (FOUR-PAGE HERO MEDIA above) and satisfies the FORM CONTRACT when the page is contact. ${outputModeBlock(`${page}.html`, "<!DOCTYPE html>.")}`;
+TASK (call ${PAGE_IDS.indexOf(page) + 2} of 6 — this call): Realize the "${page}" page as one complete HTML document, realizing the blueprint's "${page}" spec section-by-section on that frozen stylesheet. Production-grade, no placeholders. The document opens with the page's blueprint hero section (FOUR-PAGE HERO MEDIA above) and satisfies the FORM CONTRACT when the page is contact.${page === "home" ? " This call DEFINES the shared chrome: its header (with navigation) and footer become the frozen chrome every remaining page reproduces exactly." : ""} ${outputModeBlock(`${page}.html`, "<!DOCTYPE html>.")}`;
 }
 
 function jsCallUserPrompt(input: RunSimpleWebsiteBuilderInput, css: string, pages: Record<PageId, string>): string {
@@ -314,16 +363,21 @@ ${frozenPages}
 TASK (call 6 of 6 — this call): Realize the shared script. The "site.js" implements only the blueprint's interactions — navigation toggle, scroll/entrance reveals that enhance ALREADY-VISIBLE content, header states — small, defensive (querySelector null checks), dependency-free. Its selectors must match the frozen markup and stylesheet above exactly. ${outputModeBlock("site.js", "the first JavaScript statement.")}`;
 }
 
-// The Builder's DEFAULT seam: the non-streaming RAW file transport on the
-// routed model (GO §5). Transport only; injected seams (tests, driver) always
-// take precedence.
+// The Builder's DEFAULT seam: the ONE Coding Plan provider, streaming
+// transport (GO §13 — streaming is a transport choice inside the Coding
+// Plan). Transport only; injected seams (tests, driver) always take
+// precedence.
 function fileBuilderGenerate(env: Env, config: { maxCompletionTokens: number; label: string }): RawAiGenerate {
+  const model = resolveWebsiteBuilderModel(env);
   return async (systemPrompt, userPrompt) => {
-    const result = await generateWorkersAiFile(env, {
-      model: WEBSITE_BUILDER_MODEL,
-      system: systemPrompt,
-      user: userPrompt,
-      maxCompletionTokens: config.maxCompletionTokens,
+    const result = await generateZaiCodingPlan(env, {
+      model,
+      messages: [
+        { role: "system", content: systemPrompt },
+        { role: "user", content: userPrompt },
+      ],
+      maxTokens: config.maxCompletionTokens,
+      stream: true,
       label: config.label,
     });
     return {
@@ -368,10 +422,13 @@ export interface BuilderCallMetrics {
   finishReason: string | null;
   inputTokens: number | null;
   outputTokens: number | null;
-  /** §17/§25: estimated Workers AI cost from provider usage (GLM-5.3 pricing;
-   *  null when usage is absent or the model is not the routed Builder model). */
+  /** §17/§25: estimated cost from provider usage at GLM list rates (Coding
+   *  Plan usage itself is quota-based); null when usage is absent. */
   estimatedCostUsd: number | null;
   outputChars: number;
+  /** §20 resume: true when the immutable per-file artifact was REUSED — no
+   *  model call was made for this file in this run. */
+  reused?: boolean;
 }
 
 export interface SimpleBuilderFileRealizationCoreResult {
@@ -383,14 +440,138 @@ export interface SimpleBuilderFileRealizationCoreResult {
   calls: BuilderCallMetrics[];
 }
 
-// The SIX_CALL_FILE_REALIZATION core (GO §2): ONE Website Builder stage, six
-// bounded coding calls in fixed order. Every call shares the same frozen
-// context; the page calls receive the FROZEN site.css and the JS call
-// receives the FROZEN stylesheet and pages. Each call is validated
-// deterministically per file IMMEDIATELY (GO §6) and fails the stage closed —
-// constructs the SiteBundle but persists nothing; the stage wraps this core
-// with SiteBundleSchema + CRITICAL coverage validation + persistence, and the
-// transport qualification driver calls it directly (live calls, no replay).
+// Per-file resume artifacts (GO §20): every VALIDATED file freezes under its
+// own artifact kind before the next call starts. A workflow resume reuses
+// these immutable successes and continues at the first missing file — resume,
+// never a second semantic attempt for a completed file.
+const FILE_ARTIFACT_PREFIX = "builder_file/";
+const fileArtifactKind = (kind: BuilderFileKind): `builder_file/${string}` => `${FILE_ARTIFACT_PREFIX}${kind}`;
+
+async function realizeFile(
+  env: Env,
+  args: {
+    input: RunSimpleWebsiteBuilderInput;
+    kind: BuilderFileKind;
+    userPrompt: string;
+    inputArtifactIds: string[];
+    stageArtifactBase: { buildId: string; siteGenerationId: string; buildVersionId: string; buildVersionNumber: number };
+    validator: (kind: BuilderFileKind) => (source: string) => string[];
+    seamFor: (kind: BuilderFileKind) => RawAiGenerate;
+  }
+): Promise<{ file: string; metrics: BuilderCallMetrics; provenance: AiProvenance; artifactR2Key: string }> {
+  const { input, kind } = args;
+  // §20: a validated artifact from a previous run is REUSED, not regenerated.
+  const existing = await getBuildStageArtifact<string>(env, input.buildVersionId, fileArtifactKind(kind));
+  if (existing) {
+    return {
+      file: existing.value,
+      metrics: {
+        call: kind,
+        runId: "reused",
+        artifactR2Key: existing.artifactR2Key,
+        model: existing.provenance?.model ?? resolveWebsiteBuilderModel(env),
+        durationMs: 0,
+        finishReason: null,
+        inputTokens: null,
+        outputTokens: null,
+        estimatedCostUsd: null,
+        outputChars: existing.value.length,
+        reused: true,
+      },
+      // Per-file artifacts always carry provenance; the coalesce is a
+      // defensive shape for legacy rows stored without one.
+      provenance: existing.provenance ?? {
+        promptId: "simple-website-builder",
+        promptVersion: "v7",
+        promptDomainContractVersion: "1",
+        model: resolveWebsiteBuilderModel(env),
+        schemaVersion: schemaVersionOfKind(kind),
+        attempt: 1,
+        inputArtifactIds: [],
+      },
+      artifactR2Key: existing.artifactR2Key,
+    };
+  }
+  const started = Date.now();
+  const run = await runAiFileStage(env, {
+    stage: "simple-website-builder",
+    schemaVersion: schemaVersionOfKind(kind),
+    userPrompt: args.userPrompt,
+    ...args.stageArtifactBase,
+    inputArtifactIds: args.inputArtifactIds,
+    validate: args.validator(kind),
+    generate: args.seamFor(kind),
+  });
+  // Freeze BEFORE the next call starts: a later failure resumes here.
+  await storeBuildStageArtifactIdempotent(env, {
+    buildId: input.buildId,
+    siteGenerationId: input.siteGenerationId,
+    buildVersionId: input.buildVersionId,
+    kind: fileArtifactKind(kind),
+    schemaVersion: schemaVersionOfKind(kind),
+    value: run.value,
+    provenance: run.provenance,
+  });
+  return {
+    file: run.value,
+    metrics: {
+      call: kind,
+      runId: run.runId,
+      artifactR2Key: run.artifactR2Key,
+      model: run.provenance.model,
+      durationMs: Date.now() - started,
+      finishReason: run.finishReason,
+      inputTokens: usageOf(run.provenance)?.prompt_tokens ?? null,
+      outputTokens: usageOf(run.provenance)?.completion_tokens ?? null,
+      estimatedCostUsd: estimateBuilderCallCostUsd(run.provenance.model, usageOf(run.provenance)),
+      outputChars: run.value.length,
+    },
+    provenance: run.provenance,
+    artifactR2Key: run.artifactR2Key,
+  };
+}
+
+// CSS-only realization (qualification GO §12/§21): the FIRST qualification
+// bar — one site.css realization through the canonical seam, validated by the
+// same deterministic file gate, frozen as the same per-file artifact. No KIE,
+// no preview, no QA, no pages.
+export async function runSimpleBuilderCssRealization(
+  env: Env,
+  input: RunSimpleWebsiteBuilderInput
+): Promise<{ css: string; metrics: BuilderCallMetrics; provenance: AiProvenance; artifactR2Key: string; validationFailures: string[] }> {
+  const motionExists = blueprintMotionExists(input.blueprint);
+  const validator = (kind: BuilderFileKind) => (source: string) =>
+    validateBuilderFile(kind, source, { blueprintMotionExists: motionExists }).failures;
+  const outcome = await realizeFile(env, {
+    input,
+    kind: "site-css",
+    userPrompt: cssCallUserPrompt(input),
+    inputArtifactIds: [input.blueprint.businessFactsRef],
+    stageArtifactBase: {
+      buildId: input.buildId,
+      siteGenerationId: input.siteGenerationId,
+      buildVersionId: input.buildVersionId,
+      buildVersionNumber: input.buildVersionNumber,
+    },
+    validator,
+    seamFor: (kind) => input.generate ?? fileBuilderGenerate(env, { maxCompletionTokens: budgetOfKind(kind), label: `simple-website-builder:${kind}` }),
+  });
+  return {
+    css: outcome.file,
+    metrics: outcome.metrics,
+    provenance: outcome.provenance,
+    artifactR2Key: outcome.artifactR2Key,
+    validationFailures: validateBuilderFile("site-css", outcome.file, { blueprintMotionExists: motionExists }).failures,
+  };
+}
+
+// The SIX_CALL_FILE_REALIZATION core (GO §10/§18): ONE Website Builder stage,
+// six bounded coding calls in fixed order. Every call shares the same frozen
+// context; the page calls receive the FROZEN site.css (home first, defining
+// the shared chrome) and the JS call receives the FROZEN stylesheet and
+// pages. Each call is validated deterministically per file IMMEDIATELY and
+// frozen as a per-file artifact (GO §20); the stage wraps this core with
+// chrome + SiteBundleSchema + CRITICAL coverage validation + persistence.
 export async function runSimpleBuilderFileRealizationCore(
   env: Env,
   input: RunSimpleWebsiteBuilderInput
@@ -404,98 +585,69 @@ export async function runSimpleBuilderFileRealizationCore(
   const motionExists = blueprintMotionExists(input.blueprint);
   const validator = (kind: BuilderFileKind) => (source: string) =>
     validateBuilderFile(kind, source, { blueprintMotionExists: motionExists }).failures;
-
   const factsRef = input.blueprint.businessFactsRef;
-  // The Builder's default seam per call kind; an injected seam (tests,
-  // driver) always takes precedence and serves every call.
-  const seamFor = (kind: BuilderFileKind): RawAiGenerate =>
-    input.generate ?? fileBuilderGenerate(env, { maxCompletionTokens: budgetOfKind(kind), label: `simple-website-builder:${kind}` });
 
   // Call 1 — site.css (the design system). ONE semantic generation.
-  const cssStarted = Date.now();
-  const cssRun = await runAiFileStage(env, {
-    stage: "simple-website-builder",
-    schemaVersion: schemaVersionOfKind("site-css"),
+  const cssOutcome = await realizeFile(env, {
+    input,
+    kind: "site-css",
     userPrompt: cssCallUserPrompt(input),
-    ...stageArtifactBase,
     inputArtifactIds: [factsRef],
-    validate: validator("site-css"),
-    generate: seamFor("site-css"),
+    stageArtifactBase,
+    validator,
+    seamFor: (kind) => input.generate ?? fileBuilderGenerate(env, { maxCompletionTokens: budgetOfKind(kind), label: `simple-website-builder:${kind}` }),
   });
-  const css = cssRun.value;
-  const cssMetrics: BuilderCallMetrics = {
-    call: "site-css",
-    runId: cssRun.runId,
-    artifactR2Key: cssRun.artifactR2Key,
-    model: cssRun.provenance.model,
-    durationMs: Date.now() - cssStarted,
-    finishReason: cssRun.finishReason,
-    inputTokens: usageOf(cssRun.provenance)?.prompt_tokens ?? null,
-    outputTokens: usageOf(cssRun.provenance)?.completion_tokens ?? null,
-    estimatedCostUsd: estimateBuilderCallCostUsd(cssRun.provenance.model, usageOf(cssRun.provenance)),
-    outputChars: css.length,
-  };
+  const css = cssOutcome.file;
 
-  // Calls 2-5 — the four pages, each on the FROZEN stylesheet. ONE semantic
-  // generation per page.
+  // Calls 2-5 — home defines the shared chrome; the remaining pages receive
+  // the FROZEN chrome and must reproduce it exactly (GO §18).
   const pages = {} as Record<PageId, string>;
-  const provenance = { "site-css": cssRun.provenance } as Partial<Record<BuilderFileKind, AiProvenance>>;
-  const calls: BuilderCallMetrics[] = [cssMetrics];
+  const provenance = { "site-css": cssOutcome.provenance } as Partial<Record<BuilderFileKind, AiProvenance>>;
+  const calls: BuilderCallMetrics[] = [cssOutcome.metrics];
   const pageArtifactKeys: string[] = [];
+  let chrome: SharedChrome | null = null;
   for (const page of PAGE_IDS) {
-    const started = Date.now();
-    const run = await runAiFileStage(env, {
-      stage: "simple-website-builder",
-      schemaVersion: schemaVersionOfKind(`page-${page}`),
-      userPrompt: pageCallUserPrompt(input, page, css),
-      ...stageArtifactBase,
-      inputArtifactIds: [factsRef, cssRun.artifactR2Key],
-      validate: validator(`page-${page}`),
-      generate: seamFor(`page-${page}`),
+    if (page === "home") chrome = null;
+    const outcome = await realizeFile(env, {
+      input,
+      kind: `page-${page}`,
+      userPrompt: pageCallUserPrompt(input, page, css, page === "home" ? null : chrome),
+      inputArtifactIds: [factsRef, cssOutcome.artifactR2Key],
+      stageArtifactBase,
+      validator,
+      seamFor: (kind) => input.generate ?? fileBuilderGenerate(env, { maxCompletionTokens: budgetOfKind(kind), label: `simple-website-builder:${kind}` }),
     });
-    pages[page] = run.value;
-    pageArtifactKeys.push(run.artifactR2Key);
-    provenance[`page-${page}`] = run.provenance;
-    calls.push({
-      call: `page-${page}`,
-      runId: run.runId,
-      artifactR2Key: run.artifactR2Key,
-      model: run.provenance.model,
-      durationMs: Date.now() - started,
-      finishReason: run.finishReason,
-      inputTokens: usageOf(run.provenance)?.prompt_tokens ?? null,
-      outputTokens: usageOf(run.provenance)?.completion_tokens ?? null,
-      estimatedCostUsd: estimateBuilderCallCostUsd(run.provenance.model, usageOf(run.provenance)),
-      outputChars: run.value.length,
-    });
+    pages[page] = outcome.file;
+    pageArtifactKeys.push(outcome.artifactR2Key);
+    provenance[`page-${page}`] = outcome.provenance;
+    calls.push(outcome.metrics);
+    if (page === "home") chrome = extractSharedChrome(pages.home);
+  }
+
+  // §18 FAIL CLOSED: the frozen chrome is a Builder contract — a page that
+  // does not carry it exactly is invalid source, never a redesign candidate.
+  const chromeFailures = validateSharedChrome(pages);
+  if (chromeFailures.length > 0) {
+    throw new SimpleWebsiteBuilderError(
+      "SOURCE_INCOMPLETE",
+      `Website Builder violated the frozen shared chrome contract (${chromeFailures.join("; ").slice(0, 400)})`
+    );
   }
 
   // Call 6 — site.js, binding to the FROZEN markup and stylesheet. ONE
   // semantic generation.
-  const jsStarted = Date.now();
-  const jsRun = await runAiFileStage(env, {
-    stage: "simple-website-builder",
-    schemaVersion: schemaVersionOfKind("site-js"),
+  const jsOutcome = await realizeFile(env, {
+    input,
+    kind: "site-js",
     userPrompt: jsCallUserPrompt(input, css, pages),
-    ...stageArtifactBase,
-    inputArtifactIds: [factsRef, cssRun.artifactR2Key, ...pageArtifactKeys],
-    validate: validator("site-js"),
-    generate: seamFor("site-js"),
+    inputArtifactIds: [factsRef, cssOutcome.artifactR2Key, ...pageArtifactKeys],
+    stageArtifactBase,
+    validator,
+    seamFor: (kind) => input.generate ?? fileBuilderGenerate(env, { maxCompletionTokens: budgetOfKind(kind), label: `simple-website-builder:${kind}` }),
   });
-  const js = jsRun.value;
-  provenance["site-js"] = jsRun.provenance;
-  calls.push({
-    call: "site-js",
-    runId: jsRun.runId,
-    artifactR2Key: jsRun.artifactR2Key,
-    model: jsRun.provenance.model,
-    durationMs: Date.now() - jsStarted,
-    finishReason: jsRun.finishReason,
-    inputTokens: usageOf(jsRun.provenance)?.prompt_tokens ?? null,
-    outputTokens: usageOf(jsRun.provenance)?.completion_tokens ?? null,
-    estimatedCostUsd: estimateBuilderCallCostUsd(jsRun.provenance.model, usageOf(jsRun.provenance)),
-    outputChars: js.length,
-  });
+  const js = jsOutcome.file;
+  provenance["site-js"] = jsOutcome.provenance;
+  calls.push(jsOutcome.metrics);
 
   // The SYSTEM constructs the SiteBundle — deterministic provenance note,
   // never model output.
@@ -542,8 +694,8 @@ export async function runSimpleWebsiteBuilderStage(
     // ceiling) is classified OUTPUT_EXHAUSTED and FAILS CLOSED — never parsed
     // as a valid Builder result, never retried, never budget-raised.
     // DETERMINISTIC_REVIEW_REQUIRED via the stage-failure classifier.
-    if (error instanceof WorkersAiFileOutputExhaustedError) {
-      throw new SimpleWebsiteBuilderError("OUTPUT_EXHAUSTED", `Website Builder output exhausted on the raw file transport: ${error.message}`);
+    if (error instanceof ZaiCodingPlanOutputExhaustedError) {
+      throw new SimpleWebsiteBuilderError("OUTPUT_EXHAUSTED", `Website Builder output exhausted on the Coding Plan transport: ${error.message}`);
     }
     // A deterministic per-file validation/normalization failure after the ONE
     // semantic generation propagates as AiStageFileInvalidError — the

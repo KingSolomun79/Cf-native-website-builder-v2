@@ -46,12 +46,18 @@ import { buildAssembledCandidate, deployPreview, freezeAssembledCandidate, Assem
 import { storeBuildStageArtifactIdempotent, getBuildStageArtifact } from "../domain/stage-artifacts";
 import { buildStandardEvidenceBundle } from "../domain/qa-evidence";
 import { createProductionQaCapture } from "../domain/qa-capture";
-import { runSimpleWebsiteBuilderStage, runSimpleBuilderFileRealizationCore, WEBSITE_BUILDER_MODEL } from "../simple-design/website-builder";
 import {
-  generateWorkersAiFile,
-  WorkersAiFileOutputExhaustedError,
-  WorkersAiFileTransportError,
-} from "../lib/workers-ai-file";
+  runSimpleWebsiteBuilderStage,
+  runSimpleBuilderFileRealizationCore,
+  runSimpleBuilderCssRealization,
+  resolveWebsiteBuilderModel,
+} from "../simple-design/website-builder";
+import {
+  generateZaiCodingPlan,
+  listZaiCodingPlanModels,
+  ZaiCodingPlanOutputExhaustedError,
+  ZaiCodingPlanTransportError,
+} from "../lib/zai-coding-plan";
 import { validateBuilderFileBundle, blueprintMotionExists } from "../simple-design/builder-file-realization";
 import { runSimpleDesignBlueprintStage } from "../simple-design/design-blueprint";
 import { renderDesignBlueprintMarkdown } from "../simple-design/render-blueprint";
@@ -89,9 +95,12 @@ interface DriverFixtureImage {
 }
 
 interface DriverBody {
-  op: "health" | "put-fixture" | "finch-builder" | "file-canary" | "file-qualification" | "file-css-probe" | "assemble-stored" | "capture" | "blueprint" | "artifact" | "probe" | "fetch-probe" | "sql-probe" | "general-api-canary" | "stream-canary-text" | "stream-canary-vision" | "schema-canary" | "stage-runs" | "simple-kie" | "simple-kie-validation" | "simple-full-run" | "simple-rerender-qa" | "simple-hardening-run" | "simple-final-run";
+  op: "health" | "put-fixture" | "finch-builder" | "coding-plan-models" | "coding-plan-text-canary" | "coding-plan-vision-canary" | "coding-plan-css-qualification" | "file-qualification" | "assemble-stored" | "capture" | "blueprint" | "artifact" | "probe" | "fetch-probe" | "sql-probe" | "general-api-canary" | "stream-canary-text" | "stream-canary-vision" | "schema-canary" | "stage-runs" | "simple-kie" | "simple-kie-validation" | "simple-full-run" | "simple-rerender-qa" | "simple-hardening-run" | "simple-final-run";
   maxCompletionTokens?: number;
   model?: string;
+  imageBase64?: string;
+  imageMimeType?: string;
+  question?: string;
   key?: string;
   base64?: string;
   facts?: BusinessFacts;
@@ -187,14 +196,20 @@ export async function expBenchmarkDriver(c: Context<{ Bindings: Env }>): Promise
       case "finch-builder":
         return c.json(await runFinchBuilder(c.env, body));
 
-      case "file-canary":
-        return c.json(await runFileCanary(c.env, body));
+      case "coding-plan-models":
+        return c.json(await runCodingPlanModels(c.env));
+
+      case "coding-plan-text-canary":
+        return c.json(await runCodingPlanTextCanary(c.env, body));
+
+      case "coding-plan-vision-canary":
+        return c.json(await runCodingPlanVisionCanary(c.env, body));
+
+      case "coding-plan-css-qualification":
+        return c.json(await runCodingPlanCssQualification(c.env, body));
 
       case "file-qualification":
         return c.json(await runFileQualification(c.env, body));
-
-      case "file-css-probe":
-        return c.json(await runFileCssProbe(c.env, body));
 
       case "assemble-stored":
         return c.json(await runAssembleStored(c.env, body));
@@ -463,57 +478,67 @@ function sanitizeDiagnosticBundle(bundle: SiteBundle): { bundle: SiteBundle; nor
   return { bundle: { ...bundle, pages, sharedCss, sharedJs }, normalizations };
 }
 
-// ── FILE-REALIZATION TRANSPORT (operator GO 2026-09-11 §7-§9) ───────────────
+// ── CODING PLAN CANARIES + QUALIFICATION (operator GO 2026-09-11 §8/§9/§12) ─
 
-// CANARY: prove the DEPLOYED Workers AI binding supports stream=false RAW
-// output (NO response_format) + enable_thinking=false on the routed model
-// before the Builder is exercised. The model is allowlisted — the driver
-// never becomes a generic model runner. Set maxCompletionTokens (e.g. 18000)
-// to probe that the provider ACCEPTS the qualification budgets as a bound.
-async function runFileCanary(env: Env, body: DriverBody) {
-  const allowedModels = ["@cf/zai-org/glm-5.3-flash", "@cf/zai-org/glm-5.3"];
-  const requestedModel = body.model && allowedModels.includes(body.model) ? body.model : "@cf/zai-org/glm-5.3-flash";
-  const maxCompletionTokens = body.maxCompletionTokens ?? 256;
+// Model allowlist — the driver never becomes a generic model runner.
+const CODING_PLAN_CANARY_MODELS = ["glm-5.3", "glm-5.3-flash"];
+
+async function runCodingPlanModels(env: Env) {
+  const result = await listZaiCodingPlanModels(env);
+  return {
+    op: "coding-plan-models",
+    verdict: result.listed ? "LISTED" : "NOT_LISTED",
+    modelCount: result.models.length,
+    models: result.models,
+    relevant: result.models.filter((m) => /^glm/i.test(m)),
+    ...(result.raw ? { raw: result.raw } : {}),
+  };
+}
+
+// §8 TEXT CANARY: tiny glm-5.3 completion through the Coding Plan endpoint.
+// Records provider, exact model, finish reason, duration, usage and request
+// id. No fallback.
+async function runCodingPlanTextCanary(env: Env, body: DriverBody) {
+  const requestedModel = body.model && CODING_PLAN_CANARY_MODELS.includes(body.model) ? body.model : "glm-5.3";
+  const stream = body.stream ?? false;
   const started = Date.now();
   try {
-    const result = await generateWorkersAiFile(env, {
+    const result = await generateZaiCodingPlan(env, {
       model: requestedModel,
-      system: "You are a raw-file transport canary. Output the requested file and nothing else.",
-      user: 'Return ONLY the complete contents of canary.css: exactly one line reading /* ok */',
-      maxCompletionTokens,
-      label: "raw-file-canary",
+      messages: [
+        { role: "system", content: "You are a transport canary. Reply with exactly the requested text and nothing else." },
+        { role: "user", content: "Reply with exactly: ok" },
+      ],
+      maxTokens: body.maxCompletionTokens ?? 256,
+      stream,
+      label: "coding-plan-text-canary",
     });
-    const parsed = parseSingleFileSource(result.content);
-    const fileOk = parsed.ok && parsed.value.trim() === "/* ok */";
-    const pass = fileOk && result.providerModel === requestedModel && result.finishReason !== "length";
+    const contentOk = result.content.trim() === "ok";
     return {
-      op: "file-canary",
-      verdict: pass ? "PASS" : "FILE_FAIL",
-      WORKERS_AI_RAW_FILE: pass ? "AVAILABLE" : "UNAVAILABLE",
+      op: "coding-plan-text-canary",
+      verdict: contentOk && result.providerModel === requestedModel ? "PASS" : "CONTENT_OR_MODEL_FAIL",
       model: result.model,
       providerModel: result.providerModel,
       modelSubstitution: result.providerModel !== null && result.providerModel !== requestedModel,
-      maxCompletionTokens,
-      durationMs: result.durationMs,
+      stream,
       finishReason: result.finishReason,
+      durationMs: result.durationMs,
       usage: result.usage,
+      requestId: result.requestId,
       contentChars: result.contentChars,
       contentHead: result.content.slice(0, 120),
-      // canary diagnostic: the full raw payload up to 2000 chars
-      contentFull: result.content.slice(0, 2000),
-      fileOk,
+      contentOk,
     };
   } catch (error) {
     return {
-      op: "file-canary",
+      op: "coding-plan-text-canary",
       verdict: "FAIL",
-      WORKERS_AI_RAW_FILE: "UNAVAILABLE",
-      maxCompletionTokens,
+      stream,
       durationMs: Date.now() - started,
       errorClass:
-        error instanceof WorkersAiFileOutputExhaustedError
+        error instanceof ZaiCodingPlanOutputExhaustedError
           ? "OUTPUT_EXHAUSTED"
-          : error instanceof WorkersAiFileTransportError
+          : error instanceof ZaiCodingPlanTransportError
             ? "TRANSPORT"
             : "UNKNOWN",
       error: (error as Error).message,
@@ -521,85 +546,142 @@ async function runFileCanary(env: Env, body: DriverBody) {
   }
 }
 
-// EXPERIMENT DIAGNOSTIC ONLY (precedent: the deleted transport diagnostic):
-// ONE site.css realization at an ELEVATED diagnostic budget so the operator
-// can measure the full model's NATURAL output size (healthy-but-verbose vs
-// degenerate repetition) after the 18K qualification exhaustion. The
-// pipeline's budget constants are unchanged and this op is never a pipeline
-// path.
-async function runFileCssProbe(env: Env, body: DriverBody) {
-  if (!body.facts || !body.blueprint) throw new Error("facts and blueprint required");
-  const blueprintV2 = storedBlueprintToV2(body.blueprint);
-  const gate = evaluateBlueprintQualityGateV2(blueprintV2);
-  if (!gate.passed) {
-    return { op: "file-css-probe", verdict: "FIXTURE_INVALID", gateFailures: gate.failures };
+// §9 MULTIMODAL CANARY: tiny image+text call through the SAME Coding Plan
+// endpoint. Determines the Blueprint / Visual QA model. Multimodal support is
+// never inferred from the model name alone.
+async function runCodingPlanVisionCanary(env: Env, body: DriverBody) {
+  const requestedModel = body.model && CODING_PLAN_CANARY_MODELS.includes(body.model) ? body.model : "glm-5.3-flash";
+  if (!body.imageBase64) {
+    return { op: "coding-plan-vision-canary", verdict: "FAILED", error: "imageBase64 required" };
   }
-  const referenceScreenshotKey = body.referenceScreenshotKey ?? "references/simple/exp-finch-ref.png";
-  const ctx = await scaffold(env, body.facts, { screenshotR2Key: referenceScreenshotKey });
-  const acceptedImages = materializeAcceptedImageDescriptors(blueprintV2);
-  const budget = body.maxCompletionTokens ?? 36_000;
+  const mimeType = body.imageMimeType ?? "image/png";
+  const question = body.question ?? "What single word is written in this image? Answer with the word only.";
   const started = Date.now();
   try {
-    const result = await generateWorkersAiFile(env, {
-      model: WEBSITE_BUILDER_MODEL,
-      system: composeStagePrompt("simple-website-builder").systemPrompt,
-      user: cssProbeUserPrompt(blueprintV2, body.facts, acceptedImages, `${env.PUBLIC_APP_URL}/api/v2/forms/submit`, `site:${ctx.siteId}`),
-      maxCompletionTokens: budget,
-      label: "file-css-probe",
+    const result = await generateZaiCodingPlan(env, {
+      model: requestedModel,
+      messages: [{
+        role: "user",
+        content: [
+          { type: "image_url", image_url: { url: `data:${mimeType};base64,${body.imageBase64}` } },
+          { type: "text", text: question },
+        ],
+      }],
+      maxTokens: body.maxCompletionTokens ?? 512,
+      stream: body.stream ?? false,
+      label: "coding-plan-vision-canary",
     });
     return {
-      op: "file-css-probe",
-      verdict: result.finishReason === "length" ? "STILL_EXHAUSTED" : "TERMINATED",
+      op: "coding-plan-vision-canary",
+      verdict: result.providerModel === requestedModel ? "PASS" : "MODEL_FAIL",
       model: result.model,
       providerModel: result.providerModel,
-      maxCompletionTokens: budget,
+      modelSubstitution: result.providerModel !== null && result.providerModel !== requestedModel,
+      imageAccepted: true,
       finishReason: result.finishReason,
-      outputTokens: result.usage?.completion_tokens ?? null,
+      durationMs: result.durationMs,
+      usage: result.usage,
+      requestId: result.requestId,
       contentChars: result.contentChars,
-      charsPerToken: result.usage?.completion_tokens ? Math.round(result.contentChars / result.usage.completion_tokens * 100) / 100 : null,
-      durationMs: Date.now() - started,
-      // degeneracy signals: repeated 120-char windows within the last 8000 chars
-      tailSample: result.content.slice(-1500),
+      contentHead: result.content.slice(0, 200),
     };
   } catch (error) {
+    // A 4xx that names the image/multimodal capability is the decisive
+    // "image input NOT accepted" evidence (GO §9: never infer from the name).
+    const message = (error as Error).message;
+    const imageRejected = /image|multimodal|vision|not support/i.test(message) && error instanceof ZaiCodingPlanTransportError;
     return {
-      op: "file-css-probe",
-      verdict: "FAILED",
-      maxCompletionTokens: budget,
+      op: "coding-plan-vision-canary",
+      verdict: imageRejected ? "IMAGE_INPUT_REJECTED" : "FAIL",
+      imageAccepted: false,
       durationMs: Date.now() - started,
-      error: (error as Error).message,
+      error: message,
     };
   }
 }
 
-// The canonical css-call context, rebuilt for the probe (the pipeline's own
-// prompt builder is internal to the builder stage).
-function cssProbeUserPrompt(
-  blueprint: DesignBlueprintV2,
-  facts: BusinessFacts,
-  acceptedImages: ReturnType<typeof materializeAcceptedImageDescriptors>,
-  formServiceEndpoint: string,
-  siteFormId: string
-): string {
-  const accepted = acceptedImages
-    .map((image) => `- ${image.slotId} [${image.page}${image.section ? `/${image.section}` : ""}] ${image.aspectRatio} — priority: ${image.priority}${image.required ? " (MANDATORY)" : ""} — alt: ${image.altText}`)
-    .join("\n");
-  return `DESIGN BLUEPRINT (design authority — realize it faithfully; it is complete and implementation-ready):
-${JSON.stringify(blueprint)}
-
-BUSINESS FACTS (the ONLY content authority):
-${JSON.stringify(facts)}
-
-ACCEPTED IMAGES (the ONLY images you may reference, as <img src="IMG:{slotId}" data-image-id="{slotId}" alt="...">):
-${acceptedImages.length > 0 ? accepted : "(none yet — build WITHOUT images; do not invent slot ids)"}
-
-FORM CONTRACT (contact page only): form action ${formServiceEndpoint}; hidden input siteFormId ${siteFormId}; fields name, email, message with labels.
-
-TASK: Realize the shared stylesheet "site.css" implementing the blueprint's entire design system: tokens as CSS custom properties, the complete type scale with clamp() sizes, layout for every planned section, responsive breakpoints, hover states, :focus-visible, and a prefers-reduced-motion block.
-
-OUTPUT MODE (hard rule): return ONLY the complete contents of site.css — raw source starting directly with the first CSS rule. No Markdown fences, no explanation, no JSON, no TODO, no summaries.
-
-DIAGNOSTIC NOTE: keep the stylesheet COMPLETE but idiomatic and compact — do not pad, do not repeat rules, do not enumerate every breakpoint variation for every section when a shared pattern covers it. A complete production stylesheet for a four-page marketing site is typically 1500-4000 lines.`;
+// §12/§21 CSS-ONLY QUALIFICATION: the FIRST qualification bar — one site.css
+// realization through the canonical Coding Plan Builder seam on the VALID
+// fixture, judged by the already-accepted source-completeness validator. No
+// KIE / capture / preview / QA. Persists the frozen per-file artifact.
+async function runCodingPlanCssQualification(env: Env, body: DriverBody) {
+  if (!body.facts || !body.blueprint) throw new Error("facts and blueprint required");
+  const blueprintV2 = storedBlueprintToV2(body.blueprint);
+  const gate = evaluateBlueprintQualityGateV2(blueprintV2);
+  if (!gate.passed) {
+    return { op: "coding-plan-css-qualification", verdict: "FIXTURE_INVALID", gateFailures: gate.failures };
+  }
+  const requestedModel = resolveWebsiteBuilderModel(env);
+  if (body.model && body.model !== requestedModel) {
+    return { op: "coding-plan-css-qualification", verdict: "FAILED", error: `model '${body.model}' is not the routed Website Builder model ('${requestedModel}') — stage routing forbids substitution` };
+  }
+  const referenceScreenshotKey = body.referenceScreenshotKey ?? "references/simple/exp-finch-ref.png";
+  const ctx = await scaffold(env, body.facts, { screenshotR2Key: referenceScreenshotKey });
+  const acceptedImages = materializeAcceptedImageDescriptors(blueprintV2);
+  const started = Date.now();
+  try {
+    const outcome = await runSimpleBuilderCssRealization(env, {
+      siteGenerationId: ctx.siteGenerationId,
+      buildId: ctx.buildId,
+      buildVersionId: ctx.buildVersionId,
+      buildVersionNumber: ctx.buildVersionNumber,
+      blueprint: blueprintV2,
+      facts: body.facts,
+      acceptedImages,
+      formServiceEndpoint: `${env.PUBLIC_APP_URL}/api/v2/forms/submit`,
+      siteFormId: `site:${ctx.siteId}`,
+    });
+    const css = outcome.css;
+    // Decisive content checks (GO §21): actual CSS, no meta-stub, no
+    // reasoning debris, normal completion, no exhaustion.
+    const ruleCount = (css.match(/\{[^{}]*\}/g) ?? []).length;
+    const looksLikeCss = /(^|[^-])--[\w-]+\s*:/.test(css) || css.includes(":root");
+    const hasMedia = css.includes("@media");
+    const completed = outcome.metrics.finishReason !== "length" && outcome.metrics.finishReason !== null ? outcome.metrics.finishReason === "stop" || outcome.metrics.finishReason === null : outcome.metrics.finishReason !== "length";
+    const qualified =
+      outcome.validationFailures.length === 0 &&
+      looksLikeCss &&
+      hasMedia &&
+      ruleCount >= 10 &&
+      completed &&
+      outcome.metrics.reused !== true;
+    return {
+      op: "coding-plan-css-qualification",
+      verdict: qualified ? "QUALIFIED" : "FAILED",
+      model: requestedModel,
+      totalDurationMs: Date.now() - started,
+      css: {
+        chars: css.length,
+        ruleCount,
+        tokenLayer: looksLikeCss,
+        mediaQueries: hasMedia,
+        outputTokens: outcome.metrics.outputTokens,
+        inputTokens: outcome.metrics.inputTokens,
+        finishReason: outcome.metrics.finishReason,
+        durationMs: outcome.metrics.durationMs,
+        estimatedCostUsd: outcome.metrics.estimatedCostUsd,
+        requestId: null,
+        runId: outcome.metrics.runId,
+        reused: outcome.metrics.reused === true,
+      },
+      sourceCompleteness: outcome.validationFailures.length === 0 ? "PASS" : "FAIL",
+      completenessFailures: outcome.validationFailures.slice(0, 12),
+      head: css.slice(0, 240),
+    };
+  } catch (error) {
+    return {
+      op: "coding-plan-css-qualification",
+      verdict: "FAILED",
+      totalDurationMs: Date.now() - started,
+      errorClass:
+        error instanceof ZaiCodingPlanOutputExhaustedError
+          ? "OUTPUT_EXHAUSTED"
+          : error instanceof ZaiCodingPlanTransportError
+            ? "TRANSPORT_FAILED"
+            : "UNKNOWN",
+      error: (error as Error).message,
+    };
+  }
 }
 
 // QUALIFICATION: the six file-sized realization calls of the canonical
@@ -616,7 +698,8 @@ async function runFileQualification(env: Env, body: DriverBody) {
   }
   // The qualification always runs the ROUTED Builder model (stage policy:
   // never substituted); a caller-supplied value is accepted only if it matches.
-  const requestedModel = !body.model || body.model === WEBSITE_BUILDER_MODEL ? WEBSITE_BUILDER_MODEL : null;
+  const routedModel = resolveWebsiteBuilderModel(env);
+  const requestedModel = !body.model || body.model === routedModel ? routedModel : null;
   if (!requestedModel) {
     return { op: "file-qualification", verdict: "FAILED", error: `model '${body.model}' is not the routed Website Builder model — stage routing forbids substitution` };
   }
@@ -683,9 +766,9 @@ async function runFileQualification(env: Env, body: DriverBody) {
       verdict: "FAILED",
       totalDurationMs: Date.now() - started,
       errorClass:
-        error instanceof WorkersAiFileOutputExhaustedError
+        error instanceof ZaiCodingPlanOutputExhaustedError
           ? "OUTPUT_EXHAUSTED"
-          : error instanceof WorkersAiFileTransportError
+          : error instanceof ZaiCodingPlanTransportError
             ? "TRANSPORT_FAILED"
             : error instanceof AiStageFileInvalidError
               ? "SOURCE_INCOMPLETE"

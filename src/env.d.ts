@@ -45,6 +45,14 @@ export interface Env {
 
   ZHIPU_API_KEY?: string;
   ZHIPU_API_URL?: string;
+  // ZAI GLM Coding Plan — the ONE LLM provider (operator GO 2026-09-11).
+  // Base URL defaults to the Coding Plan endpoint; the key is the Coding
+  // Plan credential (ZHIPU_API_KEY is the accepted legacy name on the
+  // sandbox). NEVER the general API (/api/paas/v4).
+  ZAI_CODING_BASE_URL?: string;
+  ZAI_CODING_API_KEY?: string;
+  ZAI_CODING_MODEL?: string;
+  ZAI_MULTIMODAL_MODEL?: string;
   ZHIPU_GATEWAY_PROVIDER?: string;
   PRIMARY_PROVIDER?: string;
   // One canonical LLM model for every V2 textual/multimodal call (issue

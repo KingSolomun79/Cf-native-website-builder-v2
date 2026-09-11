@@ -88,7 +88,9 @@ function nav(): string {
 }
 
 function shell(title: string, main: string): string {
-  return `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${title}</title><meta name="description" content="${title} — quiet luxury"><meta property="og:title" content="${title}"><meta property="og:description" content="${title}"><link rel="stylesheet" href="site.css"><script src="site.js" defer></script></head><body>${nav()}<main>${main}</main><footer class="site-footer"><p>© <span id="year">2026</span> ${title}</p></footer></body></html>`;
+  // The footer is FROZEN SHARED CHROME (GO §18): identical on every page —
+  // only <head> metadata and <main> are page-specific.
+  return `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${title}</title><meta name="description" content="${title} — quiet luxury"><meta property="og:title" content="${title}"><meta property="og:description" content="${title}"><link rel="stylesheet" href="site.css"><script src="site.js" defer></script></head><body>${nav()}<main>${main}</main><footer class="site-footer"><p>© <span id="year">2026</span> RankForge Kenya</p></footer></body></html>`;
 }
 
 const img = (slotId: string, alt: string) => `<img src="IMG:${slotId}" data-image-id="${slotId}" alt="${alt}">`;
