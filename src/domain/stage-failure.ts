@@ -94,10 +94,10 @@ export function classifyStageFailure(error: unknown): StageFailureClass {
   // (The legacy VisualBlueprintError / SiteGenerationValidationError classes
   // were removed with the legacy design chain; the SIMPLE pipeline's
   // schema-invalid class carries the semantics.) The Website Builder's
-  // CRITICAL image coverage failure belongs here too: ONE_CALL plus the
-  // sanctioned TWO_CALL fallback IS the Builder's whole budget — the pipeline
-  // handles it in-step; this backstop guarantees no engine retry can ever
-  // become a third Builder attempt.
+  // CRITICAL image coverage and SOURCE_INCOMPLETE / OUTPUT_EXHAUSTED
+  // failures belong here too: the six file-sized realization calls ARE the
+  // Builder's whole budget — the pipeline handles them in-step; this backstop
+  // guarantees no engine retry can ever become a second Builder attempt.
   if (error instanceof AiStageSchemaInvalidError || error instanceof SimpleWebsiteBuilderError) {
     return "DETERMINISTIC_REVIEW_REQUIRED";
   }

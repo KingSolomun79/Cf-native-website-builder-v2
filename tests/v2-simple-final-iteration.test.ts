@@ -362,7 +362,7 @@ describe("builder progressive-enhancement instruction (#4)", () => {
     // placed on its declared page) returned by the injected seam
     const longPage = (pageId: "home" | "about" | "services" | "contact") => {
       const title = pageId[0].toUpperCase() + pageId.slice(1);
-      return `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${title}</title><meta name="description" content="${title} page with a full descriptive body for the fixture bundle."><meta property="og:title" content="${title}"><meta property="og:description" content="${title} description"></head><body><header><nav aria-label="Primary"><a href="/">Home</a><a href="/about">About</a><a href="/services">Services</a><a href="/contact">Contact</a></nav></header><main><section class="hero"><img src="IMG:${pageId}-hero" data-image-id="${pageId}-hero" alt="${title} hero photograph"><h1>${title}</h1><p>${title} hero copy for the fixture bundle, long enough to satisfy the schema floor and describe the section honestly.</p></section></main><footer><p>Business footer line for the fixture.</p></footer><script src="site.js" defer></script></body></html>`;
+      return `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${title}</title><meta name="description" content="${title} page with a full descriptive body for the fixture bundle."><meta property="og:title" content="${title}"><meta property="og:description" content="${title} description"><link rel="stylesheet" href="site.css"></head><body><header><nav aria-label="Primary"><a href="/">Home</a><a href="/about">About</a><a href="/services">Services</a><a href="/contact">Contact</a></nav></header><main><section class="hero"><img src="IMG:${pageId}-hero" data-image-id="${pageId}-hero" alt="${title} hero photograph"><h1>${title}</h1><p>${title} hero copy for the fixture bundle, long enough to satisfy the schema floor and describe the section honestly.</p></section></main><footer><p>Business footer line for the fixture.</p></footer><script src="site.js" defer></script></body></html>`;
     };
     const builderBundle: SiteBundle = {
       version: "1",
@@ -373,7 +373,7 @@ describe("builder progressive-enhancement instruction (#4)", () => {
         contact: longPage("contact"),
       },
       sharedCss:
-        ":root { --accent: #7c3aed; --ink: #1a1523; --paper: #faf7f2; }\nbody { background: var(--paper); color: var(--ink); font-family: system-ui, sans-serif; }\n.hero { min-height: 60vh; display: grid; place-items: center; }\na:hover { text-decoration: underline; }\n:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }\n@media (max-width: 767px) { .hero { min-height: 40vh; } }\n@media (prefers-reduced-motion: reduce) { * { animation: none; transition: none; } }",
+        ":root { --accent: #7c3aed; --ink: #1a1523; --paper: #faf7f2; }\nbody { background: var(--paper); color: var(--ink); font-family: system-ui, sans-serif; }\n.hero { min-height: 60vh; display: grid; place-items: center; }\n.site-nav { display: flex; gap: 1.5rem; }\nimg { max-width: 100%; display: block; }\nform { display: grid; gap: 1rem; }\na:hover { text-decoration: underline; }\n:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }\n@media (max-width: 767px) { .hero { min-height: 40vh; } }\n@media (prefers-reduced-motion: reduce) { * { animation: none; transition: none; } }",
       sharedJs: "(function(){var t=document.querySelector('.nav-toggle');if(t){t.addEventListener('click',function(){document.body.classList.toggle('nav-open');});}})();",
     };
     await runSimpleWebsiteBuilderStage(env, {
@@ -386,13 +386,20 @@ describe("builder progressive-enhancement instruction (#4)", () => {
       acceptedImages: materializeAcceptedImageDescriptors(bp),
       formServiceEndpoint: endpoint,
       siteFormId,
-      visualInputs: [],
       generate: async (system, user) => {
         seen.push({ system, user });
-        return { content: JSON.stringify(builderBundle), provider: "test", model: "test" };
+        // Canonical SIX_CALL shapes: one RAW file per call, in order.
+        if (user.includes("call 1 of 6")) {
+          return { content: builderBundle.sharedCss, provider: "test", model: "@cf/zai-org/glm-5.3" };
+        }
+        if (user.includes("call 6 of 6")) {
+          return { content: builderBundle.sharedJs, provider: "test", model: "@cf/zai-org/glm-5.3" };
+        }
+        const page = /Realize the \"(home|about|services|contact)\" page/.exec(user)![1];
+        return { content: builderBundle.pages[page as keyof typeof builderBundle.pages], provider: "test", model: "@cf/zai-org/glm-5.3" };
       },
     });
-    expect(seen.length).toBeGreaterThan(0);
+    expect(seen.length).toBe(6);
     for (const phrase of [
       "All content must be visible in the base HTML/CSS state.",
       "content visibility may never depend on JavaScript execution",

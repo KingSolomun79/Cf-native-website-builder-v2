@@ -244,7 +244,6 @@ describe("design-blueprint/2 downstream", () => {
       acceptedImages: materializeAcceptedImageDescriptors(blueprint),
       formServiceEndpoint: "https://test.example.com/api/v2/forms/submit",
       siteFormId: "site:abc123",
-      visualInputs: [],
       generate: createSimpleScripts().generate,
     });
     for (const page of PAGES) {

@@ -39,14 +39,18 @@ export const PROMPT_MANIFEST: Record<PromptStageKey, PromptManifestEntry> = {
     promptVersion: "v5",
     bodyFile: "simple/01-design-blueprint.md",
   },
-  // v3 (operator GO, 2026-09-10): CRITICAL image coverage is a Builder
-  // contract — every CRITICAL Accepted Image is mandatory on its declared
-  // page/section (deterministic ledger in the context; truth-safe usage
-  // guidance). v2 (2026-09-09): hero-media hard requirement on every routed
-  // page + traceable Accepted Image identity + mobile hero mass floor.
+  // v7 (operator GO 2026-09-11, FILE-SIZED REALIZATION): the ONE Builder
+  // stage realizes the site through six bounded coding calls, each producing
+  // exactly ONE source file as RAW model output (stream=false, NO
+  // response_format, one tolerated Markdown fence) on full GLM-5.3 — the
+  // Blueprint is the complete, implementation-ready design authority (no
+  // Reference screenshots attached). v3 (2026-09-10): CRITICAL image coverage
+  // is a Builder contract — every CRITICAL Accepted Image is mandatory on its
+  // declared page/section (deterministic ledger in the context; truth-safe
+  // usage guidance).
   "simple-website-builder": {
     promptId: "simple-website-builder",
-    promptVersion: "v3",
+    promptVersion: "v7",
     bodyFile: "simple/02-website-builder.md",
   },
   // v2 (operator GO, 2026-09-09): visual QA verifies photographic hero

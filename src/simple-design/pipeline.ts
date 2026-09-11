@@ -42,7 +42,8 @@ import {
   type SiteBundle,
 } from "./contracts";
 import { runSimpleDesignBlueprintStage, SimpleDesignBlueprintError } from "./design-blueprint";
-import { runSimpleWebsiteBuilderStage, SimpleWebsiteBuilderError, type SimpleBuilderVisualInput } from "./website-builder";
+import { runSimpleWebsiteBuilderStage, SimpleWebsiteBuilderError } from "./website-builder";
+import type { SimpleBuilderVisualInput } from "./contracts";
 import { runSimpleVisualQaStage } from "./visual-qa";
 import { runSimpleSiteRepairStage } from "./site-repair";
 import { runDeterministicBundleQa } from "./bundle-qa";
@@ -80,7 +81,7 @@ export interface SimplePipelineOutcome {
   artifactManifestHash: string | null;
   previewUrl: string | null;
   repairApplied: boolean;
-  builderStrategy: "ONE_CALL" | "TWO_CALL_SINGLE_STAGE" | null;
+  builderStrategy: "SIX_CALL_FILE_REALIZATION" | null;
   designBlueprintR2Key: string | null;
 }
 
@@ -498,15 +499,13 @@ export async function runSimpleBuildPipeline(
             acceptedImages: acceptedImageDescriptors,
             formServiceEndpoint,
             siteFormId,
-            visualInputs,
-            ...(deps.visionGenerate ? { visionGenerate: deps.visionGenerate } : {}),
             ...(deps.generate ? { generate: deps.generate } : {}),
           });
           return { kind: "ok" as const, strategy: built.strategy };
         } catch (error) {
-          // The Builder's CRITICAL image coverage contract failed after
-          // ONE_CALL and the sanctioned TWO_CALL fallback: fail closed IN-STEP
-          // (the #62 §7 terminal-result pattern) — no engine retry, no third
+          // The Builder's CRITICAL image coverage contract failed after the
+          // canonical SIX_CALL_FILE_REALIZATION build: fail closed IN-STEP
+          // (the #62 §7 terminal-result pattern) — no engine retry, no second
           // Builder attempt, no bundle handed to downstream QA.
           if (error instanceof SimpleWebsiteBuilderError && error.code === "CRITICAL_IMAGE_COVERAGE") {
             return { kind: "review" as const, reason: `WEBSITE_BUILDER_CRITICAL_IMAGE_COVERAGE: ${error.message}` };

@@ -26,7 +26,7 @@ import {
 import { bytesToBase64, mimeForKey } from "./vision";
 import { generateSimpleStreamingCompletion } from "../lib/ai-streaming";
 import { SIMPLE_PAGE_FILES } from "./bundle-qa";
-import type { SimpleBuilderVisualInput } from "./website-builder";
+import type { SimpleBuilderVisualInput } from "./contracts";
 
 export class SimpleRepairBudgetExceededError extends Error {
   constructor() {

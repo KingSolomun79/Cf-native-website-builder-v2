@@ -172,6 +172,8 @@ export default defineWorkersConfig({
       "tests/v2-nano-banana-substitution.test.ts",
       "tests/v2-four-page-hero.test.ts",
       "tests/v2-builder-critical-image-coverage.test.ts",
+      "tests/v2-builder-file-realization.test.ts",
+      "tests/v2-builder-file-validation.test.ts",
     ],
   },
 });

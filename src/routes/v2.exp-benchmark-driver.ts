@@ -46,12 +46,20 @@ import { buildAssembledCandidate, deployPreview, freezeAssembledCandidate, Assem
 import { storeBuildStageArtifactIdempotent, getBuildStageArtifact } from "../domain/stage-artifacts";
 import { buildStandardEvidenceBundle } from "../domain/qa-evidence";
 import { createProductionQaCapture } from "../domain/qa-capture";
-import { runSimpleWebsiteBuilderStage, runSimpleBuilderTransportDiagnostic } from "../simple-design/website-builder";
+import { runSimpleWebsiteBuilderStage, runSimpleBuilderFileRealizationCore, WEBSITE_BUILDER_MODEL } from "../simple-design/website-builder";
+import {
+  generateWorkersAiFile,
+  WorkersAiFileOutputExhaustedError,
+  WorkersAiFileTransportError,
+} from "../lib/workers-ai-file";
+import { validateBuilderFileBundle, blueprintMotionExists } from "../simple-design/builder-file-realization";
 import { runSimpleDesignBlueprintStage } from "../simple-design/design-blueprint";
 import { renderDesignBlueprintMarkdown } from "../simple-design/render-blueprint";
 import { renderDesignBlueprintV2Markdown } from "../simple-design/render-blueprint-v2";
 import { runDeterministicBundleQa } from "../simple-design/bundle-qa";
 import { runSimpleVisualQaStage } from "../simple-design/visual-qa";
+import { Value } from "@sinclair/typebox/value";
+import { validateCriticalImageCoverage } from "../simple-design/critical-image-coverage";
 import {
   blueprintSlotsToImageSlots,
   blueprintSlotsToPromptRecords,
@@ -63,13 +71,15 @@ import {
   storedBlueprintToV2,
   DESIGN_BLUEPRINT_NATIVE_JSON_SCHEMA,
   DESIGN_BLUEPRINT_SCHEMA_VERSION,
+  SiteBundleSchema,
   evaluateBlueprintQualityGate,
+  evaluateBlueprintQualityGateV2,
   validateDesignBlueprint,
   type DesignBlueprint,
   type DesignBlueprintV2,
   type SiteBundle,
 } from "../simple-design/contracts";
-import { parseModelJson } from "../domain/ai-boundary";
+import { parseModelJson, parseSingleFileSource, AiStageFileInvalidError } from "../domain/ai-boundary";
 import { composeStagePrompt } from "../domain/prompt-contract";
 import type { BusinessFacts } from "../domain/lifecycle-schema";
 
@@ -79,7 +89,9 @@ interface DriverFixtureImage {
 }
 
 interface DriverBody {
-  op: "health" | "put-fixture" | "finch-builder" | "builder-diagnostic" | "assemble-stored" | "capture" | "blueprint" | "artifact" | "probe" | "fetch-probe" | "sql-probe" | "general-api-canary" | "stream-canary-text" | "stream-canary-vision" | "schema-canary" | "stage-runs" | "simple-kie" | "simple-kie-validation" | "simple-full-run" | "simple-rerender-qa" | "simple-hardening-run" | "simple-final-run";
+  op: "health" | "put-fixture" | "finch-builder" | "file-canary" | "file-qualification" | "assemble-stored" | "capture" | "blueprint" | "artifact" | "probe" | "fetch-probe" | "sql-probe" | "general-api-canary" | "stream-canary-text" | "stream-canary-vision" | "schema-canary" | "stage-runs" | "simple-kie" | "simple-kie-validation" | "simple-full-run" | "simple-rerender-qa" | "simple-hardening-run" | "simple-final-run";
+  maxCompletionTokens?: number;
+  model?: string;
   key?: string;
   base64?: string;
   facts?: BusinessFacts;
@@ -175,8 +187,11 @@ export async function expBenchmarkDriver(c: Context<{ Bindings: Env }>): Promise
       case "finch-builder":
         return c.json(await runFinchBuilder(c.env, body));
 
-      case "builder-diagnostic":
-        return c.json(await runBuilderDiagnostic(c.env, body));
+      case "file-canary":
+        return c.json(await runFileCanary(c.env, body));
+
+      case "file-qualification":
+        return c.json(await runFileQualification(c.env, body));
 
       case "assemble-stored":
         return c.json(await runAssembleStored(c.env, body));
@@ -387,9 +402,6 @@ async function runFinchBuilder(env: Env, body: DriverBody) {
     acceptedImages: materializeAcceptedImageDescriptors(blueprintV2),
     formServiceEndpoint,
     siteFormId,
-    visualInputs: [
-      { kind: "full-page", artifact: referenceScreenshotKey, sha256: "exp-fixture", width: 1440, height: 3200 } as const,
-    ],
   };
   const built = await runSimpleWebsiteBuilderStage(env, stageInput);
   const result = await assembleAndJudge(env, ctx, built.bundle, { ...body, blueprint: blueprintV2 }, acceptedKeys);
@@ -448,58 +460,152 @@ function sanitizeDiagnosticBundle(bundle: SiteBundle): { bundle: SiteBundle; nor
   return { bundle: { ...bundle, pages, sharedCss, sharedJs }, normalizations };
 }
 
-// EXPERIMENT DIAGNOSTIC ONLY: measures design-transfer quality under a forced
-// small-call decomposition (see website-builder.ts). Not a pipeline strategy.
-async function runBuilderDiagnostic(env: Env, body: DriverBody) {
+// ── FILE-REALIZATION TRANSPORT (operator GO 2026-09-11 §7-§9) ───────────────
+
+// CANARY: prove the DEPLOYED Workers AI binding supports stream=false RAW
+// output (NO response_format) + enable_thinking=false on the routed model
+// before the Builder is exercised. The model is allowlisted — the driver
+// never becomes a generic model runner. Set maxCompletionTokens (e.g. 18000)
+// to probe that the provider ACCEPTS the qualification budgets as a bound.
+async function runFileCanary(env: Env, body: DriverBody) {
+  const allowedModels = ["@cf/zai-org/glm-5.3-flash", "@cf/zai-org/glm-5.3"];
+  const requestedModel = body.model && allowedModels.includes(body.model) ? body.model : "@cf/zai-org/glm-5.3-flash";
+  const maxCompletionTokens = body.maxCompletionTokens ?? 256;
+  const started = Date.now();
+  try {
+    const result = await generateWorkersAiFile(env, {
+      model: requestedModel,
+      system: "You are a raw-file transport canary. Output the requested file and nothing else.",
+      user: 'Return ONLY the complete contents of canary.css: exactly one line reading /* ok */',
+      maxCompletionTokens,
+      label: "raw-file-canary",
+    });
+    const parsed = parseSingleFileSource(result.content);
+    const fileOk = parsed.ok && parsed.value.trim() === "/* ok */";
+    const pass = fileOk && result.providerModel === requestedModel && result.finishReason !== "length";
+    return {
+      op: "file-canary",
+      verdict: pass ? "PASS" : "FILE_FAIL",
+      WORKERS_AI_RAW_FILE: pass ? "AVAILABLE" : "UNAVAILABLE",
+      model: result.model,
+      providerModel: result.providerModel,
+      modelSubstitution: result.providerModel !== null && result.providerModel !== requestedModel,
+      maxCompletionTokens,
+      durationMs: result.durationMs,
+      finishReason: result.finishReason,
+      usage: result.usage,
+      contentChars: result.contentChars,
+      contentHead: result.content.slice(0, 120),
+      fileOk,
+    };
+  } catch (error) {
+    return {
+      op: "file-canary",
+      verdict: "FAIL",
+      WORKERS_AI_RAW_FILE: "UNAVAILABLE",
+      maxCompletionTokens,
+      durationMs: Date.now() - started,
+      errorClass:
+        error instanceof WorkersAiFileOutputExhaustedError
+          ? "OUTPUT_EXHAUSTED"
+          : error instanceof WorkersAiFileTransportError
+            ? "TRANSPORT"
+            : "UNKNOWN",
+      error: (error as Error).message,
+    };
+  }
+}
+
+// QUALIFICATION: the six file-sized realization calls of the canonical
+// Builder core on a VALID design-blueprint/2 fixture — zero KIE / zero
+// preview / zero QA. Persists no site_bundle. NEVER raises budgets, never
+// retries the qualification inside the op.
+async function runFileQualification(env: Env, body: DriverBody) {
   if (!body.facts || !body.blueprint) throw new Error("facts and blueprint required");
   const blueprintV2 = storedBlueprintToV2(body.blueprint);
+  // The fixture must be a VALID v2 artifact — rejected BEFORE any Builder call.
+  const gate = evaluateBlueprintQualityGateV2(blueprintV2);
+  if (!gate.passed) {
+    return { op: "file-qualification", verdict: "FIXTURE_INVALID", gateFailures: gate.failures };
+  }
+  // The qualification always runs the ROUTED Builder model (stage policy:
+  // never substituted); a caller-supplied value is accepted only if it matches.
+  const requestedModel = !body.model || body.model === WEBSITE_BUILDER_MODEL ? WEBSITE_BUILDER_MODEL : null;
+  if (!requestedModel) {
+    return { op: "file-qualification", verdict: "FAILED", error: `model '${body.model}' is not the routed Website Builder model — stage routing forbids substitution` };
+  }
   const referenceScreenshotKey = body.referenceScreenshotKey ?? "references/simple/exp-finch-ref.png";
   const ctx = await scaffold(env, body.facts, { screenshotR2Key: referenceScreenshotKey });
-  const acceptedKeys = await storeFixtureImages(env, ctx, body.fixtureImages ?? []);
-
-  const formServiceEndpoint = `${env.PUBLIC_APP_URL}/api/v2/forms/submit`;
-  const siteFormId = `site:${ctx.siteId}`;
-  const diagnostic = await runSimpleBuilderTransportDiagnostic(env, {
-    siteGenerationId: ctx.siteGenerationId,
-    buildId: ctx.buildId,
-    buildVersionId: ctx.buildVersionId,
-    buildVersionNumber: ctx.buildVersionNumber,
-    blueprint: blueprintV2,
-    facts: body.facts,
-    acceptedImages: materializeAcceptedImageDescriptors(blueprintV2),
-    formServiceEndpoint,
-    siteFormId,
-    visualInputs: [
-      { kind: "full-page", artifact: referenceScreenshotKey, sha256: "exp-fixture", width: 1440, height: 3200 } as const,
-    ],
-  });
-  // Persist BEFORE assembly so the (expensive) generated bundle survives a
-  // preflight rejection for inspection.
-  const { bundle: cleanBundle, normalizations } = sanitizeDiagnosticBundle(diagnostic.bundle);
-  await storeBuildStageArtifactIdempotent(env, {
-    buildId: ctx.buildId,
-    siteGenerationId: ctx.siteGenerationId,
-    buildVersionId: ctx.buildVersionId,
-    kind: "site_bundle",
-    schemaVersion: "site-bundle/1",
-    value: cleanBundle,
-  });
+  await storeFixtureImages(env, ctx, body.fixtureImages ?? []);
+  const acceptedImages = materializeAcceptedImageDescriptors(blueprintV2);
+  const started = Date.now();
   try {
-    const result = await assembleAndJudge(env, ctx, cleanBundle, { ...body, blueprint: blueprintV2 }, acceptedKeys);
-    return { ...result, builderStrategy: "TRANSPORT_DIAGNOSTIC", calls: diagnostic.calls, normalizations };
+    const core = await runSimpleBuilderFileRealizationCore(env, {
+      siteGenerationId: ctx.siteGenerationId,
+      buildId: ctx.buildId,
+      buildVersionId: ctx.buildVersionId,
+      buildVersionNumber: ctx.buildVersionNumber,
+      blueprint: blueprintV2,
+      facts: body.facts,
+      acceptedImages,
+      formServiceEndpoint: `${env.PUBLIC_APP_URL}/api/v2/forms/submit`,
+      siteFormId: `site:${ctx.siteId}`,
+    });
+    const bundleSchemaPass = Value.Check(SiteBundleSchema, core.bundle);
+    const completeness = validateBuilderFileBundle(core.bundle, {
+      blueprintMotionExists: blueprintMotionExists(blueprintV2),
+    });
+    const coverage = validateCriticalImageCoverage(core.pages, acceptedImages, "placeholder");
+    const unusedCritical = coverage.filter((f) => f.id === "MISSING_CRITICAL_IMAGE").length;
+    const wrongPageCritical = coverage.filter((f) => f.id === "WRONG_PAGE_CRITICAL_IMAGE").length;
+    const noExhaustion = core.calls.every((call) => call.finishReason !== "length");
+    const qualified = bundleSchemaPass && completeness.passed && coverage.length === 0 && noExhaustion;
+    const totalCost = core.calls.reduce((sum, call) => sum + (call.estimatedCostUsd ?? 0), 0);
+    return {
+      op: "file-qualification",
+      verdict: qualified ? "QUALIFIED" : "FAILED",
+      model: requestedModel,
+      totalDurationMs: Date.now() - started,
+      totalEstimatedCostUsd: Math.round(totalCost * 10000) / 10000,
+      calls: core.calls.map((call) => ({
+        call: call.call,
+        model: call.model,
+        outputChars: call.outputChars,
+        outputTokens: call.outputTokens,
+        inputTokens: call.inputTokens,
+        finishReason: call.finishReason,
+        durationMs: call.durationMs,
+        estimatedCostUsd: call.estimatedCostUsd,
+        runId: call.runId,
+      })),
+      cssChars: core.css.length,
+      pageChars: Object.fromEntries(Object.entries(core.pages).map(([page, html]) => [page, html.length])),
+      jsChars: core.js.length,
+      sourceCompleteness: completeness.passed ? "PASS" : "FAIL",
+      completenessFailures: completeness.failures.slice(0, 12),
+      siteBundleSchema: bundleSchemaPass ? "PASS" : "FAIL",
+      criticalCoverage: {
+        unusedCritical,
+        wrongPageCritical,
+        findings: coverage.map((f) => `${f.id}: ${f.detail}`.slice(0, 300)),
+      },
+      bundleNotes: core.bundle.notes,
+    };
   } catch (error) {
-    if (error instanceof AssemblyPreflightError) {
-      return {
-        ...ctx,
-        builderStrategy: "TRANSPORT_DIAGNOSTIC",
-        calls: diagnostic.calls,
-        normalizations,
-        bundle: cleanBundle,
-        preflightBlockers: error.blockers.map((blocker) => ({ id: blocker.id, detail: blocker.detail ?? blocker.id })),
-        previewUrl: null,
-      };
-    }
-    throw error;
+    return {
+      op: "file-qualification",
+      verdict: "FAILED",
+      totalDurationMs: Date.now() - started,
+      errorClass:
+        error instanceof WorkersAiFileOutputExhaustedError
+          ? "OUTPUT_EXHAUSTED"
+          : error instanceof WorkersAiFileTransportError
+            ? "TRANSPORT_FAILED"
+            : error instanceof AiStageFileInvalidError
+              ? "SOURCE_INCOMPLETE"
+              : "UNKNOWN",
+      error: (error as Error).message,
+    };
   }
 }
 

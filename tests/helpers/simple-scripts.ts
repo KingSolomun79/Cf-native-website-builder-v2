@@ -138,8 +138,8 @@ export interface SimpleScriptsOptions {
   allVisualQaFails?: boolean;
   /** Return a blueprint that passes schema but fails the quality gate. */
   blueprintFailsGate?: boolean;
-  /** The builder omits the CRITICAL about-hero on EVERY strategy (ONE_CALL
-   *  and the TWO_CALL pages call) — the Builder coverage fail-closed path. */
+  /** The builder omits the CRITICAL about-hero on its page call — the
+   *  Builder coverage fail-closed path. */
   builderOmitsAboutHero?: boolean;
 }
 
@@ -163,36 +163,27 @@ export function createSimpleScripts(options: SimpleScriptsOptions = {}): SimpleP
       }
       return respond(simpleBlueprintFixture());
     }
-    if (user.includes("TASK: Build the COMPLETE website in one response")) {
-      const endpoint = /form action:\s*(\S+)/.exec(user)?.[1] ?? "";
-      const siteFormId = /value="(site:[^"]+)"/.exec(user)?.[1] ?? "site:unknown";
-      return respond({
-        version: "1",
-        pages: {
-          home: homeHtml(),
-          about: aboutPage(),
-          services: servicesHtml(),
-          contact: contactHtml(endpoint, siteFormId),
-        },
-        sharedCss: SIMPLE_CSS,
-        sharedJs: SIMPLE_JS,
-        notes: "scripted bundle",
-      });
+    // Builder file-realization calls (file-sized GO): each call returns ONE
+    // file as RAW source — never JSON. The routed Builder model is full
+    // GLM-5.3 (stage routing provenance).
+    const respondRaw = (content: string) => ({ content, provider: "simple-script", model: "@cf/zai-org/glm-5.3" });
+    if (user.includes("call 1 of 6")) {
+      return respondRaw(SIMPLE_CSS);
     }
-    if (user.includes("TASK (1 of 2")) {
-      return respond({ sharedCss: SIMPLE_CSS, sharedJs: SIMPLE_JS });
+    if (user.includes("call 6 of 6")) {
+      return respondRaw(SIMPLE_JS);
     }
-    if (user.includes("TASK (2 of 2")) {
+    const builderPage = /Realize the \"(home|about|services|contact)\" page/.exec(user);
+    if (builderPage) {
       const endpoint = /form action:\s*(\S+)/.exec(user)?.[1] ?? "";
-      const siteFormId = /value="(site:[^"]+)"/.exec(user)?.[1] ?? "site:unknown";
-      return respond({
-        pages: {
-          home: homeHtml(),
-          about: aboutPage(),
-          services: servicesHtml(),
-          contact: contactHtml(endpoint, siteFormId),
-        },
-      });
+      const siteFormId = /value=\"(site:[^"]+)\"/.exec(user)?.[1] ?? "site:unknown";
+      const page = builderPage[1];
+      return respondRaw(
+        page === "home" ? homeHtml()
+        : page === "about" ? aboutPage()
+        : page === "services" ? servicesHtml()
+        : contactHtml(endpoint, siteFormId)
+      );
     }
     if (user.includes("Compare the CANDIDATE renders against the REFERENCE screenshots")) {
       visualQaCalls += 1;

@@ -15,7 +15,7 @@ import {
   type VisualQaReport,
 } from "./contracts";
 import { bytesToBase64, createSimpleVisionGenerate, mimeForKey } from "./vision";
-import type { SimpleBuilderVisualInput } from "./website-builder";
+import type { SimpleBuilderVisualInput } from "./contracts";
 
 export interface RunSimpleVisualQaInput {
   siteGenerationId: string;
