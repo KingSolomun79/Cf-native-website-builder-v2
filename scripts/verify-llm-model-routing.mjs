@@ -118,6 +118,9 @@ const positives = [
   [codingPlan.includes('ZAI_CODING_PLAN_DEFAULT_BASE_URL = "https://api.z.ai/api/coding/paas/v4"'), "zai-coding-plan.ts must default to the Coding Plan endpoint"],
   [codingPlan.includes("env.ZAI_CODING_API_KEY"), "zai-coding-plan.ts must use the canonical ZAI_CODING_API_KEY credential"],
   [!codingPlan.includes("env.ZHIPU_API_URL"), "zai-coding-plan.ts must NOT reference the retired ZHIPU_API_URL var"],
+  [!codingPlan.includes("env.ZHIPU_API_KEY"), "zai-coding-plan.ts must NOT reference the retired ZHIPU_API_KEY alias (credential is ZAI_CODING_API_KEY only — fail closed)"],
+  [!/ZHIPU_API_KEY/.test(wranglerExp), "wrangler.exp.jsonc must NOT reference the retired ZHIPU_API_KEY alias"],
+  [!/ZHIPU_API_KEY/.test(wrangler), "wrangler.jsonc must NOT reference the retired ZHIPU_API_KEY alias"],
   [codingPlan.includes('env.ZAI_CODING_MODEL || "glm-5.3"'), "zai-coding-plan.ts must resolve the coding model (glm-5.3) from the canonical var"],
   [codingPlan.includes('env.ZAI_MULTIMODAL_MODEL || "glm-5.3-flash"'), "zai-coding-plan.ts must resolve the multimodal model (glm-5.3-flash) from the canonical var"],
 ];

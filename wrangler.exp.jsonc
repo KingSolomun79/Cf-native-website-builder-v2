@@ -4,10 +4,10 @@
   // pipeline experiment; now the durable V2 sandbox). Deploy with:
   //   CLOUDFLARE_ACCOUNT_ID=c1c0f6b100d55a09ce6a7a3121a19224 \
   //     npx wrangler deploy -c wrangler.exp.jsonc
-  // It reuses the operator's dormant sandbox Worker name (last deployed
-  // 2026-08-25, V1-era) so the existing provider Worker secrets
-  // (ZHIPU_API_KEY / KIE_API_KEY / CF_DEPLOY_API_TOKEN / WEBHOOK_SECRET)
-  // carry over WITHOUT any secret ever leaving the platform.
+  // It shares the operator's sandbox Worker with the retained V2 secrets
+  // (ZAI_CODING_API_KEY / KIE_API_KEY / CF_DEPLOY_API_TOKEN / WEBHOOK_SECRET) —
+  // the canonical credential name, identical to production (final secret
+  // hygiene 2026-09-12); no secret ever leaves the platform.
   //
   // RESOURCE ISOLATION (post-rollout hardening, 2026-09-12): every
   // environment-sensitive Cloudflare resource name here is DISTINCT from the
@@ -92,11 +92,10 @@
     "KIE_POLL_INTERVAL_MS": "30000",
     "KIE_ATTEMPT_TIMEOUT_MS": "900000",
     // ZAI GLM CODING PLAN (operator GO 2026-09-11): the ONE LLM provider.
-    // The Coding Plan key still rides the retained ZHIPU_API_KEY secret name
-    // on this sandbox; production sets ZAI_CODING_API_KEY explicitly. The
-    // source-level fallback (src/lib/zai-coding-plan.ts apiKeyOf) stays ONLY
-    // until this sandbox is canonicalized onto ZAI_CODING_API_KEY — then the
-    // fallback is removed from source.
+    // The credential is ZAI_CODING_API_KEY — the same canonical secret name
+    // as production (final secret hygiene 2026-09-12); the retired legacy
+    // alias name is gone from source and from both Workers, which passed
+    // Coding Plan canaries on the canonical name before its removal.
     "ZAI_CODING_BASE_URL": "https://api.z.ai/api/coding/paas/v4",
     "ZAI_CODING_MODEL": "glm-5.3",
     "ZAI_MULTIMODAL_MODEL": "glm-5.3-flash",
