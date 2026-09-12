@@ -91,6 +91,8 @@ ${replacementBusiness.brandPaletteHint ? `- Brand palette preference: ${replacem
 ${input.referenceUrl ? `- Reference URL (supplemental behavioral evidence): ${input.referenceUrl}` : ""}
 BUSINESS FACTS POINTER (provenance only — repeat verbatim in businessFactsRef): ${input.businessFactsRef}
 
+TRUTH CONSTRAINT ON TRUST SECTIONS (build fails on violation — live evidence 2026-09-11: a Reference testimonial band was blueprinted and realized as fabricated trust content): the Reference may display testimonials, star ratings, client names or logos, awards and metric claims. These are design PATTERNS only. A trust section (testimonial quotes, ratings, client rosters, awards, metric claims) may be specified ONLY when the Business Facts explicitly contain that content — for provenance-free facts, they never do. Where the Reference shows one, specify instead a fact-backed section with the SAME visual role (services/capability band, process band, values band), marked [ADAPTATION], and carry its imagery spec over to the replacement section. Never blueprint quotes, names, ratings, awards or metric claims.
+
 Prioritize the desktop full-page screenshot as the primary composition authority; use any mobile capture for the responsive spec; use detail slices for precision on typography, spacing and color values.`;
 }
 
