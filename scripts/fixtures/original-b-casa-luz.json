@@ -1,0 +1,33 @@
+{
+  "submission": {
+    "buildMode": "ORIGINAL_DESIGN",
+    "facts": {
+      "businessName": "Casa Luz de Sal",
+      "contactEmail": "stay@casaluzdesal.example",
+      "businessType": "Small coastal guesthouse with nine rooms",
+      "businessDescription": "Casa Luz de Sal is a nine-room guesthouse above a quiet cove on the southern Portuguese coast. Rooms are simple and light-filled, breakfast is served at one long table, and the terrace looks over the Atlantic. The house is adults-only and most guests come to swim, read and eat well rather than tour.",
+      "idealClientProfile": "Adult couples and solo travelers seeking a quiet coastal stay without resort entertainment; many are repeat off-season visitors. Website purpose: direct room enquiries and bookings.",
+      "city": "Salema",
+      "country": "Portugal",
+      "phoneNumber": "+351 282 555 019",
+      "extraInformation": [
+        "Positioning: unhurried, salt-washed, personal. Supporting message: nine rooms, one long breakfast table, the Atlantic at the door.",
+        "What the guesthouse offers (exactly these four): Rooms — nine light-filled rooms, some with sea-facing balconies, no televisions. Breakfast table — one long shared table each morning with local bread, fruit, eggs and pastries. Terrace & pool — a shaded terrace, a small saltwater pool and steps down to the cove path. Boat coves & walks — the host keeps a hand-drawn map of quiet coves, cliff walks and the fish market timings.",
+        "Practical notes the site may state: adults-only; check-in from 15:00; the cove is a three-minute walk; closed December to February.",
+        "Things to emphasize: the light, the quiet, the single long table, walking the cove path at dawn.",
+        "Strict content constraints: do not invent guest reviews, ratings, press mentions, awards, room prices, availability claims or any statistics."
+      ]
+    },
+    "creativeDirection": {
+      "direction": "Salt-bleached Mediterranean postcard: whitewashed plaster surfaces with cobalt and sea-glass accents, airy full-bleed coastal photography, wide margins like a loosely printed travel journal, and one recurring hand-drawn map motif",
+      "audience": "Adult couples and solo travelers 30-65 who prefer quiet coves and long breakfasts to resorts",
+      "conversionGoal": "Direct booking enquiry for a stay",
+      "serviceEnvironment": "A whitewashed house above a Portuguese cove: salt air, limestone, strong midday light, blue water",
+      "preferredPalette": "Whitewash #F8F6F0, cobalt #2456A6, sea glass #9FBFAE, terracotta #C97B4A, ink navy #1E2A3A",
+      "visualStyle": "Loose travel-journal editorial: full-bleed photography interrupted by small hand-set notes, the hand-drawn map as a signature section divider, oversized lowercase headlines",
+      "tone": "Calm, warm, personal; like a note from the host",
+      "avoidances": "No resort-generic sliders, no star ratings, no booking-engine widgets look, no busy gradients, no corporate stock imagery of sunsets with lens flares",
+      "inspirationNotes": "Fishing-boat paint jobs, hand-painted ceramic number plates, salt-crusted limestone steps"
+    }
+  }
+}

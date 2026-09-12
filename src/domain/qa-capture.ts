@@ -170,7 +170,8 @@ export interface ProductionQaCaptureOptions {
 export function createProductionQaCapture(env: Env, previewUrl: string, options?: ProductionQaCaptureOptions): QaCaptureFn {
   const base = previewUrl.replace(/\/$/, "");
   return async (spec) => {
-    if (options?.expectedBuildVersionId) {
+    const expectedBuildVersionId = options?.expectedBuildVersionId;
+    if (expectedBuildVersionId) {
       // In the Workers Runtime the fetch-based poll can never pass on a
       // workers.dev preview (loopback error 1042) — verify through the
       // browser binding when present; the fetch path remains for
@@ -178,14 +179,14 @@ export function createProductionQaCapture(env: Env, previewUrl: string, options?
       if (env.BROWSER) {
         await waitForPreviewMarkerViaBrowser(env, {
           previewUrl: base,
-          buildVersionId: options.expectedBuildVersionId,
-          ...(options.readinessTimeoutMs ? { timeoutMs: options.readinessTimeoutMs } : {}),
+          buildVersionId: expectedBuildVersionId,
+          ...(options?.readinessTimeoutMs ? { timeoutMs: options.readinessTimeoutMs } : {}),
         });
       } else {
         await waitForPreviewMarker({
           previewUrl: base,
-          buildVersionId: options.expectedBuildVersionId,
-          ...(options.readinessTimeoutMs ? { timeoutMs: options.readinessTimeoutMs } : {}),
+          buildVersionId: expectedBuildVersionId,
+          ...(options?.readinessTimeoutMs ? { timeoutMs: options.readinessTimeoutMs } : {}),
         });
       }
     }
@@ -206,6 +207,26 @@ export function createProductionQaCapture(env: Env, previewUrl: string, options?
             waitUntil: "networkidle",
           });
           await page.waitForImages(10_000);
+          // CAPTURE-SESSION MARKER PROOF (sandbox evidence 2026-09-12): the
+          // pre-poll proves the preview in ITS browser session, but
+          // workers.dev propagation is eventually consistent ACROSS browser
+          // sessions/colos — the repaired-version captures then photographed
+          // the "There is nothing here yet" placeholder and Visual QA
+          // correctly condemned a site it never saw. The page that is about
+          // to be screenshotted must prove ITSELF to be this exact candidate
+          // first; otherwise fail as PREVIEW_NOT_READY so the durable step
+          // retries against a settled deployment.
+          if (expectedBuildVersionId) {
+            const markerSelector = `meta[name="${PREVIEW_MARKER_META_NAME}"][content="${expectedBuildVersionId}"]`;
+            if ((await page.countMatches(markerSelector)) === 0) {
+              throw new PreviewNotReadyError(
+                `${base}/${PAGE_PATHS[entry.page]}`,
+                expectedBuildVersionId,
+                0,
+                null
+              );
+            }
+          }
           const layout = await page.extractLayout();
 
           const imageMassRatio = layout.images.length > 0

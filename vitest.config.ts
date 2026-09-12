@@ -133,6 +133,7 @@ export default defineWorkersConfig({
       "tests/v2-lifecycle.test.ts",
       "tests/v2-revision.test.ts",
       "tests/v2-original-design.test.ts",
+      "tests/v2-qa-capture-marker.test.ts",
       "tests/v2-stage-liveness.test.ts",
       "tests/v2-prompt-contract.test.ts",
       "tests/v2-reference-intake.test.ts",
