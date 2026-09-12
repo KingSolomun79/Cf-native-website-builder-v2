@@ -1,0 +1,7 @@
+# Deterministic prompt-body generation (canonical LF, every platform).
+# The prompt-body generator embeds these markdown sources into
+# src/domain/generated/prompt-bodies.ts; Git's platform smudge (core.autocrlf)
+# must never vary their on-disk line endings, or test runs would rewrite the
+# tracked generated module. Enforced by scripts/verify-prompt-bodies-idempotence.mjs.
+v2-docs/prompts/**/*.md text eol=lf
+src/domain/generated/prompt-bodies.ts text eol=lf
