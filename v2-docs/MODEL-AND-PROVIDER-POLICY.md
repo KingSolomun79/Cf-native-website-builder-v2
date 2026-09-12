@@ -60,8 +60,11 @@ canonical-secret canaries passed (final secret hygiene, 2026-09-12).
 Workers AI transports (`@cf/zai-org/*` model ids, `workers-ai-file`,
 `SIMPLE_STREAMING_TRANSPORT=workers_ai_stream`), the Z.AI General API
 streaming experiments, and all single/dual-call whole-site output envelopes
-are retired from the canonical path. Their experiment reports and branches
-remain as evidence. The Kimi branch was never created and must not be.
+are retired from the canonical path. Their experiment reports remain in the
+repository (v2-docs/EXPERIMENT-*.md, FOLLOW-UP-TRANSPORT-RESILIENCE.md); the
+research branches themselves were deleted from origin after the final secret
+hygiene (2026-09-12) — their commits remain reachable through main's merge
+history where merged. The Kimi branch was never created and must not be.
 
 **Physical retirement (2026-09-12):** the legacy seams themselves were deleted from
 the repository — `src/lib/ai-gateway.ts` (Cloudflare AI Gateway / OpenRouter /
