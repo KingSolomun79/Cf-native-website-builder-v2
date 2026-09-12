@@ -1,0 +1,32 @@
+{
+  "submission": {
+    "buildMode": "ORIGINAL_DESIGN",
+    "facts": {
+      "businessName": "Toto STEAM Lab",
+      "contactEmail": "hello@totosteam.example",
+      "businessType": "Children's science, art and making workshop studio",
+      "businessDescription": "Toto STEAM Lab runs weekend and holiday workshops where children aged 6-12 build, experiment and make with real tools and materials: simple robotics kits, kitchen-science chemistry, printmaking and small woodwork. Groups are capped at eight children and led by trained facilitators in a purpose-built studio with proper workbenches.",
+      "idealClientProfile": "Parents of primary-school children in Nairobi looking for hands-on, screen-free enrichment activities. Decision maker: the parent. Website purpose: book a trial workshop session.",
+      "city": "Nairobi",
+      "country": "Kenya",
+      "phoneNumber": "+254 20 555 0123",
+      "extraInformation": [
+        "Positioning: curious, hands-on, joyful but orderly. Supporting message: real tools, real materials, real questions — screen-free making for curious kids.",
+        "Programs (exactly these four): Saturday Lab — rotating two-hour build and experiment sessions. Holiday Camps — week-long themed maker camps during school breaks. School Partnerships — curriculum-linked workshops delivered at partner schools. Birthday Builds — a group build project as a birthday party activity.",
+        "Things to emphasize: small groups of eight, trained facilitators, every child takes home what they build, all materials and safety gear provided.",
+        "Strict content constraints: do not invent testimonials, client names, awards, certifications, years in business, staff bios, pricing or any statistics. Never use real children's names or photos."
+      ]
+    },
+    "creativeDirection": {
+      "direction": "Toy-box workshop poster: a bright, chunky, screen-free maker feel — mustard yellow, tomato red and cobalt on warm cream, thick rounded outlines, big friendly shapes that look cut from coloured paper, and photos treated like snapshots taped into a scrapbook",
+      "audience": "Parents 28-45 in Nairobi choosing enrichment activities for primary-school children; they value safety, real learning and visible joy",
+      "conversionGoal": "Book a trial workshop session",
+      "serviceEnvironment": "A bright purpose-built studio with wooden workbenches; paint, wood, wheels and wires in active use",
+      "preferredPalette": "Mustard yellow #E8A93B, tomato red #D9532C, cobalt blue #2B5FB8, warm cream #FAF3E3, charcoal outline #2B2620",
+      "visualStyle": "Playful geometric poster: chunky rounded shapes with thick outlines, slightly rotated cards like paper cutouts, big friendly headline type, scrapbook photo treatment with taped corners",
+      "tone": "Warm, energetic, encouraging; playful but trustworthy — never childish chaos",
+      "avoidances": "No dark tech aesthetics, no purple gradients, no stock classroom photos, no generic rounded SaaS cards, no clip-art science beakers",
+      "inspirationNotes": "Mid-century toy packaging, paper cut-out collage, children's museum workshop posters, hand-painted shop signs"
+    }
+  }
+}

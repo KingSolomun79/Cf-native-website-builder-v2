@@ -27,10 +27,16 @@ contradictory clauses inside the retained detailed body.
 | Visual QA | `simple-visual-qa/v2` | `simple/03-visual-qa.md` |
 | Site Repair — the ONE repair | `simple-site-repair/v1` | `simple/04-site-repair.md` |
 
-## Deferred mode
+## ORIGINAL_DESIGN — SIMPLE pipeline stages (issue #24, enabled 2026-09-12)
 
-ORIGINAL_DESIGN remains a recognized V2 Build Mode whose runtime is explicitly
-NOT ENABLED (deterministic lock; see `src/domain/original-design-lock.ts`).
-Its future SIMPLE implementation will reuse `simple-design-blueprint` (with
-Business Facts + creative-direction inputs instead of Reference captures) and
-the SAME downstream bodies: `simple/02`, `simple/03`, `simple/04`.
+Both Build Modes share EVERYTHING downstream of the Design Blueprint. The
+divergence is only the Blueprint inputs/prompt and the Visual QA evaluation
+context/prompt. Both Blueprint prompts output the SAME `design-blueprint/2`
+schema; both Visual QA prompts output the SAME report schema.
+
+| Stage | prompt id/version | Detailed body |
+|---|---|---|
+| Original Design Blueprint Generator (text-only — Business Facts + Creative Direction, no Reference) | `simple-original-design-blueprint/v1` | `simple/05-original-design-blueprint.md` |
+| Website Builder — the ONE visual owner (SHARED with REFERENCE_BOUND) | `simple-website-builder/v8` | `simple/02-website-builder.md` |
+| Original Design Visual QA (candidate renders vs Blueprint + Creative Direction; no Reference) | `simple-original-design-visual-qa/v1` | `simple/06-original-design-visual-qa.md` |
+| Site Repair — the ONE repair (SHARED with REFERENCE_BOUND) | `simple-site-repair/v1` | `simple/04-site-repair.md` |

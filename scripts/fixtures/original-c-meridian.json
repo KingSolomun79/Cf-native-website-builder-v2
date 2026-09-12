@@ -1,0 +1,33 @@
+{
+  "submission": {
+    "buildMode": "ORIGINAL_DESIGN",
+    "facts": {
+      "businessName": "Meridian Flow Systems",
+      "contactEmail": "sales@meridianflow.example",
+      "businessType": "Industrial water-monitoring hardware and software (B2B)",
+      "businessDescription": "Meridian Flow Systems builds inline water-monitoring hardware and the software that runs it for industrial plants and water utilities. Sensor probes measure flow, pressure, turbidity and conductivity; a rugged edge unit collects the data on-site and pushes it into the Meridian dashboard, alerting plant engineers before thresholds are breached.",
+      "idealClientProfile": "Operations and process engineers at food and beverage plants, breweries, municipal water utilities and industrial laundries. Decision makers: plant manager, operations director, quality lead. Website purpose: book a monitoring assessment call.",
+      "city": "Eindhoven",
+      "country": "Netherlands",
+      "phoneNumber": "+31 40 555 0177",
+      "extraInformation": [
+        "Positioning: engineered, precise, unglamorous in the best way. Supporting message: instrumentation you can trust, from probe to dashboard.",
+        "Product line (exactly these four): Sensor probes — inline flow, pressure, turbidity and conductivity probes built for continuous industrial service. MF-Edge unit — a rugged on-site collector that buffers data during outages and pushes to the dashboard when the link returns. Meridian dashboard — thresholds, trends and export; built for plant engineers, not data scientists. Assessment & install — site survey, probe placement planning, installation and calibration by the company's own engineers.",
+        "Process, four stages: 01 Survey — map the process line and define measurement points. 02 Instrument — specify probes and edge unit placement. 03 Install & calibrate — fitting, calibration and threshold setup. 04 Monitor — dashboard onboarding and alert tuning with the plant team.",
+        "Things to emphasize: measurement accuracy, buffer-then-forward reliability during network outages, engineers who install and calibrate in person.",
+        "Strict content constraints: do not invent customers, case studies, uptime percentages, accuracy specs, certifications, awards, pricing or headcount. Describe capabilities without quantitative claims."
+      ]
+    },
+    "creativeDirection": {
+      "direction": "Precision instrument: a technical, engineered aesthetic — cool slate surfaces with a signal-amber accent, a visible layout grid like graph paper, monospaced data labels, schematic line diagrams as section dividers, and dense, well-considered typography that respects the reader",
+      "audience": "Operations and process engineers; technical buyers who distrust marketing fluff",
+      "conversionGoal": "Book a monitoring assessment call",
+      "serviceEnvironment": "Industrial plant floors and utility rooms: stainless pipe, control cabinets, cable runs, status LEDs",
+      "preferredPalette": "Slate #22272B, cool steel #E8ECEF, signal amber #E8A020, deep teal #1F5F5B, ink black #14171A",
+      "visualStyle": "Engineering drawing meets modern spec sheet: visible hairline grid, section numbers like drawing codes (01/, 02/), monospaced labels for data and part names, restrained photography of hardware in real plant environments",
+      "tone": "Exact, calm, competent; no adjectives where a measurement belongs",
+      "avoidances": "No generic SaaS dashboard screenshots, no stock handshakes or hard hats, no rounded friendly cards, no decorative gradients, no invented metrics or up-time claims",
+      "inspirationNotes": "P&ID schematics, DIN rail layouts, calibration certificates, machined aluminum faceplates"
+    }
+  }
+}

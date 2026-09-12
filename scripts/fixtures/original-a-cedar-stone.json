@@ -1,0 +1,33 @@
+{
+  "submission": {
+    "buildMode": "ORIGINAL_DESIGN",
+    "facts": {
+      "businessName": "Cedar & Stone Landscapes",
+      "contactEmail": "studio@cedarandstone.example",
+      "businessType": "Residential landscape design and build studio",
+      "businessDescription": "Cedar & Stone Landscapes is a design-build studio for residential gardens and outdoor rooms. The studio handles the full arc: site walkthrough, planting and hardscape design, sourcing, construction and first-season care. Work ranges from small city gardens to full backyard transformations with terraces, fire areas and shade structures.",
+      "idealClientProfile": "Homeowners planning a full garden or backyard renovation, typically moving into or remodeling a detached house. Decision maker: the homeowner or couple managing the project directly. Website purpose: book a design consultation walk-through.",
+      "city": "Portland",
+      "country": "United States",
+      "phoneNumber": "+1 503 555 0184",
+      "extraInformation": [
+        "Positioning: grounded, craft-led, patient, botanical. Supporting message: gardens designed to mature well, built by the same hands that drew them.",
+        "Services (exactly these four): Garden Design — site analysis, planting plans and hardscape drawings for the whole plot. Build & Construction — terraces, paths, retaining walls, raised beds and shade structures built by the studio's own crew. Planting & Care — sourcing, installation and a first-season care program for establishing planting. Outdoor Rooms — fire areas, covered seating and dining spaces treated as extensions of the house.",
+        "Process, four stages: 01 Walk the site — sun, soil, drainage and how you actually want to live outside. 02 Design — planting and hardscape plans, materials and a phased budget. 03 Build — the studio's own crew constructs the hardscape and planting. 04 First season — establishment care and adjustment visits through the first growing season.",
+        "Things to emphasize: hand-built stonework, four-season planting interest, working with Portland's rain and shade, small crews who stay on one project start to finish.",
+        "Strict content constraints: do not invent testimonials, client names, awards, certifications, years in business, team bios, pricing or any statistics. Never fabricate before/after claims."
+      ]
+    },
+    "creativeDirection": {
+      "direction": "Northwest craft almanac: a warm, botanical field-guide feel — deep forest greens against warm cedar and paper tones, oversized serif display type, generous hand-set-looking margins, and close-crop garden photography that bleeds off the container edge like pressed specimens",
+      "audience": "Homeowners 35-60 investing in a long-horizon garden renovation; values craft and patience over speed",
+      "conversionGoal": "Book a design consultation walk-through",
+      "serviceEnvironment": "Residential gardens in a rainy, green Pacific Northwest city; muddy boots, real weather, mature plants",
+      "preferredPalette": "Deep forest green #24382B, warm cedar #A9683C, paper cream #F4EFE4, charcoal ink #23211C, moss accent #7A8450",
+      "visualStyle": "Editorial field-guide: asymmetric layouts, numbered chapters, botanical close-ups at unusual crops, generous margins, hairline rules like an almanac",
+      "tone": "Grounded, patient, craftsmanlike; quietly confident, never salesy",
+      "avoidances": "No generic three-card service grids, no stock lawns or sprinkler stock photos, no purple gradients, no rounded SaaS cards",
+      "inspirationNotes": "Old botanical almanacs, seed catalogues with numbered plates, Japanese garden pruners on cedar benches"
+    }
+  }
+}

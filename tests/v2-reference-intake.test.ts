@@ -409,11 +409,12 @@ describe("Reference intake and evidence freeze", () => {
       payload: {
         buildMode: "ORIGINAL_DESIGN",
         facts: { businessName: "No Reference Co", contactEmail: "hi@nr.example" },
+        creativeDirection: { direction: "Handcrafted warm minimalism" },
       },
     });
     // Intake rejects on mode before touching Build ids, so no Build is
-    // created here — ORIGINAL_DESIGN is recognized but NOT ENABLED (deferred
-    // SIMPLE implementation) and this test must not depend on the lock.
+    // created here — an ORIGINAL_DESIGN generation never runs the Reference
+    // intake (issue #24: its Reference stages are skipped, never faked).
     await expect(
       runReferenceIntake(env, {
         siteGenerationId: started.siteGenerationId,

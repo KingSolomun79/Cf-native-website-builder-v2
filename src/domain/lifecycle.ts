@@ -13,7 +13,6 @@
 
 import type { Env } from "../env.d";
 import { generateId, nowIso } from "../lib/crypto";
-import { assertOriginalDesignAvailable } from "./original-design-lock";
 import { getObject } from "../lib/assets";
 import {
   ONBOARDING_SUBMISSION_SCHEMA_VERSION,
@@ -22,6 +21,7 @@ import {
   type BuildLifecycleState,
   type BuildMode,
   type BusinessFacts,
+  type CreativeDirection,
   type ReferenceInput,
 } from "./lifecycle-schema";
 
@@ -179,8 +179,16 @@ export async function startSiteGeneration(
             : {}),
         }
       : undefined;
+  // ORIGINAL_DESIGN's design-intent authority rides the frozen submission:
+  // provenance-immutable and covered by the checksum like every other input.
+  const creativeDirection: CreativeDirection | undefined = payload.creativeDirection;
 
-  const frozenPayload = stableStringify({ buildMode: payload.buildMode, facts, reference });
+  const frozenPayload = stableStringify({
+    buildMode: payload.buildMode,
+    facts,
+    reference,
+    ...(creativeDirection ? { creativeDirection } : {}),
+  });
   const checksum = await sha256Hex(frozenPayload);
   const submittedAt = nowIso();
 
@@ -293,13 +301,11 @@ export async function createInitialBuild(
     );
   }
 
-  // ORIGINAL_DESIGN is a recognized Build Mode whose runtime is explicitly
-  // NOT ENABLED (deferred SIMPLE implementation; deterministic lock replacing
-  // the retired 3-of-5 legacy benchmark proof gate). No fallback to
-  // REFERENCE_BOUND, no legacy generator, no automatic enablement.
-  if (generation.build_mode === "ORIGINAL_DESIGN") {
-    assertOriginalDesignAvailable();
-  }
+  // Both Build Modes are enabled (issue #24): REFERENCE_BOUND via the SIMPLE
+  // pipeline with its Reference authority, ORIGINAL_DESIGN via the SAME
+  // pipeline with Business Facts + Creative Direction as the design origin.
+  // No fallback exists in either direction — mode-specific input validity is
+  // enforced by the Onboarding Submission validation, never remapped here.
 
   const createdAt = nowIso();
   const buildId = generateId();
@@ -499,6 +505,7 @@ export interface SiteGenerationView {
     buildMode: BuildMode;
     facts: BusinessFacts;
     reference: ReferenceInput | null;
+    creativeDirection: CreativeDirection | null;
     checksum: string;
     submittedAt: string;
   };
@@ -553,6 +560,7 @@ export async function getSiteGenerationView(
     buildMode: BuildMode;
     facts: BusinessFacts;
     reference?: ReferenceInput;
+    creativeDirection?: CreativeDirection;
   };
 
   return {
@@ -571,6 +579,7 @@ export async function getSiteGenerationView(
       buildMode: submission.build_mode,
       facts: payload.facts,
       reference: payload.reference ?? null,
+      creativeDirection: payload.creativeDirection ?? null,
       checksum: submission.checksum,
       submittedAt: submission.submitted_at,
     },

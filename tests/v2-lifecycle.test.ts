@@ -198,7 +198,7 @@ describe("V2 domain lifecycle backbone", () => {
   it("starts a replacement Site Generation on the same stable Site from a later submission, leaving the earlier submission untouched", async () => {
     const first = ((await (await postSubmission(app, env)).json()) as { siteId: string; onboardingSubmissionId: string; siteGenerationId: string });
 
-    const second = await postSubmission(app, env, { buildMode: "ORIGINAL_DESIGN", reference: undefined }, { siteId: first.siteId });
+    const second = await postSubmission(app, env, { buildMode: "ORIGINAL_DESIGN", reference: undefined, creativeDirection: { direction: "Bold industrial minimalism for a roastery lab" } }, { siteId: first.siteId });
     expect(second.status).toBe(201);
 
     const secondBody = (await second.json()) as { siteId: string; sequenceNumber: number; siteGenerationId: string };
