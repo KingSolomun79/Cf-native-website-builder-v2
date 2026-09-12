@@ -13,7 +13,6 @@ import { submitForm } from "./routes/v2.form-submit";
 import { createApproval } from "./routes/v2.approval-create";
 import { createPublication } from "./routes/v2.publication-create";
 import { rollbackSitePublication } from "./routes/v2.rollback";
-import { tmpLlmCanary } from "./routes/tmp-llm-canary";
 
 // V2-only route table. The V1 product routes (Fluent Forms webhook, jobs,
 // contact, reference upload in its V1 shape, GitHub deploy webhook) were
@@ -37,10 +36,6 @@ app.post("/api/v2/build-versions/:buildVersionId/publication", createPublication
 app.post("/api/v2/sites/:siteId/rollback", rollbackSitePublication);
 
 app.post("/api/internal/kie-callback", handleKieCallback);
-
-// TEMPORARY CANARY (final secret hygiene) — REMOVED BEFORE MERGE. Preview-
-// version-only Z.AI Coding Plan credential canary; HMAC-gated.
-app.post("/api/internal/llm-canary", tmpLlmCanary);
 
 // The experiment benchmark driver route (/api/v2/exp/benchmark-driver) was
 // retired with the post-rollout hardening (2026-09-12): the rollout condition
