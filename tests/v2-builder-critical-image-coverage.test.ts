@@ -575,3 +575,27 @@ describe("pipeline: a Builder whose stylesheet invents structure terminates HUMA
     expect(event).not.toBeNull();
   });
 });
+
+describe("pipeline: every deterministic Builder gate terminates HUMAN_REVIEW_REQUIRED in-step", () => {
+  it("a shared-chrome violation (SOURCE_INCOMPLETE) lands in review — never an instance-killing escape", async () => {
+    const referenceKey = "references/simple/chrome-violation-pipeline.png";
+    await persistSimpleScreenshot(env, referenceKey);
+    const started = await startSiteGeneration(env, {
+      payload: {
+        buildMode: "REFERENCE_BOUND",
+        facts: FACTS as unknown as typeof FACTS & Record<string, never>,
+        reference: { screenshotR2Key: referenceKey, url: "https://reference.example.com/" },
+      },
+    });
+    const outcome = await runBuildPipeline(env, {
+      siteGenerationId: started.siteGenerationId,
+      deps: createSimpleScripts({ builderRestylesChrome: true }),
+    });
+
+    expect(outcome.terminal).toBe("HUMAN_REVIEW_REQUIRED");
+    expect(outcome.reasons[0]).toContain("WEBSITE_BUILDER_SOURCE_INCOMPLETE");
+    expect(outcome.reasons[0]).toContain("frozen shared chrome");
+    expect(outcome.repairApplied).toBe(false);
+    expect(outcome.releaseReadyBuildVersionId).toBeNull();
+  });
+});

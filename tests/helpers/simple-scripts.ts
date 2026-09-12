@@ -146,12 +146,20 @@ export interface SimpleScriptsOptions {
   /** The builder stylesheet anchors selectors on structure absent from the
    *  four pages and site.js — the DOM-first invented-structure gate. */
   builderInventsCssSelectors?: boolean;
+  /** An inner page replaces the shared footer — the frozen shared chrome
+   *  gate (SOURCE_INCOMPLETE). */
+  builderRestylesChrome?: boolean;
 }
 
 export function createSimpleScripts(options: SimpleScriptsOptions = {}): SimplePipelineDeps {
   let visualQaCalls = 0;
   let repairCalls = 0;
-  const aboutPage = () => (options.builderOmitsAboutHero ? aboutHtml().replace(/<img src="IMG:about-hero"[^>]*>/, "") : aboutHtml());
+  const aboutPage = () => {
+    let html = aboutHtml();
+    if (options.builderOmitsAboutHero) html = html.replace(/<img src="IMG:about-hero"[^>]*>/, "");
+    if (options.builderRestylesChrome) html = html.replace(/<footer class="site-footer">[\s\S]*?<\/footer>/, `<footer><p>© 2026 Different Business</p></footer>`);
+    return html;
+  };
 
   const generate: RawAiGenerate = async (_system, user) => {
     const respond = (value: unknown) => ({
