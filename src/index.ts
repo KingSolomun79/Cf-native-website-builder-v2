@@ -13,7 +13,6 @@ import { submitForm } from "./routes/v2.form-submit";
 import { createApproval } from "./routes/v2.approval-create";
 import { createPublication } from "./routes/v2.publication-create";
 import { rollbackSitePublication } from "./routes/v2.rollback";
-import { expBenchmarkDriver } from "./routes/v2.exp-benchmark-driver";
 
 // V2-only route table. The V1 product routes (Fluent Forms webhook, jobs,
 // contact, reference upload in its V1 shape, GitHub deploy webhook) were
@@ -38,10 +37,11 @@ app.post("/api/v2/sites/:siteId/rollback", rollbackSitePublication);
 
 app.post("/api/internal/kie-callback", handleKieCallback);
 
-// EXPERIMENT BRANCH ONLY: live benchmark driver for the experimental runtime
-// (wrangler.exp.jsonc). 404s unless EXP_BENCHMARK_DRIVER=1 — never set in the
-// production config — and is HMAC-gated like every operator intake route.
-app.post("/api/v2/exp/benchmark-driver", expBenchmarkDriver);
+// The experiment benchmark driver route (/api/v2/exp/benchmark-driver) was
+// retired with the post-rollout hardening (2026-09-12): the rollout condition
+// "keep the driver until production smoke succeeds" was met — production
+// smoke generated a site to RELEASE READY. The driver's scripts and evidence
+// remain in repository history.
 
 app.onError((err, c) => {
   console.error("Unhandled error:", err);
@@ -90,7 +90,11 @@ export default {
   scheduled,
 };
 export { WebsiteBuildWorkflow } from "./workflows/website-build-workflow";
-// EXPERIMENT BRANCH ONLY: inert DO-namespace compatibility export for the
-// experimental sandbox runtime (see src/exp-compat-website-agent.ts). The
-// runtime ignores named exports beside the default handler object.
+// Sandbox deploy-compatibility export: the sandbox Worker's account still
+// carries a V1-era Durable Object namespace backed by the class `WebsiteAgent`,
+// and the Cloudflare API rejects any new script version that stops exporting a
+// class an existing DO namespace depends on (error 10064). This empty stub
+// satisfies that export contract without implementing anything: no V2 route
+// reaches the namespace. Removing it requires a DO-namespace migration on the
+// sandbox Worker — deliberately not part of this cleanup.
 export { WebsiteAgent } from "./exp-compat-website-agent";

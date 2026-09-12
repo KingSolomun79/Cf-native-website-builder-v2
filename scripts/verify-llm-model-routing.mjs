@@ -1,14 +1,16 @@
-// LLM model-routing hygiene gate (issue #30, Part 4).
+// LLM model-routing hygiene gate (issue #30, Part 4; post-rollout hardening
+// edition 2026-09-12).
 //
-// Node-context source scan proving no executable production routing retains a
-// legacy LLM model or a retired per-provider model variable. Legacy names may
-// appear only in historical evidence/migration docs — never in src/ runtime
-// routing or in deployable wrangler configurations.
+// Node-context source scan proving V2 has EXACTLY ONE LLM provider path: the
+// Z.AI Coding Plan (src/lib/zai-coding-plan.ts). The legacy multi-provider
+// experiment seams (Cloudflare AI Gateway chain, OpenRouter leg, Z.AI General
+// API streaming, Workers AI transport, benchmark driver) were REMOVED — this
+// gate fails if any of them ever reappears.
 //
 // Exclusions:
 //   - this script itself;
-//   - ai-gateway.ts's CANONICAL_LLM_MODEL declaration (the one allowed
-//     literal, which the positive assertions below re-verify).
+//   - the model-routing regression suite (sanctioned to discuss legacy
+//     names inside negative assertions).
 
 import { readdirSync, readFileSync, statSync, existsSync } from "node:fs";
 import { join } from "node:path";
@@ -33,7 +35,7 @@ const FORBIDDEN = [
 ];
 
 const SCAN_DIRS = ["src", "scripts", "tests"];
-const SCAN_FILES = ["wrangler.jsonc", "wrangler.test.jsonc"];
+const SCAN_FILES = ["wrangler.jsonc", "wrangler.exp.jsonc", "wrangler.test.jsonc"];
 // The model-routing regression suite is the one sanctioned fixture that may
 // name legacy models (always inside negative assertions).
 const EXCLUDED_FILES = new Set(["verify-llm-model-routing.mjs", "v2-llm-model-routing.test.ts"]);
@@ -67,9 +69,10 @@ for (const file of files) {
 
 // Positive assertions: the canonical configuration actually exists.
 const wrangler = readFileSync(join(ROOT, "wrangler.jsonc"), "utf8");
+const wranglerExp = readFileSync(join(ROOT, "wrangler.exp.jsonc"), "utf8");
 const wranglerTest = readFileSync(join(ROOT, "wrangler.test.jsonc"), "utf8");
-const gateway = readFileSync(join(ROOT, "src", "lib", "ai-gateway.ts"), "utf8");
-const codingPlan = readFileSync(join(ROOT, "src", "lib", "zai-coding-plan.ts"), "utf8");
+const codingPlanPath = join(ROOT, "src", "lib", "zai-coding-plan.ts");
+const codingPlan = readFileSync(codingPlanPath, "utf8");
 
 const positives = [
   // Production runs the Z.AI Coding Plan only (operator GO 2026-09-11). The
@@ -77,7 +80,7 @@ const positives = [
   [wrangler.includes('"ZAI_CODING_BASE_URL": "https://api.z.ai/api/coding/paas/v4"'), 'wrangler.jsonc must set ZAI_CODING_BASE_URL to the Coding Plan endpoint'],
   [wrangler.includes('"ZAI_CODING_MODEL": "glm-5.3"'), 'wrangler.jsonc must set ZAI_CODING_MODEL="glm-5.3"'],
   [wrangler.includes('"ZAI_MULTIMODAL_MODEL": "glm-5.3-flash"'), 'wrangler.jsonc must set ZAI_MULTIMODAL_MODEL="glm-5.3-flash"'],
-  // Retired multi-provider vars must be ABSENT from the production artifact.
+  // Retired multi-provider vars must be ABSENT from every deployable artifact.
   [!wrangler.includes("LLM_MODEL"), "wrangler.jsonc must NOT set LLM_MODEL (retired multi-provider seam var)"],
   [!wrangler.includes("PRIMARY_PROVIDER"), "wrangler.jsonc must NOT set PRIMARY_PROVIDER"],
   [!wrangler.includes("ZHIPU_API_URL"), "wrangler.jsonc must NOT set ZHIPU_API_URL"],
@@ -86,7 +89,21 @@ const positives = [
   [!wrangler.includes("VISION_FALLBACK_PROVIDER"), "wrangler.jsonc must NOT set VISION_FALLBACK_PROVIDER"],
   [!wrangler.includes("DESIGN_PIPELINE_VERSION"), "wrangler.jsonc must NOT set DESIGN_PIPELINE_VERSION (no runtime pipeline selector)"],
   [!wrangler.includes("CF_AI_GATEWAY_ID"), "wrangler.jsonc must NOT set CF_AI_GATEWAY_ID (production LLM has no AI Gateway dependency)"],
-  [!wrangler.includes("EXP_BENCHMARK_DRIVER"), "wrangler.jsonc must NOT set EXP_BENCHMARK_DRIVER (experiment-only driver stays unavailable in production)"],
+  [!wrangler.includes("EXP_BENCHMARK_DRIVER"), "wrangler.jsonc must NOT set EXP_BENCHMARK_DRIVER (the benchmark driver is retired)"],
+  [!wranglerTest.includes("LLM_MODEL"), "wrangler.test.jsonc must NOT set LLM_MODEL (retired multi-provider seam var)"],
+  [!wranglerTest.includes("OPENROUTER_API_KEY"), "wrangler.test.jsonc must NOT set OPENROUTER_API_KEY"],
+  [!wranglerTest.includes("CF_AIG_TOKEN"), "wrangler.test.jsonc must NOT set CF_AIG_TOKEN"],
+  // The sandbox artifact is Coding-Plan-only too (no experiment transports,
+  // no benchmark driver switch).
+  [wranglerExp.includes('"ZAI_CODING_BASE_URL": "https://api.z.ai/api/coding/paas/v4"'), "wrangler.exp.jsonc must set ZAI_CODING_BASE_URL to the Coding Plan endpoint"],
+  [!wranglerExp.includes("LLM_MODEL"), "wrangler.exp.jsonc must NOT set LLM_MODEL (retired multi-provider seam var)"],
+  [!wranglerExp.includes("PRIMARY_PROVIDER"), "wrangler.exp.jsonc must NOT set PRIMARY_PROVIDER"],
+  [!wranglerExp.includes("ZHIPU_GATEWAY_PROVIDER"), "wrangler.exp.jsonc must NOT set ZHIPU_GATEWAY_PROVIDER"],
+  [!wranglerExp.includes("EXP_BENCHMARK_DRIVER"), "wrangler.exp.jsonc must NOT set EXP_BENCHMARK_DRIVER (the benchmark driver is retired)"],
+  [!wranglerExp.includes("CF_AI_GATEWAY_ID"), "wrangler.exp.jsonc must NOT set CF_AI_GATEWAY_ID"],
+  [!/gateway\.ai\.cloudflare\.com/.test(wranglerExp), "wrangler.exp.jsonc must NOT reference the Cloudflare AI Gateway endpoint"],
+  [!/api\.z\.ai\/api\/paas/.test(wranglerExp), "wrangler.exp.jsonc must NOT reference the Z.AI General API endpoint"],
+  [!/"ai"\s*:\s*\{/.test(wranglerExp), "wrangler.exp.jsonc must NOT bind the Workers AI experiment binding"],
   // No non-Coding-Plan provider surface may appear in the production artifact.
   [!wrangler.includes("gateway.ai.cloudflare.com"), "wrangler.jsonc must NOT reference the Cloudflare AI Gateway endpoint"],
   [!wrangler.includes("api.z.ai/api/paas"), "wrangler.jsonc must NOT reference the Z.AI General API endpoint"],
@@ -97,11 +114,6 @@ const positives = [
   // production release with the retired z-image model must fail this gate.
   [wrangler.includes('"KIE_MODEL": "nano-banana-2-lite"'), 'wrangler.jsonc must set KIE_MODEL="nano-banana-2-lite"'],
   [!wrangler.includes("z-image"), "wrangler.jsonc must NOT reference the retired z-image image model"],
-  // Test-harness config keeps the canonical model for the retained dead-seam
-  // fixtures; it is not a deployment artifact.
-  [wranglerTest.includes('"LLM_MODEL": "glm-5.3-flash"'), 'wrangler.test.jsonc must set LLM_MODEL="glm-5.3-flash"'],
-  [gateway.includes('export const CANONICAL_LLM_MODEL = "glm-5.3-flash"'), "ai-gateway.ts must declare CANONICAL_LLM_MODEL = glm-5.3-flash"],
-  [gateway.includes("resolveLlmModel"), "ai-gateway.ts must expose the resolveLlmModel seam"],
   // The ACTIVE production LLM seam is the Coding Plan transport.
   [codingPlan.includes('ZAI_CODING_PLAN_DEFAULT_BASE_URL = "https://api.z.ai/api/coding/paas/v4"'), "zai-coding-plan.ts must default to the Coding Plan endpoint"],
   [codingPlan.includes("env.ZAI_CODING_API_KEY"), "zai-coding-plan.ts must use the canonical ZAI_CODING_API_KEY credential"],
@@ -110,30 +122,47 @@ const positives = [
   [codingPlan.includes('env.ZAI_MULTIMODAL_MODEL || "glm-5.3-flash"'), "zai-coding-plan.ts must resolve the multimodal model (glm-5.3-flash) from the canonical var"],
 ];
 
-// Reachability proof (rollout GO §11): normal production generation must
-// route to zai-coding-plan.ts and must NOT be able to reach the retired
-// provider seams. ai-gateway.ts / ai-streaming.ts remain temporarily as
-// dead/gated code; this gate proves they stay that way.
-for (const file of [...walk(join(ROOT, "src"))]) {
-  const name = file.split(/[\\/]/).pop();
-  if (name === "zai-coding-plan.ts" || name === "env.d.ts") continue;
-  const text = readFileSync(file, "utf8");
-  // ai-streaming.ts itself belongs to the retained dead cluster; its import
-  // of the gateway module is intra-cluster and dies with the same cleanup.
-  if (/from\s+"\.\.\/lib\/ai-streaming"|from\s+"\.\/ai-streaming"/.test(text) && !["v2.exp-benchmark-driver.ts", "ai-streaming.ts"].includes(name)) {
-    violations.push(`${file.replace(ROOT, "")}: imports ai-streaming outside the gated experiment driver`);
-  }
-  if (/from\s+"\.\.\/lib\/ai-gateway"|from\s+"\.\/ai-gateway"/.test(text) && !["ai-boundary.ts", "qa-stages.ts", "v2.exp-benchmark-driver.ts", "ai-streaming.ts"].includes(name)) {
-    violations.push(`${file.replace(ROOT, "")}: imports the retired ai-gateway seam from an unexpected module`);
-  }
-  if (/generateVisionWithGateway|createProductionQaVisionGenerate/.test(text) && name !== "ai-gateway.ts" && name !== "qa-stages.ts") {
-    violations.push(`${file.replace(ROOT, "")}: references the dead vision-gateway path outside its retired home`);
+// ── Retirement proof (post-rollout hardening 2026-09-12) ────────────────────
+// The legacy provider seams no longer exist as files. Their REAPPEARANCE is a
+// routing violation, not merely dead code.
+const retiredFiles = [
+  join(ROOT, "src", "lib", "ai-gateway.ts"),
+  join(ROOT, "src", "lib", "ai-streaming.ts"),
+  join(ROOT, "src", "routes", "v2.exp-benchmark-driver.ts"),
+  join(ROOT, "scripts", "exp-benchmark-driver.mjs"),
+  join(ROOT, "tests", "v2-simple-streaming-transport.test.ts"),
+];
+for (const file of retiredFiles) {
+  if (existsSync(file)) {
+    violations.push(`${file.replace(ROOT, "")}: retired provider/driver seam must NOT exist`);
   }
 }
+
+// Reachability proof: NOTHING in src may import the retired seams (they are
+// deleted; any import could not even typecheck, but this keeps the gate
+// independent of typecheck) and no dead vision-gateway reference may remain.
+for (const file of [...walk(join(ROOT, "src"))]) {
+  const text = readFileSync(file, "utf8");
+  if (/from\s+"[^"]*ai-gateway"/.test(text)) {
+    violations.push(`${file.replace(ROOT, "")}: imports the retired ai-gateway seam`);
+  }
+  if (/from\s+"[^"]*ai-streaming"/.test(text)) {
+    violations.push(`${file.replace(ROOT, "")}: imports the retired ai-streaming seam`);
+  }
+  if (/generateVisionWithGateway|createProductionQaVisionGenerate/.test(text)) {
+    violations.push(`${file.replace(ROOT, "")}: references the retired vision-gateway path`);
+  }
+  if (/EXP_BENCHMARK_(DRIVER|SECRET)/.test(text)) {
+    violations.push(`${file.replace(ROOT, "")}: references the retired benchmark driver switch`);
+  }
+}
+
+// The schema stages must keep passing an explicit (Coding Plan) generate
+// override — the boundary has no default provider path to fall back to.
 for (const stage of ["visual-qa.ts", "design-blueprint.ts", "site-repair.ts"]) {
   const text = readFileSync(join(ROOT, "src", "simple-design", stage), "utf8");
   if (!/const generate: RawAiGenerate =\s*$/m.test(text) || !/input\.generate \?\?/.test(text)) {
-    violations.push(`src/simple-design/${stage}: schema stage must pass an explicit (Coding Plan) generate override — the gateway default must stay unreachable`);
+    violations.push(`src/simple-design/${stage}: schema stage must pass an explicit (Coding Plan) generate override — there is no default provider path`);
   }
 }
 // The active seam must remain imported by every normal-generation stage.
@@ -141,7 +170,6 @@ for (const importer of [
   join(ROOT, "src", "simple-design", "vision.ts"),
   join(ROOT, "src", "simple-design", "site-repair.ts"),
   join(ROOT, "src", "simple-design", "website-builder.ts"),
-  join(ROOT, "src", "routes", "v2.exp-benchmark-driver.ts"),
 ]) {
   if (!existsSync(importer) || !readFileSync(importer, "utf8").includes("zai-coding-plan")) {
     violations.push(`${importer.replace(ROOT, "")}: expected to import the active zai-coding-plan seam`);
@@ -159,6 +187,6 @@ if (violations.length > 0 || failedPositives.length > 0) {
 
 console.log(
   `LLM model-routing hygiene gate passed: ${files.length} file(s) scanned, ` +
-    "Z.AI Coding Plan-only production config (Coding endpoint, glm-5.3 / glm-5.3-flash, " +
-    "Nano Banana 2 Lite), retired provider vars absent, dead seams unreachable from generation."
+    "single-provider Z.AI Coding Plan runtime (Coding endpoint, glm-5.3 / glm-5.3-flash, " +
+    "Nano Banana 2 Lite), retired provider seams absent from source and every deployable config."
 );

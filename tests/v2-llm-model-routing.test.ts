@@ -1,137 +1,169 @@
-import { afterEach, beforeAll, describe, expect, it } from "vitest";
-import { env as providedEnv, fetchMock } from "cloudflare:test";
+import { describe, expect, it } from "vitest";
+import { env as providedEnv } from "cloudflare:test";
 import type { Env } from "../src/env.d";
 import { Type } from "@sinclair/typebox";
 import {
-  CANONICAL_LLM_MODEL,
-  generateWithGatewayDetailed,
-  resolveLlmModel,
-  resolveVisionProviderChain,
-} from "../src/lib/ai-gateway";
+  generateZaiCodingPlan,
+  resolveCodingModel,
+  resolveCodingMultimodalModel,
+  ZaiCodingPlanOutputExhaustedError,
+} from "../src/lib/zai-coding-plan";
 import { runSchemaValidatedAiStage } from "../src/domain/ai-boundary";
 import { startSiteGeneration, createInitialBuild } from "../src/domain/lifecycle";
 
-// Issue #30 model-routing gate: ONE canonical LLM model (glm-5.3-flash) for
-// every V2 textual/multimodal call on every provider leg; no legacy glm-4v
-// vision path, no per-provider model fallback, and provider-reported model
-// identity lands in provenance. Static source hygiene (no legacy literals in
-// executable routing) is enforced by scripts/verify-llm-model-routing.mjs,
-// which runs as part of `npm test`.
+// LLM model-routing gate, post-retirement edition (post-rollout hardening
+// 2026-09-12): the Z.AI Coding Plan is the ONE LLM provider. The legacy
+// multi-provider gateway/streaming seams were removed, so routing now means:
+// canonical stage models resolve from the canonical vars, every request goes
+// to the Coding Plan endpoint with the canonical credential, and the
+// AI-boundary provenance persists that identity. Static source hygiene (no
+// retired provider seam may even exist) is enforced by
+// scripts/verify-llm-model-routing.mjs + scripts/verify-resource-isolation.mjs,
+// which run as part of `npm test`.
 
 const env = providedEnv as unknown as Env;
-const GATEWAY_ORIGIN = "https://gateway.ai.cloudflare.com";
 
-function chatResponse(overrides: { model?: string; content?: string } = {}): string {
-  return JSON.stringify({
-    id: "chatcmpl-test",
-    model: overrides.model ?? CANONICAL_LLM_MODEL,
-    choices: [{ message: { role: "assistant", content: overrides.content ?? "{\"ok\":true}" }, finish_reason: "stop" }],
-    usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 },
-  });
+interface CapturedRequest {
+  url: string;
+  model?: string;
+  authorization?: string;
+  thinking?: unknown;
+  maxTokens?: number;
 }
 
-beforeAll(() => {
-  fetchMock.activate();
-  // Outbound LLM calls in this suite must never reach a real provider.
-  fetchMock.disableNetConnect();
-});
+/** Coding Plan transport stub: records the request, returns one fixed completion. */
+function codingPlanFetch(overrides: { model?: string; content?: string; finishReason?: string } = {}) {
+  const captured: CapturedRequest[] = [];
+  const fetchImpl = (async (url: unknown, init?: { headers?: Record<string, string>; body?: string }) => {
+    const body = typeof init?.body === "string" ? JSON.parse(init.body) : {};
+    captured.push({
+      url: String(url),
+      model: body.model,
+      authorization: init?.headers?.Authorization,
+      thinking: body.thinking,
+      maxTokens: body.max_tokens,
+    });
+    return new Response(
+      JSON.stringify({
+        id: "chatcmpl-test",
+        model: overrides.model ?? body.model,
+        choices: [
+          {
+            message: { role: "assistant", content: overrides.content ?? '{"ok":true}' },
+            finish_reason: overrides.finishReason ?? "stop",
+          },
+        ],
+        usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 },
+      }),
+      { status: 200, headers: { "content-type": "application/json" } }
+    );
+  }) as typeof fetch;
+  return { captured, fetchImpl };
+}
 
-afterEach(() => {
-  fetchMock.assertNoPendingInterceptors();
-});
-
-describe("canonical LLM model resolution", () => {
-  it("resolves glm-5.3-flash by default and through the LLM_MODEL seam", () => {
-    expect(CANONICAL_LLM_MODEL).toBe("glm-5.3-flash");
-    expect(resolveLlmModel(env)).toBe("glm-5.3-flash");
-    expect(resolveLlmModel({ ...env, LLM_MODEL: undefined } as unknown as Env)).toBe("glm-5.3-flash");
-    // The seam stays configurable, but every caller of it gets one value.
-    expect(resolveLlmModel({ ...env, LLM_MODEL: "glm-5.3-flash" } as unknown as Env)).toBe("glm-5.3-flash");
+describe("canonical Coding Plan model resolution", () => {
+  it("resolves glm-5.3 / glm-5.3-flash by default and through the canonical vars", () => {
+    expect(resolveCodingModel(env)).toBe("glm-5.3");
+    expect(resolveCodingModel({ ...env, ZAI_CODING_MODEL: undefined } as unknown as Env)).toBe("glm-5.3");
+    expect(resolveCodingMultimodalModel(env)).toBe("glm-5.3-flash");
+    expect(
+      resolveCodingMultimodalModel({ ...env, ZAI_MULTIMODAL_MODEL: undefined } as unknown as Env)
+    ).toBe("glm-5.3-flash");
+    // The vars are the ONLY model seam — there is no alternate provider that
+    // could carry a different model.
+    expect(resolveCodingModel({ ...env, ZAI_CODING_MODEL: "glm-5.3" } as unknown as Env)).toBe("glm-5.3");
   });
-
-  it("routes every vision leg to the canonical model — no glm-4v path", () => {
-    const productionLike = {
-      ...env,
-      VISION_PRIMARY_PROVIDER: "zhipu",
-      VISION_FALLBACK_PROVIDER: "ai-gateway",
-    } as unknown as Env;
-    const routes = resolveVisionProviderChain(productionLike);
-    expect(routes.length).toBeGreaterThan(0);
-    for (const route of routes) {
-      expect(route.model).toBe("glm-5.3-flash");
-    }
-    expect(JSON.stringify(routes)).not.toContain("glm-4v");
-
-    // Minimal environment: canonical primary provider and model still apply.
-    const minimal = resolveVisionProviderChain({ ...env, VISION_PRIMARY_PROVIDER: undefined, VISION_FALLBACK_PROVIDER: undefined } as unknown as Env);
-    expect(minimal).toEqual([{ provider: "zhipu", model: "glm-5.3-flash" }]);
-  });
 });
 
-describe("gateway request routing", () => {
-  it("sends glm-5.3-flash on the ZAI/zhipu leg and records the provider-reported model", async () => {
-    const captured: Array<{ model?: string; authorization?: string }> = [];
-    fetchMock
-      .get("https://api.z.ai")
-      .intercept({ method: "POST", path: (path) => path.includes("chat/completions") })
-      .reply((options) => {
-        const body = typeof options.body === "string" ? JSON.parse(options.body) : {};
-        captured.push({ model: body.model, authorization: options.headers?.authorization });
-        return { statusCode: 200, data: chatResponse({ model: "glm-5.3-flash" }) };
-      });
+describe("Coding Plan credential routing", () => {
+  it("sends the routed model to the Coding Plan endpoint with GLM reasoning disabled", async () => {
+    const { captured, fetchImpl } = codingPlanFetch();
+    const result = await generateZaiCodingPlan(env, {
+      model: resolveCodingModel(env),
+      messages: [
+        { role: "system", content: "s" },
+        { role: "user", content: "u" },
+      ],
+      maxTokens: 256,
+      stream: false,
+      jsonMode: true,
+      label: "routing-test",
+      fetchImpl,
+    });
 
-    const zhipuEnv = { ...env, ZHIPU_API_KEY: "test-zhipu-key", PRIMARY_PROVIDER: "zhipu" } as unknown as Env;
-    const result = await generateWithGatewayDetailed(zhipuEnv, "system", "user", { build_id: "b" }, { jsonMode: true });
-
-    expect(result.provider).toBe("zhipu");
-    expect(result.model).toBe("glm-5.3-flash");
+    expect(result.provider).toBe("zai-coding-plan");
+    expect(result.model).toBe("glm-5.3");
     expect(captured).toHaveLength(1);
-    expect(captured[0].model).toBe("glm-5.3-flash");
+    expect(captured[0].url).toBe("https://api.z.ai/api/coding/paas/v4/chat/completions");
+    expect(captured[0].model).toBe("glm-5.3");
+    expect(captured[0].thinking).toEqual({ type: "disabled" });
+    expect(captured[0].maxTokens).toBe(256);
+    expect(captured[0].authorization).toMatch(/^Bearer /);
   });
 
-  it("prefers the provider-reported model identity over the requested label", async () => {
-    // The test env carries no ZHIPU_API_KEY, so the chain resolves to the
-    // Cloudflare AI Gateway compat leg serving the canonical model.
-    fetchMock
-      .get(GATEWAY_ORIGIN)
-      .intercept({ method: "POST", path: (path) => path.includes("compat") })
-      .reply(200, chatResponse({ model: "glm-5.3-flash" }));
+  it("prefers the canonical ZAI_CODING_API_KEY credential over the legacy ZHIPU_API_KEY name", async () => {
+    const { captured, fetchImpl } = codingPlanFetch();
+    const bothKeysEnv = {
+      ...env,
+      ZAI_CODING_API_KEY: "canonical-coding-plan-key",
+      ZHIPU_API_KEY: "legacy-zhipu-name",
+    } as unknown as Env;
 
-    const result = await generateWithGatewayDetailed(env, "system", "user", { build_id: "b" }, { jsonMode: true });
-    expect(result.provider).toBe("ai-gateway");
-    expect(result.model).toBe("glm-5.3-flash");
+    await generateZaiCodingPlan(bothKeysEnv, {
+      model: "glm-5.3",
+      messages: [{ role: "user", content: "u" }],
+      maxTokens: 16,
+      stream: false,
+      label: "credential-preference-test",
+      fetchImpl,
+    });
+
+    expect(captured).toHaveLength(1);
+    // The canonical secret wins — asserted by NAME shape, never by printing
+    // any real credential (these are fixture values).
+    expect(captured[0].authorization).toBe("Bearer canonical-coding-plan-key");
   });
 
-  it("fails closed when the canonical model is unavailable — never silently substitutes another model", async () => {
-    const capturedModels: string[] = [];
-    // One provider only: the AI Gateway compat leg alone (no ZHIPU key).
-    // 1 attempt + 3 bounded retries, each served by a one-shot interceptor.
-    for (let i = 0; i < 4; i++) {
-      fetchMock
-        .get(GATEWAY_ORIGIN)
-        .intercept({ method: "POST", path: () => true })
-        .reply((options) => {
-          const body = typeof options.body === "string" ? JSON.parse(options.body) : {};
-          capturedModels.push(body.model);
-          return { statusCode: 500, data: "model unavailable" };
-        });
-    }
+  it("still serves the sandbox reality: the legacy ZHIPU_API_KEY name alone is accepted", async () => {
+    const { captured, fetchImpl } = codingPlanFetch();
+    const legacyOnlyEnv = {
+      ...env,
+      ZAI_CODING_API_KEY: undefined,
+      ZHIPU_API_KEY: "legacy-zhipu-name",
+    } as unknown as Env;
 
+    const result = await generateZaiCodingPlan(legacyOnlyEnv, {
+      model: "glm-5.3-flash",
+      messages: [{ role: "user", content: "u" }],
+      maxTokens: 16,
+      stream: false,
+      label: "legacy-credential-test",
+      fetchImpl,
+    });
+
+    expect(result.provider).toBe("zai-coding-plan");
+    expect(captured).toHaveLength(1);
+    expect(captured[0].authorization).toBe("Bearer legacy-zhipu-name");
+  });
+
+  it("classifies output exhaustion as OUTPUT_EXHAUSTED — never retried, never substituted", async () => {
+    const { captured, fetchImpl } = codingPlanFetch({ finishReason: "length", content: "partial" });
     await expect(
-      generateWithGatewayDetailed(env, "system", "user", { build_id: "b" }, { jsonMode: true })
-    ).rejects.toThrow();
-    expect(capturedModels).toHaveLength(4);
-    for (const model of capturedModels) expect(model).toBe("glm-5.3-flash");
+      generateZaiCodingPlan(env, {
+        model: "glm-5.3",
+        messages: [{ role: "user", content: "u" }],
+        maxTokens: 8,
+        stream: false,
+        label: "exhaustion-test",
+        fetchImpl,
+      })
+    ).rejects.toBeInstanceOf(ZaiCodingPlanOutputExhaustedError);
+    expect(captured).toHaveLength(1);
   });
 });
 
-describe("AI-stage provenance records the canonical model", () => {
-  it("persists glm-5.3-flash on the ai_stage_runs row through the default generate seam", async () => {
-    fetchMock
-      .get(GATEWAY_ORIGIN)
-      .intercept({ method: "POST", path: (path) => path.includes("compat") })
-      .reply(200, chatResponse({ model: "glm-5.3-flash", content: "{\"ok\":true}" }));
-
+describe("AI-stage provenance records the routed Coding Plan identity", () => {
+  it("persists the stage seam's provider and model on the ai_stage_runs row", async () => {
     const started = await startSiteGeneration(env, {
       payload: {
         buildMode: "REFERENCE_BOUND",
@@ -149,17 +181,23 @@ describe("AI-stage provenance records the canonical model", () => {
       buildId: created.buildId,
       buildVersionId: created.buildVersionId,
       buildVersionNumber: 1,
+      generate: async () => ({
+        content: '{"ok":true}',
+        provider: "zai-coding-plan",
+        model: resolveCodingModel(env),
+        tokenUsage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 },
+      }),
     });
 
     expect(run.value).toEqual({ ok: true });
-    expect(run.provenance.model).toBe("glm-5.3-flash");
+    expect(run.provenance.model).toBe("glm-5.3");
     const rows = await env.DB.prepare(
       "SELECT model, provider FROM ai_stage_runs WHERE run_id = ? ORDER BY attempt"
     )
       .bind(run.runId)
       .all<{ model: string; provider: string }>();
     expect(rows.results).toHaveLength(1);
-    expect(rows.results[0].model).toBe("glm-5.3-flash");
-    expect(rows.results[0].provider).toBe("ai-gateway");
+    expect(rows.results[0].model).toBe("glm-5.3");
+    expect(rows.results[0].provider).toBe("zai-coding-plan");
   });
 });

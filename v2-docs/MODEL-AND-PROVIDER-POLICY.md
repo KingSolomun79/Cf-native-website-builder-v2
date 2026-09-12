@@ -62,6 +62,13 @@ streaming experiments, and all single/dual-call whole-site output envelopes
 are retired from the canonical path. Their experiment reports and branches
 remain as evidence. The Kimi branch was never created and must not be.
 
+**Physical retirement (2026-09-12):** the legacy seams themselves were deleted from
+the repository — `src/lib/ai-gateway.ts` (Cloudflare AI Gateway / OpenRouter /
+provider chain), `src/lib/ai-streaming.ts` (Z.AI General API + Workers AI streaming
+transports), the benchmark driver route/script, and their env/secret surfaces. The
+Coding Plan is not merely preferred; NO alternate provider path exists in source.
+`scripts/verify-llm-model-routing.mjs` fails the build if any of them reappear.
+
 ## Production prerequisites (supersedes the Workers AI binding prerequisite)
 
 1. `KIE_MODEL`: `nano-banana-2-lite` (image model — unchanged policy).

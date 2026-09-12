@@ -14,7 +14,6 @@
 import type { TSchema } from "@sinclair/typebox";
 import { Value } from "@sinclair/typebox/value";
 import type { Env } from "../env.d";
-import { generateWithGatewayDetailed, repairTruncatedJson } from "../lib/ai-gateway";
 import { putImmutableObject } from "../lib/assets";
 import { generateId, nowIso } from "../lib/crypto";
 import { aiStageArtifactKey } from "./artifact-keys";
@@ -115,6 +114,48 @@ export class AiStageFileInvalidError extends Error {
 }
 
 // ── Parsing ─────────────────────────────────────────────────────────────────
+
+// Deterministic truncated-JSON salvage (originally lib/ai-gateway; retained
+// here when the legacy multi-provider gateway was retired — 2026-09-12 —
+// because parseModelJson is the only consumer). Repairs a TRUNCATED JSON
+// object/array by closing the open brackets; never invents content.
+function repairTruncatedJson(raw: string): string {
+  let s = raw
+    .replace(/^```json?\s*/i, "")
+    .replace(/```\s*$/i, "")
+    .trim();
+
+  if (s.endsWith("}")) return s;
+
+  const lastBrace = Math.max(s.lastIndexOf("{"), s.lastIndexOf("["));
+  const lastQuote = s.lastIndexOf('"');
+
+  let cut = s.length;
+  if (lastQuote > lastBrace) {
+    cut = lastQuote;
+  } else if (lastBrace >= 0) {
+    cut = lastBrace + 1;
+  }
+  s = s.substring(0, cut);
+
+  const openBraces = (s.match(/\{/g) || []).length;
+  const closeBraces = (s.match(/\}/g) || []).length;
+  const openBrackets = (s.match(/\[/g) || []).length;
+  const closeBrackets = (s.match(/\]/g) || []).length;
+
+  if (s.endsWith('"')) {
+    s += '"';
+  } else if (s.endsWith(':')) {
+    s += '""';
+  } else if (s.endsWith(',')) {
+    s = s.slice(0, -1);
+  }
+
+  for (let i = 0; i < openBrackets - closeBrackets; i++) s += "]";
+  for (let i = 0; i < openBraces - closeBraces; i++) s += "}";
+
+  return s;
+}
 
 export function parseModelJson(raw: string): { ok: true; value: unknown } | { ok: false; error: string } {
   let text = raw.trim();
@@ -279,11 +320,13 @@ export interface RunSchemaValidatedAiStageOptions {
   buildVersionId: string;
   buildVersionNumber: number;
   inputArtifactIds?: string[];
-  model?: string;
-  temperature?: number;
-  maxTokens?: number;
   estimatedCostUsd?: number;
-  generate?: RawAiGenerate;
+  /** REQUIRED since the legacy gateway default was retired (2026-09-12):
+   *  every stage supplies its own transport seam — the Z.AI Coding Plan in
+   *  production (src/lib/zai-coding-plan.ts), a stub in tests. There is no
+   *  default provider path and no fallback. Model/temperature/token ceilings
+   *  are owned by the caller's seam, never re-specified here. */
+  generate: RawAiGenerate;
   /** Native transport-level structured output (schema-convergence brief §3):
    *  the supplied `generate` seam already carries the JSON Schema in the
    *  request's response_format, so the boundary must NOT duplicate it as
@@ -339,36 +382,7 @@ export async function runSchemaValidatedAiStage<T>(
   const inputArtifactIds = options.inputArtifactIds ?? [];
   const createdAt = nowIso();
 
-  const generate: RawAiGenerate =
-    options.generate ??
-    (async (systemPrompt, userPrompt, attempt) => {
-      const result = await generateWithGatewayDetailed(
-        env,
-        systemPrompt,
-        userPrompt,
-        {
-          build_id: options.buildId,
-          site_generation_id: options.siteGenerationId,
-          build_version_id: options.buildVersionId,
-          stage: options.stage,
-          prompt_id: composed.promptId,
-          prompt_version: composed.promptVersion,
-          attempt,
-        },
-        {
-          temperature: options.temperature,
-          maxTokens: options.maxTokens,
-          jsonMode: true,
-          model: options.model,
-        }
-      );
-      return {
-        content: result.response.choices[0]?.message?.content ?? "",
-        provider: result.provider,
-        model: result.model,
-        tokenUsage: result.response.usage,
-      };
-    });
+  const generate: RawAiGenerate = options.generate;
 
   const attempts: AiStageAttemptRecord[] = [];
   let accepted: { value: T; attempt: number; raw: RawAiGenerateResult } | null = null;

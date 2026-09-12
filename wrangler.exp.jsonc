@@ -1,17 +1,26 @@
 {
   "$schema": "./node_modules/wrangler/config-schema.json",
-  // EXPERIMENT BRANCH ONLY (experiment/simplified-design-pipeline).
-  // Dedicated experimental runtime for the SIMPLE design pipeline live
-  // benchmark (spec sections 17-18). Deploy with:
+  // SANDBOX / EXPERIMENTAL RUNTIME (originally stood up for the SIMPLE design
+  // pipeline experiment; now the durable V2 sandbox). Deploy with:
   //   CLOUDFLARE_ACCOUNT_ID=c1c0f6b100d55a09ce6a7a3121a19224 \
   //     npx wrangler deploy -c wrangler.exp.jsonc
   // It reuses the operator's dormant sandbox Worker name (last deployed
   // 2026-08-25, V1-era) so the existing provider Worker secrets
-  // (ZHIPU_API_KEY / KIE_API_KEY / CF_AIG_TOKEN / CF_DEPLOY_API_TOKEN /
-  // WEBHOOK_SECRET) carry over WITHOUT any secret ever leaving the platform.
-  // Data resources are FRESH and experimental-only: migration 0035 is applied
-  // to THIS D1 only, never to production website_factory_v2.
-  // NEVER deploy this config's bindings to cf-website-factory-v2 (spec 74-75).
+  // (ZHIPU_API_KEY / KIE_API_KEY / CF_DEPLOY_API_TOKEN / WEBHOOK_SECRET)
+  // carry over WITHOUT any secret ever leaving the platform.
+  //
+  // RESOURCE ISOLATION (post-rollout hardening, 2026-09-12): every
+  // environment-sensitive Cloudflare resource name here is DISTINCT from the
+  // production config (wrangler.jsonc) — Worker name, D1 database, R2 bucket
+  // and especially the WORKFLOW RESOURCE NAME. A full `wrangler deploy`
+  // associates the named Workflow resource with the Worker being deployed,
+  // so a shared workflow name lets one environment's deploy steal the other
+  // environment's Workflow (observed live during the production rollout:
+  // sandbox deploys left production instances executing against sandbox
+  // bindings). The Worker-level BINDING name (WEBSITE_BUILD_WORKFLOW) may be
+  // identical — it is scoped inside each Worker. Enforced by
+  // scripts/verify-resource-isolation.mjs, which runs as part of `npm test`.
+  // See v2-docs/CLOUDFLARE-RESOURCE-ISOLATION-RUNBOOK.md.
   "name": "cf-website-factory-sandbox",
   "main": "src/index.ts",
   "compatibility_date": "2026-08-04",
@@ -42,7 +51,11 @@
   ],
   "workflows": [
     {
-      "name": "website-build-workflow",
+      // Deliberately NOT website-build-workflow: that resource belongs to the
+      // production Worker (cf-website-factory-v2). A shared name let a sandbox
+      // deploy capture production's Workflow and route its instances to
+      // sandbox bindings (proven during the 2026-09-12 production rollout).
+      "name": "website-build-workflow-sandbox",
       "binding": "WEBSITE_BUILD_WORKFLOW",
       "class_name": "WebsiteBuildWorkflow"
     }
@@ -61,11 +74,6 @@
   "images": {
     "binding": "IMAGES"
   },
-  // TRANSPORT ITERATION (§16): Workers AI binding for the experiment-only
-  // alternate transport @cf/zai-org/glm-5.3-flash. NEVER production config.
-  "ai": {
-    "binding": "AI"
-  },
   "observability": {
     "logs": {
       "enabled": true,
@@ -77,30 +85,28 @@
   },
   "vars": {
     "CF_ACCOUNT_ID": "c1c0f6b100d55a09ce6a7a3121a19224",
-    "CF_AI_GATEWAY_ID": "website-factory",
     "PUBLIC_APP_URL": "https://cf-website-factory-sandbox.wazibizwebsites.workers.dev",
     "WAZIBIZ_SENDER_EMAIL": "notifications@wazibiz.ke",
     "KIE_API_URL": "https://api.kie.ai",
     "KIE_MODEL": "nano-banana-2-lite",
     "KIE_POLL_INTERVAL_MS": "30000",
     "KIE_ATTEMPT_TIMEOUT_MS": "900000",
-    "ZHIPU_API_URL": "https://api.z.ai/api/coding/paas/v4",
-    "ZHIPU_GATEWAY_PROVIDER": "custom-zhipu",
-    "LLM_MODEL": "glm-5.3-flash",
-    "PRIMARY_PROVIDER": "zhipu",
-    "DESIGN_PIPELINE_VERSION": "simple_blueprint_v1",
-    "VISION_PRIMARY_PROVIDER": "zhipu",
-    "VISION_FALLBACK_PROVIDER": "ai-gateway",
+    // ZAI GLM CODING PLAN (operator GO 2026-09-11): the ONE LLM provider.
+    // The Coding Plan key still rides the retained ZHIPU_API_KEY secret name
+    // on this sandbox; production sets ZAI_CODING_API_KEY explicitly. The
+    // source-level fallback (src/lib/zai-coding-plan.ts apiKeyOf) stays ONLY
+    // until this sandbox is canonicalized onto ZAI_CODING_API_KEY — then the
+    // fallback is removed from source.
+    "ZAI_CODING_BASE_URL": "https://api.z.ai/api/coding/paas/v4",
+    "ZAI_CODING_MODEL": "glm-5.3",
+    "ZAI_MULTIMODAL_MODEL": "glm-5.3-flash",
+    // Visual-input preparation bounds (shared with production; consumed by
+    // src/domain/stage-execution.ts and src/lib/vision-input.ts).
     "VISION_REQUEST_TIMEOUT_MS": "120000",
     "VISION_MAX_ATTEMPTS_PER_PROVIDER": "2",
     "VISION_RETRY_DELAY_MS": "500",
     "VISION_INPUT_MAX_BYTES": "4194304",
     "VISION_INPUT_MAX_WIDTH": "1920",
-    "VISION_INPUT_MAX_HEIGHT": "12000",
-    "EXP_BENCHMARK_DRIVER": "1",
-    // ZAI GLM CODING PLAN (operator GO 2026-09-11): the ONE LLM provider.
-    // The Coding Plan key rides the retained ZHIPU_API_KEY secret name on
-    // this sandbox; production sets ZAI_CODING_API_KEY explicitly.
-    "ZAI_CODING_BASE_URL": "https://api.z.ai/api/coding/paas/v4"
+    "VISION_INPUT_MAX_HEIGHT": "12000"
   }
 }

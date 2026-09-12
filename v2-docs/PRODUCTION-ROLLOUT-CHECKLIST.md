@@ -33,7 +33,9 @@ the 2026-09-11 production-rollout GO from main `4127500`).
 ### Bindings
 
 - No Workers AI binding (`"ai"`) in the production config — not a prerequisite.
-- Benchmark driver: `EXP_BENCHMARK_DRIVER` absent → route 404s in production.
+- Benchmark driver: RETIRED (2026-09-12 post-rollout hardening) — the route, its driver
+  script and the `EXP_BENCHMARK_DRIVER`/`EXP_BENCHMARK_SECRET` switches no longer exist;
+  `scripts/verify-llm-model-routing.mjs` fails if any of them reappear.
 
 ### Builder
 
@@ -69,8 +71,11 @@ the 2026-09-11 production-rollout GO from main `4127500`).
    real operator-flow `REFERENCE_BOUND` Site Generation to Release Ready.
    No auto-publication.
 
-## Post-rollout cleanup (separate task — never in the deploy commit)
+## Post-rollout cleanup (DONE 2026-09-12, chore/v2-post-rollout-hardening)
 
-Retire the experiment benchmark driver, delete the dead `ai-gateway.ts` /
-`ai-streaming.ts` provider seams, drop legacy `Env` fields, remove remaining
-experimental transport code.
+The experiment benchmark driver was retired (route + script + switches removed), the
+dead `ai-gateway.ts` / `ai-streaming.ts` provider seams and legacy `Env` fields were
+deleted, and the sandbox Workflow resource was isolated as
+`website-build-workflow-sandbox` (see v2-docs/CLOUDFLARE-RESOURCE-ISOLATION-RUNBOOK.md).
+Static gates (`verify-llm-model-routing.mjs`, `verify-resource-isolation.mjs`) keep the
+retirement and the production/sandbox resource split permanent.

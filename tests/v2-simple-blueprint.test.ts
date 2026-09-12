@@ -6,7 +6,7 @@ import { describe, expect, it } from "vitest";
 import { env as providedEnv } from "cloudflare:test";
 import type { Env } from "../src/env.d";
 import {
-  DESIGN_BLUEPRINT_NATIVE_JSON_SCHEMA,
+
   DESIGN_BLUEPRINT_SCHEMA_VERSION,
   DesignBlueprintSchema,
   evaluateBlueprintQualityGate,
@@ -156,7 +156,6 @@ describe("design-blueprint/1 schema-convergence amendments (brief sections 3-12)
     const result = validateDesignBlueprint(withFacts);
     expect(result.valid).toBe(false);
     if (!result.valid) expect(result.errors).toContain("businessFactSheet");
-    expect(DESIGN_BLUEPRINT_NATIVE_JSON_SCHEMA.name).toBe("design-blueprint");
   });
 });
 

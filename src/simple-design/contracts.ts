@@ -333,18 +333,6 @@ export function validateDesignBlueprint(value: unknown): { valid: true; value: D
   return { valid: true, value: blueprint };
 }
 
-// Workers AI native structured output (schema-convergence brief §3): the
-// blueprint's JSON Schema in the provider's OpenAI-style wrapper. Wrapper
-// shape verified against `wrangler ai models schema @cf/zai-org/glm-5.3-flash`
-// (response_format.json_schema: { name (required), schema, description?,
-// strict? }). The JSON round-trip strips TypeBox symbol metadata so the
-// payload is plain JSON Schema.
-export const DESIGN_BLUEPRINT_NATIVE_JSON_SCHEMA = {
-  name: "design-blueprint",
-  description: "A complete design-blueprint/1 website design document.",
-  schema: JSON.parse(JSON.stringify(DesignBlueprintSchema)) as Record<string, unknown>,
-} as const;
-
 // Deterministic blueprint quality gate (spec section 30): SMALL, structural
 // checks only. No identity cardinality, no trait obligations, no region
 // coverage. The schema already enforces the counts; these are the human-audit
@@ -815,13 +803,6 @@ export const DesignBlueprintV2Schema = Type.Object(
   { additionalProperties: false }
 );
 export type DesignBlueprintV2 = Static<typeof DesignBlueprintV2Schema>;
-
-// Workers AI native structured output for v2 (same wrapper shape as v1).
-export const DESIGN_BLUEPRINT_V2_NATIVE_JSON_SCHEMA = {
-  name: "design-blueprint",
-  description: "A complete design-blueprint/2 website design document.",
-  schema: JSON.parse(JSON.stringify(DesignBlueprintV2Schema)) as Record<string, unknown>,
-} as const;
 
 export function validateDesignBlueprintV2(value: unknown): { valid: true; value: DesignBlueprintV2 } | { valid: false; errors: string } {
   const candidate = value as unknown;

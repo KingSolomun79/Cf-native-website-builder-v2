@@ -23,8 +23,6 @@ export interface Env {
   IMAGES: ImagesBinding;
 
   CF_ACCOUNT_ID: string;
-  CF_AI_GATEWAY_ID: string;
-  CF_AIG_TOKEN: string;
   CF_DEPLOY_API_TOKEN: string;
   CF_API_EMAIL?: string;
   CF_GLOBAL_API_KEY?: string;
@@ -43,53 +41,26 @@ export interface Env {
   KIE_ATTEMPT_TIMEOUT_MS?: string;
   WEBHOOK_SECRET: string;
 
-  ZHIPU_API_KEY?: string;
-  ZHIPU_API_URL?: string;
   // ZAI GLM Coding Plan — the ONE LLM provider (operator GO 2026-09-11).
   // Base URL defaults to the Coding Plan endpoint; the key is the Coding
-  // Plan credential (ZHIPU_API_KEY is the accepted legacy name on the
-  // sandbox). NEVER the general API (/api/paas/v4).
+  // Plan credential. NEVER the general API (/api/paas/v4).
   ZAI_CODING_BASE_URL?: string;
   ZAI_CODING_API_KEY?: string;
   ZAI_CODING_MODEL?: string;
   ZAI_MULTIMODAL_MODEL?: string;
-  ZHIPU_GATEWAY_PROVIDER?: string;
-  PRIMARY_PROVIDER?: string;
-  // One canonical LLM model for every V2 textual/multimodal call (issue
-  // #30). Version-controlled default: src/lib/ai-gateway.ts
-  // CANONICAL_LLM_MODEL. Per-provider/per-stage model names are retired;
-  // provider failover must keep serving this exact model.
-  LLM_MODEL?: string;
-
-  // DESIGN_PIPELINE_VERSION was removed with the legacy design pipeline
-  // (cleanup 2026-09-10). Any residual value in a wrangler config is inert.
-
-  // EXPERIMENT BRANCH ONLY: live benchmark driver switches (never set in the
-  // production config). EXP_BENCHMARK_DRIVER="1" enables the driver route;
-  // EXP_BENCHMARK_SECRET (optional) overrides the HMAC secret it accepts.
-  EXP_BENCHMARK_DRIVER?: string;
-  EXP_BENCHMARK_SECRET?: string;
-
-  // EXPERIMENT TRANSPORT ITERATION ONLY (sections 3-13 of the operator brief):
-  // Z.AI GENERAL API streaming for SIMPLE large-output calls. The endpoint
-  // base defaults to https://api.z.ai/api/paas/v4; SIMPLE_STREAMING_TRANSPORT
-  // = "zai_general_stream" routes SIMPLE default seams through the streaming
-  // boundary (src/lib/ai-streaming.ts). Never set in the production config.
-  ZHIPU_GENERAL_API_URL?: string;
-  SIMPLE_STREAMING_TRANSPORT?: string;
-  SIMPLE_STREAM_STALL_TIMEOUT_MS?: string;
+  // TEMPORARY (post-rollout hardening 2026-09-12): ZHIPU_API_KEY is accepted
+  // by src/lib/zai-coding-plan.ts apiKeyOf ONLY as the configured Coding
+  // Plan credential name on environments that predate the rename (the
+  // sandbox). The canonical secret is ZAI_CODING_API_KEY; once the sandbox
+  // carries it, this legacy name and the source fallback are removed.
+  ZHIPU_API_KEY?: string;
+  // Coding Plan transport cap for ONE streamed/synchronous completion
+  // (consumed by src/lib/zai-coding-plan.ts maxDurationMs). Defaults to
+  // 600_000ms when unset.
   SIMPLE_STREAM_MAX_DURATION_MS?: string;
-  // TRANSPORT ITERATION (§16): Workers AI binding for the experiment-only
-  // alternate transport (@cf/zai-org/glm-5.3-flash). Optional at type level;
-  // bound only in wrangler.exp.jsonc.
-  AI?: Ai;
 
-  // OpenRouter leg (operator decision 2026-09-02): optional — ZAI is primary
-  // and the Cloudflare AI Gateway is the working fallback; provider chains
-  // are key-driven, so an absent key skips the OpenRouter leg without error.
-  OPENROUTER_API_KEY?: string;
-  VISION_PRIMARY_PROVIDER?: string;
-  VISION_FALLBACK_PROVIDER?: string;
+  // Visual-input preparation bounds for capture/analysis preprocessing
+  // (consumed by src/domain/stage-execution.ts and src/lib/vision-input.ts).
   VISION_REQUEST_TIMEOUT_MS?: string;
   VISION_MAX_ATTEMPTS_PER_PROVIDER?: string;
   VISION_RETRY_DELAY_MS?: string;

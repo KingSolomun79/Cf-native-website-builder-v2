@@ -274,9 +274,8 @@ export async function runSimpleSiteRepairStage(env: Env, input: RunSimpleSiteRep
     buildVersionId: input.buildVersionId,
     buildVersionNumber: input.buildVersionNumber,
     inputArtifactIds: [referenceFullPage.sha256],
-    maxTokens: 32000,
     // The pinned SIMPLE seam (or the injected test seam) is always present —
-    // the legacy gateway default is unreachable from the SIMPLE repair.
+    // there is no default provider path anywhere in the boundary.
     generate,
   });
 
