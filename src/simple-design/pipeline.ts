@@ -39,7 +39,9 @@ import {
   type DesignBlueprintV2,
   type QaPackage,
   type SiteBundle,
+  type VisualQaReport,
 } from "./contracts";
+import { AiStageSchemaInvalidError } from "../domain/ai-boundary";
 import { runSimpleDesignBlueprintStage, SimpleDesignBlueprintError } from "./design-blueprint";
 import { runSimpleWebsiteBuilderStage, SimpleWebsiteBuilderError } from "./website-builder";
 import type { SimpleBuilderVisualInput } from "./contracts";
@@ -415,21 +417,45 @@ export async function runSimpleBuildPipeline(
         // ONE visual QA call per evaluation — only when a candidate render
         // exists to judge (a preflight-failed candidate is judged
         // deterministically; its repair clears the technical findings first).
-        const visual =
-          candidateDesktop && !existingPkg
-            ? (await runSimpleVisualQaStage(env, {
-                siteGenerationId: ctx.siteGenerationId,
-                buildId: ctx.buildId,
-                buildVersionId: ctx.buildVersionId,
-                buildVersionNumber: ctx.buildVersionNumber,
-                blueprint,
-                referenceVisualInputs: visualInputs,
-                candidateDesktopR2Key: candidateDesktop,
-                ...(candidateMobile ? { candidateMobileR2Key: candidateMobile } : {}),
-                ...(deps.visionGenerate ? { generate: deps.visionGenerate } : {}),
-                ...(deps.generate ? { generate: deps.generate } : {}),
-              })).report
-            : existingPkg?.value.visual ?? null;
+        let visual: VisualQaReport | null = null;
+        let visualQaEvaluationFailed = false;
+        if (candidateDesktop && !existingPkg) {
+          try {
+            visual = (await runSimpleVisualQaStage(env, {
+              siteGenerationId: ctx.siteGenerationId,
+              buildId: ctx.buildId,
+              buildVersionId: ctx.buildVersionId,
+              buildVersionNumber: ctx.buildVersionNumber,
+              blueprint,
+              referenceVisualInputs: visualInputs,
+              candidateDesktopR2Key: candidateDesktop,
+              ...(candidateMobile ? { candidateMobileR2Key: candidateMobile } : {}),
+              ...(deps.visionGenerate ? { generate: deps.visionGenerate } : {}),
+              ...(deps.generate ? { generate: deps.generate } : {}),
+            })).report;
+          } catch (error) {
+            // A visual-QA schema failure means this evaluation cannot judge
+            // the candidate. The candidate is NOT silently passed: the
+            // version evaluates not-release-ready and the ONE repair's
+            // re-evaluation gives the verdict a fresh chance — never an
+            // engine retry and never an instance-killing escape (live
+            // evidence 2026-09-11).
+            if (!(error instanceof AiStageSchemaInvalidError)) throw error;
+            visualQaEvaluationFailed = true;
+          }
+        } else {
+          visual = existingPkg?.value.visual ?? null;
+        }
+        if (visualQaEvaluationFailed) {
+          await appendBuildWorkflowEvent(env, {
+            buildId: ctx.buildId,
+            buildVersionId: ctx.buildVersionId,
+            fromState: "QA_EVIDENCE",
+            toState: "QA",
+            stage: "simple_visual_qa",
+            detail: "VISUAL_QA_SCHEMA_INVALID: the visual report failed schema validation twice; the version evaluates not-release-ready",
+          });
+        }
 
         const pkg = buildSimpleQaPackage({
           buildVersionNumber: ctx.buildVersionNumber,

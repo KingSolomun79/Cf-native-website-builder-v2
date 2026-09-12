@@ -74,7 +74,10 @@ export async function runSimpleVisualQaStage(env: Env, input: RunSimpleVisualQaI
       env,
       images,
       { buildId: input.buildId, stage: "simple-visual-qa", buildVersionNumber: input.buildVersionNumber },
-      { maxTokens: 4096 }
+      // Strict report schema — pinned below the provider default like the
+      // blueprint stage (temp 0.7 produced schema-invalid output twice, live
+      // evidence 2026-09-11).
+      { maxTokens: 4096, temperature: 0.3 }
     );
 
   const run = await runSchemaValidatedAiStage<unknown>(env, {
