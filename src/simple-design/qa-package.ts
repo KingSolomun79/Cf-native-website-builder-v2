@@ -19,7 +19,8 @@ export interface SimpleQaPackageInput {
   buildVersionNumber: number;
   visual: VisualQaReport | null;
   deterministic: BundleQaResult;
-  referenceScreenshotKeys: { desktop: string; mobile?: string };
+  /** Null for ORIGINAL_DESIGN — no Reference exists (issue #24). */
+  referenceScreenshotKeys: { desktop: string; mobile?: string } | null;
   candidateScreenshotKeys: { desktop: string; mobile?: string };
 }
 

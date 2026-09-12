@@ -1,14 +1,17 @@
-// V2 build pipeline entry (legacy-cleanup C4/C5): REFERENCE_BOUND builds run
-// the SIMPLE design pipeline (src/simple-design/pipeline.ts) — Reference
-// Capture → Design Blueprint → Nano Banana images → Website Builder →
-// Technical/Truth/Visual QA → optional ONE Repair → Release Ready.
+// V2 build pipeline entry (legacy-cleanup C4/C5; ORIGINAL_DESIGN enabled by
+// issue #24): both Build Modes run the SIMPLE design pipeline
+// (src/simple-design/pipeline.ts) — the ONLY design path.
+//
+//   REFERENCE_BOUND: Reference Capture → Design Blueprint → Nano Banana
+//     images → Website Builder → Technical/Truth/Visual QA → optional ONE
+//     Repair → Release Ready.
+//   ORIGINAL_DESIGN: the SAME chain with Business Facts + Creative Direction
+//     as the design origin — Reference-only stages are skipped, never faked.
 //
 // The legacy COMPLEX design chain (Reference Analysis → Visual Blueprint →
 // Implementation Contract → realization/craft-repair → Fix Coordinator) was
-// removed; there is no runtime pipeline selector any more. ORIGINAL_DESIGN is
-// a recognized Build Mode whose runtime is explicitly NOT ENABLED (see
-// ./original-design-lock): it terminates HUMAN_REVIEW_REQUIRED here and is
-// refused at the lifecycle boundary — never silently routed to REFERENCE_BOUND.
+// removed; there is no runtime pipeline selector. There is no fallback in
+// either direction between the two modes.
 import type { Env } from "../env.d";
 import { appendBuildWorkflowEvent } from "./lifecycle";
 import type { ReferenceCaptureFn } from "./reference-intake";
@@ -70,17 +73,20 @@ export async function runBuildPipeline(
   const generation = await env.DB.prepare("SELECT build_mode FROM site_generations WHERE id = ?")
     .bind(input.siteGenerationId)
     .first<{ build_mode: string }>();
-  if (generation?.build_mode !== "REFERENCE_BOUND") {
+  // Defensive only: the Onboarding Submission schema admits exactly
+  // REFERENCE_BOUND and ORIGINAL_DESIGN. An unknown mode refuses — it is
+  // never silently routed anywhere.
+  if (generation?.build_mode !== "REFERENCE_BOUND" && generation?.build_mode !== "ORIGINAL_DESIGN") {
     await appendBuildWorkflowEvent(env, {
       buildId: input.buildId,
       fromState: "INTAKE_READY",
       toState: "HUMAN_REVIEW_REQUIRED",
       stage: "intake",
-      detail: `Build Mode '${generation?.build_mode ?? "unknown"}' is recognized but NOT ENABLED (ORIGINAL_DESIGN's SIMPLE implementation is deferred; REFERENCE_BOUND is the only enabled design path)`,
+      detail: `Build Mode '${generation?.build_mode ?? "unknown"}' is not a recognized Build Mode`,
     });
     return {
       terminal: "HUMAN_REVIEW_REQUIRED",
-      reasons: [`Build Mode '${generation?.build_mode ?? "unknown"}' is recognized but NOT ENABLED`],
+      reasons: [`Build Mode '${generation?.build_mode ?? "unknown"}' is not recognized`],
       siteGenerationId: input.siteGenerationId,
       siteId: "",
       buildId: input.buildId,

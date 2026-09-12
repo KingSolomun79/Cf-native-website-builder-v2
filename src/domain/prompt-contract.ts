@@ -26,8 +26,10 @@ export interface PromptManifestEntry {
 
 export type PromptStageKey =
   | "simple-design-blueprint"
+  | "simple-original-design-blueprint"
   | "simple-website-builder"
   | "simple-visual-qa"
+  | "simple-original-design-visual-qa"
   | "simple-site-repair";
 
 export const PROMPT_MANIFEST: Record<PromptStageKey, PromptManifestEntry> = {
@@ -38,6 +40,15 @@ export const PROMPT_MANIFEST: Record<PromptStageKey, PromptManifestEntry> = {
     promptId: "simple-design-blueprint",
     promptVersion: "v5",
     bodyFile: "simple/01-design-blueprint.md",
+  },
+  // v1 (issue #24, operator GO 2026-09-12): the ORIGINAL_DESIGN Blueprint —
+  // Business Facts + Creative Direction in, NO Reference attached. Outputs the
+  // SAME design-blueprint/2 schema as the reference mode, so all downstream
+  // code stays shared. The Creative Thesis lives in projectFrame.
+  "simple-original-design-blueprint": {
+    promptId: "simple-original-design-blueprint",
+    promptVersion: "v1",
+    bodyFile: "simple/05-original-design-blueprint.md",
   },
   // v8 (operator GO 2026-09-11, DOM-FIRST/CSS-LAST VISUAL FIDELITY): the SIX
   // calls reorder to home → about → services → contact → site.css → site.js.
@@ -62,6 +73,16 @@ export const PROMPT_MANIFEST: Record<PromptStageKey, PromptManifestEntry> = {
     promptId: "simple-visual-qa",
     promptVersion: "v2",
     bodyFile: "simple/03-visual-qa.md",
+  },
+  // v1 (issue #24, operator GO 2026-09-12): ORIGINAL_DESIGN visual QA —
+  // candidate renders judged against the Blueprint + Creative Direction, NO
+  // Reference screenshots. SAME output schema as simple-visual-qa (nine
+  // dimensions reinterpreted; distinctiveness explicitly graded), so the
+  // release-gate machinery is shared unchanged.
+  "simple-original-design-visual-qa": {
+    promptId: "simple-original-design-visual-qa",
+    promptVersion: "v1",
+    bodyFile: "simple/06-original-design-visual-qa.md",
   },
   "simple-site-repair": {
     promptId: "simple-site-repair",

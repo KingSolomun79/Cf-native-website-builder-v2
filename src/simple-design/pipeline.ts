@@ -1,7 +1,7 @@
 // The V2 design pipeline (canonical since the 2026-09 legacy cleanup): the
-// SIMPLE chain is the ONLY design path.
+// SIMPLE chain is the ONLY design path, for BOTH Build Modes (issue #24).
 //
-//
+//   REFERENCE_BOUND:
 //   reference capture (REUSED legacy intake)
 //   -> DESIGN BLUEPRINT      (ONE multimodal schema-validated call + deterministic gate)
 //   -> IMAGE GENERATION      (REUSED durable KIE machinery; blueprint slots + prompts)
@@ -11,6 +11,14 @@
 //   -> ONE REPAIR            (only if required; new immutable Build Version)
 //   -> final QA              (re-render + re-judge; NO second repair)
 //   -> RELEASE_READY | HUMAN_REVIEW_REQUIRED
+//
+//   ORIGINAL_DESIGN: the SAME chain from the blueprint stage onward. The
+//   Reference-only stages are SKIPPED (never faked): the Design Blueprint is
+//   invented from Business Facts + Creative Direction
+//   (simple-original-design-blueprint/v1, same design-blueprint/2 schema) and
+//   visual QA judges the candidate against the Blueprint + Creative Direction
+//   (simple-original-design-visual-qa/v1, same report schema). No fallback
+//   exists in either direction between the modes.
 //
 // Keep-list infrastructure reused unchanged: lifecycle/state, artifact store,
 // stage claims, retry containment, KIE budget gates, accepted image identity,
@@ -31,7 +39,13 @@ import { createProductionQaCapture } from "../domain/qa-capture";
 import { classifyStageFailure } from "../domain/stage-failure";
 import { getBuildStageArtifact, storeBuildStageArtifactIdempotent } from "../domain/stage-artifacts";
 import type { RawAiGenerate } from "../domain/ai-boundary";
-import type { BusinessFacts } from "../domain/lifecycle-schema";
+import type { BusinessFacts, BuildMode, OnboardingSubmissionPayload } from "../domain/lifecycle-schema";
+import {
+  creativeDirectionChecksum,
+  deriveCreativeDirection,
+  renderCreativeDirectionBrief,
+  type CreativeDirectionContext,
+} from "../domain/creative-direction";
 import {
   materializeAcceptedImageDescriptors,
   materializeBlueprintImageSlots,
@@ -137,20 +151,18 @@ export async function runSimpleBuildPipeline(
   const stepDo = deps.step ?? (async <T>(_name: string, fn: () => Promise<T>) => fn());
   const buildId =
     input.buildId ?? (await createInitialBuild(env, { siteGenerationId: input.siteGenerationId })).buildId;
-  const siteId = await env.DB.prepare("SELECT site_id FROM site_generations WHERE id = ?")
+  const generation = await env.DB.prepare(
+    "SELECT site_id, onboarding_submission_id, build_mode FROM site_generations WHERE id = ?"
+  )
     .bind(input.siteGenerationId)
-    .first<{ site_id: string }>()
+    .first<{ site_id: string; onboarding_submission_id: string; build_mode: BuildMode }>()
     .then((row) => {
       if (!row) throw new Error(`Site Generation ${input.siteGenerationId} not found`);
-      return row.site_id;
+      return row;
     });
-  const submissionId = await env.DB.prepare("SELECT onboarding_submission_id FROM site_generations WHERE id = ?")
-    .bind(input.siteGenerationId)
-    .first<{ onboarding_submission_id: string }>()
-    .then((row) => {
-      if (!row) throw new Error(`Site Generation ${input.siteGenerationId} not found`);
-      return row.onboarding_submission_id;
-    });
+  const siteId = generation.site_id;
+  const submissionId = generation.onboarding_submission_id;
+  const buildMode: BuildMode = generation.build_mode;
   const businessFactsRef = `onboarding-submission:${submissionId}#fact-snapshot`;
 
   const terminal = (
@@ -173,7 +185,11 @@ export async function runSimpleBuildPipeline(
   });
 
   try {
-    // ── Reference capture (REUSED legacy intake; idempotent frozen reuse) ──
+    // ── Design-origin intake (mode-conditional, issue #24) ────────────────
+    // REFERENCE_BOUND: the REUSED legacy intake with suitability/sufficiency
+    // gates. ORIGINAL_DESIGN: Reference-only stages are SKIPPED — no
+    // Reference, no fake empty artifacts; the frozen Onboarding Submission's
+    // Creative Direction is the design-intent authority.
     let version: { buildVersionId: string; buildVersionNumber: number } = await env.DB.prepare(
       "SELECT id, version_number FROM build_versions WHERE build_id = ? ORDER BY version_number DESC LIMIT 1"
     )
@@ -184,43 +200,77 @@ export async function runSimpleBuildPipeline(
         return { buildVersionId: row.id, buildVersionNumber: row.version_number };
       });
 
-    await stepDo("simple: reference capture", async () => {
-      await runReferenceIntake(env, {
-        siteGenerationId: input.siteGenerationId,
-        buildId,
-        buildVersionId: version.buildVersionId,
-        buildVersionNumber: version.buildVersionNumber,
-        capture: deps.capture,
-      });
-      return null;
-    });
-    const frozen = await getFrozenReferenceEvidence(env, input.siteGenerationId);
-    if (!frozen) throw new Error("frozen evidence package missing after intake");
-    if (frozen.suitability === "UNSUPPORTED") {
-      await appendBuildWorkflowEvent(env, {
-        buildId,
-        buildVersionId: version.buildVersionId,
-        fromState: "REFERENCE_CHECK",
-        toState: "HUMAN_REVIEW_REQUIRED",
-        stage: "simple_reference_capture",
-        detail: `UNSUPPORTED Reference: ${frozen.suitabilityReasons.join("; ").slice(0, 300)}`,
-      });
-      return terminal("HUMAN_REVIEW_REQUIRED", [`UNSUPPORTED Reference: ${frozen.suitabilityReasons.join("; ")}`]);
-    }
-    if (frozen.evidenceSufficiency.sufficiency === "INSUFFICIENT") {
-      const reason = `INSUFFICIENT_REFERENCE_EVIDENCE: ${frozen.evidenceSufficiency.reasons.join("; ")}`;
-      await appendBuildWorkflowEvent(env, {
-        buildId,
-        buildVersionId: version.buildVersionId,
-        fromState: "REFERENCE_EVIDENCE",
-        toState: "HUMAN_REVIEW_REQUIRED",
-        stage: "simple_reference_capture",
-        detail: reason.slice(0, 400),
-      });
-      return terminal("HUMAN_REVIEW_REQUIRED", [reason]);
-    }
+    // Non-null exactly for REFERENCE_BOUND; ORIGINAL_DESIGN has no Reference
+    // evidence and never records a fake one (GO §30).
+    let frozen: Awaited<ReturnType<typeof getFrozenReferenceEvidence>> = null;
+    let creativeContext: CreativeDirectionContext | null = null;
+    let creativeDirectionSha256: string | null = null;
 
     const facts = (await getEffectiveBusinessFacts(env, buildId)).facts;
+
+    if (buildMode === "REFERENCE_BOUND") {
+      await stepDo("simple: reference capture", async () => {
+        await runReferenceIntake(env, {
+          siteGenerationId: input.siteGenerationId,
+          buildId,
+          buildVersionId: version.buildVersionId,
+          buildVersionNumber: version.buildVersionNumber,
+          capture: deps.capture,
+        });
+        return null;
+      });
+      frozen = await getFrozenReferenceEvidence(env, input.siteGenerationId);
+      if (!frozen) throw new Error("frozen evidence package missing after intake");
+      if (frozen.suitability === "UNSUPPORTED") {
+        await appendBuildWorkflowEvent(env, {
+          buildId,
+          buildVersionId: version.buildVersionId,
+          fromState: "REFERENCE_CHECK",
+          toState: "HUMAN_REVIEW_REQUIRED",
+          stage: "simple_reference_capture",
+          detail: `UNSUPPORTED Reference: ${frozen.suitabilityReasons.join("; ").slice(0, 300)}`,
+        });
+        return terminal("HUMAN_REVIEW_REQUIRED", [`UNSUPPORTED Reference: ${frozen.suitabilityReasons.join("; ")}`]);
+      }
+      if (frozen.evidenceSufficiency.sufficiency === "INSUFFICIENT") {
+        const reason = `INSUFFICIENT_REFERENCE_EVIDENCE: ${frozen.evidenceSufficiency.reasons.join("; ")}`;
+        await appendBuildWorkflowEvent(env, {
+          buildId,
+          buildVersionId: version.buildVersionId,
+          fromState: "REFERENCE_EVIDENCE",
+          toState: "HUMAN_REVIEW_REQUIRED",
+          stage: "simple_reference_capture",
+          detail: reason.slice(0, 400),
+        });
+        return terminal("HUMAN_REVIEW_REQUIRED", [reason]);
+      }
+    } else {
+      await stepDo("simple: original design intake", async () => {
+        const submissionRow = await env.DB.prepare(
+          "SELECT payload_json FROM onboarding_submissions WHERE id = ?"
+        )
+          .bind(submissionId)
+          .first<{ payload_json: string }>();
+        if (!submissionRow) throw new Error(`Onboarding Submission ${submissionId} not found`);
+        const payload = JSON.parse(submissionRow.payload_json) as OnboardingSubmissionPayload;
+        if (payload.buildMode !== "ORIGINAL_DESIGN" || !payload.creativeDirection) {
+          // Frozen rows were validated at intake; this is a corruption guard,
+          // never a mode fallback.
+          throw new Error(`Onboarding Submission ${submissionId} does not carry ORIGINAL_DESIGN creative direction`);
+        }
+        creativeContext = deriveCreativeDirection({ creativeDirection: payload.creativeDirection, facts });
+        creativeDirectionSha256 = await creativeDirectionChecksum(payload.creativeDirection);
+        await appendBuildWorkflowEvent(env, {
+          buildId,
+          buildVersionId: version.buildVersionId,
+          fromState: "INTAKE_READY",
+          toState: "REFERENCE_CHECK",
+          stage: "original_design_intake",
+          detail: `buildMode=ORIGINAL_DESIGN; referenceEvidence=NOT_APPLICABLE; onboardingSubmission=${submissionId}; creativeDirectionSha256=${creativeDirectionSha256}`,
+        });
+        return null;
+      });
+    }
 
     // ── DESIGN BLUEPRINT (the ONE design-authority artifact) ───────────────
     const blueprintResult = await stepDo("simple: design blueprint", (): Promise<
@@ -243,8 +293,18 @@ export async function runSimpleBuildPipeline(
               ...(facts.businessType ? { type: facts.businessType } : {}),
               ...(facts.businessDescription ? { description: facts.businessDescription } : {}),
             },
-            ...(frozen.evidence.referenceUrl ? { referenceUrl: frozen.evidence.referenceUrl } : {}),
-            visualInputs: frozen.evidence.visualInputs ?? [],
+            ...(buildMode === "ORIGINAL_DESIGN"
+              ? {
+                  originalDesign: {
+                    creativeDirection: creativeContext!,
+                    creativeDirectionSha256: creativeDirectionSha256!,
+                    onboardingSubmissionId: submissionId,
+                  },
+                }
+              : {
+                  ...(frozen!.evidence.referenceUrl ? { referenceUrl: frozen!.evidence.referenceUrl } : {}),
+                  visualInputs: frozen!.evidence.visualInputs ?? [],
+                }),
             ...(deps.visionGenerate ? { generate: deps.visionGenerate } : {}),
             ...(deps.generate ? { generate: deps.generate } : {}),
           });
@@ -283,10 +343,13 @@ export async function runSimpleBuildPipeline(
     await appendBuildWorkflowEvent(env, {
       buildId,
       buildVersionId: version.buildVersionId,
-      fromState: "REFERENCE_EVIDENCE",
+      fromState: buildMode === "ORIGINAL_DESIGN" ? "REFERENCE_CHECK" : "REFERENCE_EVIDENCE",
       toState: "BLUEPRINT",
       stage: "simple_design_blueprint",
-      detail: `Design Blueprint produced (${blueprintResult.schemaVersion}: ${blueprint.designDna.length} DNA rules, ${imagePlan.length} materialized image slots incl. 4 page heroes, ${blueprint.acceptanceChecklist.length} acceptance conditions)`,
+      detail:
+        buildMode === "ORIGINAL_DESIGN"
+          ? `Original Design Blueprint produced (${blueprintResult.schemaVersion}: ${blueprint.designDna.length} DNA rules, ${imagePlan.length} materialized image slots incl. 4 page heroes, ${blueprint.acceptanceChecklist.length} acceptance conditions)`
+          : `Design Blueprint produced (${blueprintResult.schemaVersion}: ${blueprint.designDna.length} DNA rules, ${imagePlan.length} materialized image slots incl. 4 page heroes, ${blueprint.acceptanceChecklist.length} acceptance conditions)`,
     });
 
     // ── IMAGES (REUSED durable KIE machinery; blueprint is prompt authority)
@@ -318,7 +381,10 @@ export async function runSimpleBuildPipeline(
     // ── Build + QA + bounded ONE repair ─────────────────────────────────────
     const formServiceEndpoint = `${env.PUBLIC_APP_URL}/api/v2/forms/submit`;
     const siteFormId = `site:${siteId}`;
-    const visualInputs: SimpleBuilderVisualInput[] = frozen.evidence.visualInputs ?? [];
+    // The Builder is text-only in both modes; Reference visuals flow to visual
+    // QA and the repair only. ORIGINAL_DESIGN carries none (issue #24).
+    const visualInputs: SimpleBuilderVisualInput[] =
+      buildMode === "REFERENCE_BOUND" ? (frozen!.evidence.visualInputs ?? []) : [];
     let builderStrategy: SimplePipelineOutcome["builderStrategy"] = null;
 
     const assembleAndPreview = async (ctx: SimpleVersionContext, bundle: SiteBundle): Promise<AssembleOutcome | { preflightBlockers: { id: string; detail: string }[] }> => {
@@ -427,7 +493,11 @@ export async function runSimpleBuildPipeline(
               buildVersionId: ctx.buildVersionId,
               buildVersionNumber: ctx.buildVersionNumber,
               blueprint,
-              referenceVisualInputs: visualInputs,
+              // ORIGINAL_DESIGN: candidate-only judgement against the
+              // Blueprint + Creative Direction (no Reference attached).
+              ...(buildMode === "ORIGINAL_DESIGN" && creativeContext
+                ? { originalDesign: { creativeDirectionBrief: renderCreativeDirectionBrief(creativeContext) } }
+                : { referenceVisualInputs: visualInputs }),
               candidateDesktopR2Key: candidateDesktop,
               ...(candidateMobile ? { candidateMobileR2Key: candidateMobile } : {}),
               ...(deps.visionGenerate ? { generate: deps.visionGenerate } : {}),
@@ -461,12 +531,17 @@ export async function runSimpleBuildPipeline(
           buildVersionNumber: ctx.buildVersionNumber,
           visual,
           deterministic,
-          referenceScreenshotKeys: {
-            desktop: visualInputs.find((entry) => entry.kind === "full-page")?.artifact ?? frozen.canonicalScreenshotR2Key,
-            ...(visualInputs.find((entry) => /mobile/i.test(entry.kind))?.artifact
-              ? { mobile: visualInputs.find((entry) => /mobile/i.test(entry.kind))!.artifact }
-              : {}),
-          },
+          // ORIGINAL_DESIGN records NO reference identity — null, never a fake
+          // screenshot key (GO §30).
+          referenceScreenshotKeys:
+            buildMode === "REFERENCE_BOUND"
+              ? {
+                  desktop: visualInputs.find((entry) => entry.kind === "full-page")?.artifact ?? frozen!.canonicalScreenshotR2Key,
+                  ...(visualInputs.find((entry) => /mobile/i.test(entry.kind))?.artifact
+                    ? { mobile: visualInputs.find((entry) => /mobile/i.test(entry.kind))!.artifact }
+                    : {}),
+                }
+              : null,
           candidateScreenshotKeys: {
             desktop: candidateDesktop ?? "",
             ...(candidateMobile ? { mobile: candidateMobile } : {}),

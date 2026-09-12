@@ -176,6 +176,16 @@ export function createSimpleScripts(options: SimpleScriptsOptions = {}): SimpleP
       }
       return respond(simpleBlueprintFixture());
     }
+    // ORIGINAL_DESIGN blueprint (issue #24): same design-blueprint/2 fixture —
+    // both prompts emit the SAME schema.
+    if (user.includes("Invent the Original Design Blueprint")) {
+      if (options.blueprintFailsGate) {
+        const broken = simpleBlueprintFixture();
+        broken.designDna = broken.designDna.slice(0, 3); // 5-8 rule violated
+        return respond(broken);
+      }
+      return respond(simpleBlueprintFixture());
+    }
     // Builder file-realization calls (file-sized GO): each call returns ONE
     // file as RAW source — never JSON. The routed Builder model is full
     // GLM-5.3 (stage routing provenance).
@@ -236,6 +246,42 @@ export function createSimpleScripts(options: SimpleScriptsOptions = {}): SimpleP
         },
         findings: [],
         summary: "The candidate clearly reads as the same underlying design.",
+      });
+    }
+    // ORIGINAL_DESIGN visual QA (issue #24): same report schema — candidates
+    // judged against the Blueprint + Creative Direction, no Reference.
+    if (user.includes("Judge the CANDIDATE renders of an ORIGINAL_DESIGN website")) {
+      visualQaCalls += 1;
+      const fail = options.allVisualQaFails || (options.firstVisualQaFails && visualQaCalls === 1);
+      if (fail) {
+        return respond({
+          version: "1",
+          scores: {
+            macroLayout: 88, typography: 68, spacingRhythm: 90, surfaceColor: 88,
+            imageTreatment: 84, components: 90, signatureElements: 86, responsive: 88,
+            overall: 70,
+          },
+          findings: [
+            {
+              rank: 1,
+              title: "Display typography is far too small",
+              reference: "The blueprint's Hero H1 clamp(2.5rem, 6vw, 5.5rem)",
+              candidate: "Candidate hero headline reads at body scale",
+              direction: "Apply the blueprint Hero H1 clamp(2.5rem, 6vw, 5.5rem) to .hero h1",
+            },
+          ],
+          summary: "Typography scale collapses the intended identity; layout is otherwise faithful.",
+        });
+      }
+      return respond({
+        version: "1",
+        scores: {
+          macroLayout: 94, typography: 93, spacingRhythm: 94, surfaceColor: 93,
+          imageTreatment: 91, components: 94, signatureElements: 93, responsive: 92,
+          overall: 93,
+        },
+        findings: [],
+        summary: "The candidate faithfully realizes a distinctive blueprint.",
       });
     }
     if (user.includes("QA PACKAGE (complete repair brief)")) {

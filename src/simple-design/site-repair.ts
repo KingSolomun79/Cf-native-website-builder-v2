@@ -116,7 +116,9 @@ export interface RunSimpleSiteRepairInput {
   acceptedImages: Array<{ slotId: string; altText: string; aspectRatio: string }>;
   formServiceEndpoint: string;
   siteFormId: string;
-  referenceVisualInputs: SimpleBuilderVisualInput[];
+  /** Reference visual inputs — REFERENCE_BOUND only. ORIGINAL_DESIGN has no
+   *  Reference; the Blueprint + QA findings are the design authority. */
+  referenceVisualInputs?: SimpleBuilderVisualInput[];
   candidateDesktopR2Key?: string;
   candidateMobileR2Key?: string;
   generate?: RawAiGenerate;
@@ -198,9 +200,12 @@ export function buildRepairUserPrompt(input: RunSimpleSiteRepairInput): string {
     .map((image) => `- ${image.slotId} [${image.aspectRatio}] — alt: ${image.altText}`)
     .join("\n");
   const failedFiles = failedFilesFromQaPackage(input.qaPackage);
-  const visualMode = input.candidateDesktopR2Key
-    ? "Attached images, in order: 1) REFERENCE desktop, 2) CANDIDATE desktop current render, then reference/candidate mobile when available. "
-    : "MODE: deterministic preflight-failure repair. The candidate below was rejected BEFORE rendering — no screenshots exist and none are required. Fix the exact deterministic findings in the failed files listed; do not redesign. ";
+  const hasReference = (input.referenceVisualInputs?.length ?? 0) > 0;
+  const visualMode = !input.candidateDesktopR2Key
+    ? "MODE: deterministic preflight-failure repair. The candidate below was rejected BEFORE rendering — no screenshots exist and none are required. Fix the exact deterministic findings in the failed files listed; do not redesign. "
+    : hasReference
+      ? "Attached images, in order: 1) REFERENCE desktop, 2) CANDIDATE desktop current render, then reference/candidate mobile when available. "
+      : "MODE: ORIGINAL_DESIGN repair. No Reference website exists — the Design Blueprint and the QA findings are the design authority; repair toward the Blueprint, never toward a generic template. ";
   return `CURRENT SITE BUNDLE (complete repair context — you own HTML/CSS/JS whole):
 ${JSON.stringify(input.bundle)}
 
@@ -245,11 +250,11 @@ export async function runSimpleSiteRepairStage(env: Env, input: RunSimpleSiteRep
 
   const images: Array<{ base64: string; mimeType: string }> = [];
   const referenceFullPage =
-    input.referenceVisualInputs.find((entry) => entry.kind === "full-page") ?? input.referenceVisualInputs[0];
+    input.referenceVisualInputs?.find((entry) => entry.kind === "full-page") ?? input.referenceVisualInputs?.[0];
   if (input.candidateDesktopR2Key) {
     for (const [key, mime] of [
-      [referenceFullPage.artifact, mimeForKey(referenceFullPage.artifact)],
-      [input.candidateDesktopR2Key, "image/png"],
+      ...(referenceFullPage ? [[referenceFullPage.artifact, mimeForKey(referenceFullPage.artifact)] as const] : []),
+      [input.candidateDesktopR2Key, "image/png"] as const,
       ...(input.candidateMobileR2Key ? [[input.candidateMobileR2Key, "image/png"] as const] : []),
     ] as Array<[string, string]>) {
       const body = await getObject(env, key);
@@ -273,7 +278,9 @@ export async function runSimpleSiteRepairStage(env: Env, input: RunSimpleSiteRep
     siteGenerationId: input.siteGenerationId,
     buildVersionId: input.buildVersionId,
     buildVersionNumber: input.buildVersionNumber,
-    inputArtifactIds: [referenceFullPage.sha256],
+    // The sha256 of the attached Reference visual when one exists;
+    // ORIGINAL_DESIGN carries no external design input artifacts.
+    inputArtifactIds: referenceFullPage ? [referenceFullPage.sha256] : [],
     // The pinned SIMPLE seam (or the injected test seam) is always present —
     // there is no default provider path anywhere in the boundary.
     generate,

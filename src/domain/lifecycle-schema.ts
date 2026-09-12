@@ -9,6 +9,12 @@
 import { Type, type Static } from "@sinclair/typebox";
 import { Value } from "@sinclair/typebox/value";
 import { AdaptationContractSchema } from "./reference-evidence-schema";
+import { CreativeDirectionSchema, type CreativeDirection } from "./creative-direction";
+
+// The creative-direction input contract is part of the Onboarding Submission
+// payload surface (ORIGINAL_DESIGN); re-exported here so consumers of the
+// lifecycle schemas see one coherent contract module.
+export type { CreativeDirection };
 
 export const ONBOARDING_SUBMISSION_SCHEMA_VERSION = 1;
 
@@ -110,6 +116,10 @@ export const OnboardingSubmissionPayloadSchema = Type.Object(
     buildMode: BuildModeSchema,
     facts: BusinessFactsSchema,
     reference: Type.Optional(ReferenceInputSchema),
+    // ORIGINAL_DESIGN only: the human creative intent the Blueprint invents
+    // from. Validated per-mode below — a design-origin input may never leak
+    // across modes (changing Build Mode starts a new Site Generation).
+    creativeDirection: Type.Optional(CreativeDirectionSchema),
   },
   { additionalProperties: false }
 );
@@ -154,6 +164,40 @@ export function validateOnboardingSubmissionPayload(
         ],
       };
     }
+    if (value.creativeDirection) {
+      return {
+        valid: false,
+        issues: [
+          {
+            path: "$.creativeDirection",
+            message:
+              "REFERENCE_BOUND submissions must not carry creativeDirection — the Reference is the design origin; changing Build Mode starts a new Site Generation",
+          },
+        ],
+      };
+    }
+  }
+
+  // ORIGINAL_DESIGN has NO Reference design authority: the design origin is
+  // Business Facts + the immutable submission + Creative Direction (GO §6).
+  // Supplied Reference input is rejected outright so the mode can never
+  // accidentally behave as Reference-bound, and the creative direction is
+  // REQUIRED — it is the design-intent authority.
+  if (value.buildMode === "ORIGINAL_DESIGN") {
+    const issues: SubmissionValidationIssue[] = [];
+    if (value.reference) {
+      issues.push({
+        path: "$.reference",
+        message: "ORIGINAL_DESIGN submissions must not carry a Reference — there is no Reference design authority in this mode",
+      });
+    }
+    if (!value.creativeDirection) {
+      issues.push({
+        path: "$.creativeDirection",
+        message: "ORIGINAL_DESIGN submissions require creativeDirection — the explicit design-intent authority",
+      });
+    }
+    if (issues.length > 0) return { valid: false, issues };
   }
 
   return { valid: true, value };

@@ -296,7 +296,7 @@ describe("Revision Request and Fact Update lifecycle", () => {
       siteId: (await env.DB.prepare("SELECT site_id FROM site_generations WHERE id = ?")
         .bind(initial.siteGenerationId)
         .first<{ site_id: string }>())!.site_id,
-      payload: submissionPayload({ buildMode: "ORIGINAL_DESIGN", reference: undefined }),
+      payload: submissionPayload({ buildMode: "ORIGINAL_DESIGN", reference: undefined, creativeDirection: { direction: "Warm industrial minimalism for a roastery" } }),
     });
     expect(replacement.siteGenerationId).not.toBe(initial.siteGenerationId);
     expect(replacement.sequenceNumber).toBe(2);

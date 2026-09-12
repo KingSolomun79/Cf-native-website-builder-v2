@@ -366,8 +366,29 @@ describe("preflight-mode repair context (#3)", () => {
       referenceVisualInputs: [],
       candidateDesktopR2Key: "renders/v1/desktop.png",
     });
-    expect(withRenders).toContain("Attached images, in order");
+    // Issue #24: a candidate render WITHOUT Reference inputs is the
+    // ORIGINAL_DESIGN shape — the prompt names the Blueprint as the design
+    // authority instead of claiming attached Reference screenshots.
+    expect(withRenders).toContain("MODE: ORIGINAL_DESIGN repair");
+    expect(withRenders).not.toContain("Attached images, in order");
     expect(withRenders).not.toContain("MODE: deterministic preflight-failure repair");
+
+    const withRendersAndReference = buildRepairUserPrompt({
+      siteGenerationId: "sg",
+      buildId: "b",
+      buildVersionId: "bv",
+      buildVersionNumber: 2,
+      bundle: repairBundle(),
+      blueprint: bp,
+      facts: FACTS,
+      qaPackage: preflightQaPackage,
+      acceptedImages: [],
+      formServiceEndpoint: endpoint,
+      siteFormId,
+      referenceVisualInputs: [{ kind: "full-page", artifact: "references/simple/ref.png", sha256: "frozen-ref-sha", width: 1440, height: 3200 }],
+      candidateDesktopR2Key: "renders/v1/desktop.png",
+    });
+    expect(withRendersAndReference).toContain("Attached images, in order");
   });
 });
 

@@ -23,8 +23,7 @@ export type RevisionErrorCode =
   | "GENERATION_NOT_FOUND"
   | "REVISION_INVALID"
   | "DESIGN_ORIGIN_IMMUTABLE"
-  | "FACT_UPDATE_INVALID"
-  | "ORIGINAL_DESIGN_NOT_ENABLED";
+  | "FACT_UPDATE_INVALID";
 
 export class RevisionError extends Error {
   readonly code: RevisionErrorCode;
@@ -278,25 +277,11 @@ export async function createRevisionBuild(
     throw new RevisionError("BUILD_NOT_FOUND", `Build ${input.parentBuildId} does not exist`);
   }
 
-  // The ORIGINAL_DESIGN proof gate binds every way a Build can START, not
-  // only the initial path: while the gate is shut, no new ORIGINAL_DESIGN
-  // Build may begin — including via Revision Request (QA-F1).
-  if (parent.site_generation_id) {
-    const generationMode = await env.DB.prepare(
-      "SELECT build_mode FROM site_generations WHERE id = ?"
-    )
-      .bind(parent.site_generation_id)
-      .first<{ build_mode: "REFERENCE_BOUND" | "ORIGINAL_DESIGN" }>();
-    if (generationMode?.build_mode === "ORIGINAL_DESIGN") {
-      // Same deferred-mode lock as the initial path: ORIGINAL_DESIGN is
-      // recognized but NOT ENABLED — every way a Build can START is bound by
-      // the explicit lock, including Revision Request.
-      throw new RevisionError(
-        "ORIGINAL_DESIGN_NOT_ENABLED",
-        "ORIGINAL_DESIGN is a recognized V2 Build Mode but is NOT ENABLED: its SIMPLE implementation is deferred. REFERENCE_BOUND is the only enabled design path."
-      );
-    }
-  }
+  // Both Build Modes accept Revision Requests since issue #24: a revision
+  // preserves the generation's Reference AND Build Mode, so an ORIGINAL_DESIGN
+  // lineage revises exactly like a REFERENCE_BOUND one (new Build, same
+  // design origin). Changing the Build Mode itself is a design-origin change
+  // and is rejected below — it requires a new Site Generation.
 
   if (typeof input.payload !== "object" || input.payload === null) {
     throw new RevisionError("REVISION_INVALID", "Revision Request payload must be an object");

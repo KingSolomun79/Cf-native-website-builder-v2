@@ -591,7 +591,9 @@ export interface QaPackage {
   technical: { findings: SimpleTechnicalFinding[]; blockerCount: number };
   releaseReady: boolean;
   reasons: string[];
-  referenceScreenshotKeys: { desktop: string; mobile?: string };
+  /** Reference screenshot provenance. Null for ORIGINAL_DESIGN (issue #24):
+   *  there is no Reference, and no fake identity is ever recorded. */
+  referenceScreenshotKeys: { desktop: string; mobile?: string } | null;
   candidateScreenshotKeys: { desktop: string; mobile?: string };
 }
 
