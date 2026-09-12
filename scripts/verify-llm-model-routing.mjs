@@ -121,6 +121,7 @@ const positives = [
   [!codingPlan.includes("env.ZHIPU_API_KEY"), "zai-coding-plan.ts must NOT reference the retired ZHIPU_API_KEY alias (credential is ZAI_CODING_API_KEY only — fail closed)"],
   [!/ZHIPU_API_KEY/.test(wranglerExp), "wrangler.exp.jsonc must NOT reference the retired ZHIPU_API_KEY alias"],
   [!/ZHIPU_API_KEY/.test(wrangler), "wrangler.jsonc must NOT reference the retired ZHIPU_API_KEY alias"],
+  [!/ZHIPU_API_KEY/.test(readFileSync(join(ROOT, "src", "env.d.ts"), "utf8")), "src/env.d.ts must NOT declare the retired ZHIPU_API_KEY env field (credential is ZAI_CODING_API_KEY only)"],
   [codingPlan.includes('env.ZAI_CODING_MODEL || "glm-5.3"'), "zai-coding-plan.ts must resolve the coding model (glm-5.3) from the canonical var"],
   [codingPlan.includes('env.ZAI_MULTIMODAL_MODEL || "glm-5.3-flash"'), "zai-coding-plan.ts must resolve the multimodal model (glm-5.3-flash) from the canonical var"],
 ];
