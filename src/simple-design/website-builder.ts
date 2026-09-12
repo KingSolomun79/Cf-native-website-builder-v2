@@ -209,7 +209,7 @@ export interface SimpleWebsiteBuilderResult {
 // Deterministic provenance note constructed by the system — never model
 // output.
 export const BUILDER_STRATEGY_NOTE =
-  "Built via the canonical SIX_CALL_FILE_REALIZATION Builder (simple-website-builder/v8, DOM-first/CSS-last, model-routed to glm-5.3 on the Z.AI Coding Plan): six sequential file-sized realization calls — home, about, services, contact (DOM + shared chrome + structural class vocabulary defined by home), then site.css styled against the final four documents, then site.js — each ONE raw single-file completion on the same frozen context.";
+  "Built via the canonical SIX_CALL_FILE_REALIZATION Builder (simple-website-builder/v8, DOM-first/CSS-last, model-routed to glm-5.3 on the Z.AI Coding Plan): six sequential file-sized realization calls — home, about, services, contact (DOM + shared chrome + structural class vocabulary defined by home), then site.css styled against the final four documents, then site.js — each ONE raw single-file completion on the same frozen context. Inner-page header/footer are deterministically canonicalized to home's frozen chrome (aria-current moves to the current page's nav link) before validation.";
 
 // ── CRITICAL image ledger (deterministic; derived from the materialized plan) ─
 
@@ -343,6 +343,65 @@ export function extractSharedChrome(homeHtml: string): SharedChrome {
     header: /<header\b[\s\S]*?<\/header>/i.exec(homeHtml)?.[0] ?? null,
     footer: /<footer\b[\s\S]*?<\/footer>/i.exec(homeHtml)?.[0] ?? null,
   };
+}
+
+/** Move the accessibility current-page marker to the given nav link: strip
+ *  every aria-current from the frozen header, then mark the link whose href
+ *  is the current page's route. The only inner-page-specific chrome delta. */
+/** Move the accessibility current-page marker to the given nav link: strip
+ *  every aria-current and active/current marker-class token from the frozen
+ *  header, then mark the link whose href is the current page's route with
+ *  aria-current and the same marker-class idiom (if home used one). The only
+ *  inner-page-specific chrome delta. */
+function moveCurrentPageMarker(header: string, href: string): string {
+  const markerClass = /<a\b[^>]*class="([^"]*)"[^>]*>/i
+    .exec(header)?.[1]
+    ?.split(/\s+/)
+    .find((token) => /^(is-)?(active|current)$/i.test(token));
+  let moved = header.replace(/\s*aria-current="(page|true)"/gi, "");
+  if (markerClass) {
+    moved = moved.replace(new RegExp(`\\s+${markerClass}(?=")`, "g"), "");
+  }
+  const link = new RegExp(`<a\\b[^>]*href="${href}"[^>]*>`, "i");
+  moved = moved.replace(link, (tag) => {
+    let marked = tag.replace(/>$/, ' aria-current="page">');
+    if (markerClass) {
+      marked = /class="/.test(marked)
+        ? marked.replace(/class="([^"]*)"/, (_m, classes: string) => `class="${classes} ${markerClass}"`)
+        : marked.replace(/ aria-current="page">/, ` class="${markerClass}" aria-current="page">`);
+    }
+    return marked;
+  });
+  return moved;
+}
+
+/** §18 CANONICAL CHROME SPLICE: replace an inner page's header and footer
+ *  with home's frozen chrome (the accessibility marker moves to the page's
+ *  own nav link). Models drift at the byte-for-byte chrome copy task (live
+ *  evidence 2026-09-11: services and about headers drifted in 2 of 3 builder
+ *  runs), so the SYSTEM canonicalizes instead of holding a redesign lottery;
+ *  validateSharedChrome then enforces the invariant on the final documents. */
+export function spliceSharedChrome(
+  html: string,
+  chrome: SharedChrome,
+  pageHref: string
+): string {
+  let spliced = html;
+  if (chrome.header) {
+    const canonicalHeader = moveCurrentPageMarker(chrome.header, pageHref);
+    const existing = /<header\b[\s\S]*?<\/header>/i.exec(spliced)?.[0];
+    spliced = existing
+      ? spliced.replace(existing, () => canonicalHeader)
+      : spliced.replace(/<main\b/i, () => `${canonicalHeader}<main`);
+  }
+  if (chrome.footer) {
+    const footer = chrome.footer;
+    const existing = /<footer\b[\s\S]*?<\/footer>/i.exec(spliced)?.[0];
+    spliced = existing
+      ? spliced.replace(existing, () => footer)
+      : spliced.replace(/<\/body>/i, () => `${footer}</body>`);
+  }
+  return spliced;
 }
 
 /** Deterministic chrome match: every non-home page carries the frozen header
@@ -732,8 +791,19 @@ export async function runSimpleBuilderFileRealizationCore(
     }
   }
 
-  // §18 FAIL CLOSED: the frozen chrome is a Builder contract — a page that
-  // does not carry it exactly is invalid source, never a redesign candidate.
+  // §18 CANONICAL CHROME SPLICE: canonicalize inner pages to home's frozen
+  // chrome before anything consumes them (the CSS call styles the FINAL four
+  // documents). After the splice, the invariant is enforced fail-closed.
+  if (chrome) {
+    const markerHrefs: Record<string, string> = { about: "/about", services: "/services", contact: "/contact" };
+    for (const page of ["about", "services", "contact"] as const) {
+      pages[page] = spliceSharedChrome(pages[page], chrome, markerHrefs[page]);
+    }
+  }
+
+  // §18 FAIL CLOSED: the frozen chrome is a Builder invariant — after
+  // canonicalization any residual mismatch is invalid source, never a
+  // redesign candidate.
   const chromeFailures = validateSharedChrome(pages);
   if (chromeFailures.length > 0) {
     throw new SimpleWebsiteBuilderError(

@@ -576,7 +576,7 @@ describe("pipeline: a Builder whose stylesheet invents structure terminates HUMA
   });
 });
 
-describe("pipeline: every deterministic Builder gate terminates HUMAN_REVIEW_REQUIRED in-step", () => {
+describe("pipeline: deterministic Builder chrome drift is canonicalized, not fatal", () => {
   it("a shared-chrome violation (SOURCE_INCOMPLETE) lands in review — never an instance-killing escape", async () => {
     const referenceKey = "references/simple/chrome-violation-pipeline.png";
     await persistSimpleScreenshot(env, referenceKey);
@@ -592,10 +592,15 @@ describe("pipeline: every deterministic Builder gate terminates HUMAN_REVIEW_REQ
       deps: createSimpleScripts({ builderRestylesChrome: true }),
     });
 
-    expect(outcome.terminal).toBe("HUMAN_REVIEW_REQUIRED");
-    expect(outcome.reasons[0]).toContain("WEBSITE_BUILDER_SOURCE_INCOMPLETE");
-    expect(outcome.reasons[0]).toContain("frozen shared chrome");
-    expect(outcome.repairApplied).toBe(false);
-    expect(outcome.releaseReadyBuildVersionId).toBeNull();
+    // the drifted inner-page footer was canonically replaced and the build
+    // proceeded through QA instead of dying in the Builder stage
+    expect(outcome.terminal).not.toBe("HUMAN_REVIEW_REQUIRED");
+    const version = await env.DB.prepare("SELECT id FROM build_versions WHERE build_id = ? ORDER BY version_number DESC LIMIT 1")
+      .bind(outcome.buildId)
+      .first<{ id: string }>();
+    const bundle = await getBuildStageArtifact<SiteBundle>(env, version!.id, "site_bundle");
+    expect(bundle).not.toBeNull();
+    expect(bundle!.value.pages.about).toContain("RankForge Kenya");
+    expect(bundle!.value.pages.about).not.toContain("Different Business");
   });
 });

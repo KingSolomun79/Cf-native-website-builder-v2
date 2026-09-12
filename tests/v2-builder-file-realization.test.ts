@@ -66,6 +66,14 @@ const FACTS = {
 const HEADER = `<header><nav class="site-nav" aria-label="Primary"><a href="/">Home</a><a href="/about">About</a><a href="/services">Services</a><a href="/contact">Contact</a></nav></header>`;
 const FOOTER = `<footer><p>© <span id="year">2026</span> RankForge Kenya</p></footer>`;
 
+// The builder canonically splices home's frozen chrome into inner pages and
+// moves the current-page marker to the page's own nav link — the final
+// documents differ from the model's raw page by exactly that delta.
+const canonical = (page: string) =>
+  page === "home"
+    ? FULL_PAGE(page)
+    : FULL_PAGE(page).replace(`<a href="/${page}">`, `<a href="/${page}" aria-current="page">`);
+
 const FULL_PAGE = (pageId: string) => `<!DOCTYPE html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${pageId}</title><link rel="stylesheet" href="site.css"><script src="site.js" defer></script></head>
 <body>${HEADER}
@@ -218,7 +226,8 @@ describe("stage discipline: SIX calls, one semantic generation each (GO §4)", (
     expect(seenUsers["site-css"]).toContain("IMAGE TREATMENT IS INTENTIONAL");
     for (const page of ["home", "about", "services", "contact"]) {
       expect(seenUsers["site-css"]).toContain(`FROZEN ${page}.html`);
-      expect(seenUsers["site-css"]).toContain(FULL_PAGE(page));
+      // inner pages arrive canonically spliced (current-page marker moved)
+      expect(seenUsers["site-css"]).toContain(canonical(page));
     }
     expect(seenUsers["site-css"]).not.toContain("FROZEN SHARED CHROME");
     // js waits for the CSS and all four pages (GO §15/§26)
@@ -309,7 +318,7 @@ describe("stage discipline: SIX calls, one semantic generation each (GO §4)", (
       js: wrap(CODE_JS),
     });
     const result = await runSimpleWebsiteBuilderStage(env, stageInput(ctx, blueprint(), seam.generate) as Parameters<typeof runSimpleWebsiteBuilderStage>[1]);
-    expect(result.bundle.pages.about).toBe(FULL_PAGE("about"));
+    expect(result.bundle.pages.about).toBe(canonical("about"));
     expect(result.bundle.sharedCss).toBe(TOKENS_CSS);
     expect(result.bundle.sharedJs).toBe(CODE_JS);
   });
@@ -318,24 +327,21 @@ describe("stage discipline: SIX calls, one semantic generation each (GO §4)", (
 // ── §8: frozen shared chrome ─────────────────────────────────────────────────
 
 describe("frozen shared chrome (GO §6/§18)", () => {
-  it("§8a a page that restyles the shared chrome FAILS CLOSED before the css/js calls", async () => {
+  it("§8a a page that restyles the shared chrome is CANONICALIZED: the bundle carries home's frozen chrome", async () => {
     const ctx = await scaffoldBuild("references/simple/dom-first-chrome.png");
     const restyled = FULL_PAGE("about").replace(FOOTER, `<footer><p>© 2026 Different Business</p></footer>`);
     const seam = scriptedSixCallSeam({ pages: { about: restyled } });
-    let thrown: unknown;
-    try {
-      await runSimpleWebsiteBuilderStage(env, stageInput(ctx, blueprint(), seam.generate) as Parameters<typeof runSimpleWebsiteBuilderStage>[1]);
-    } catch (error) {
-      thrown = error;
-    }
-    expect(thrown).toBeInstanceOf(SimpleWebsiteBuilderError);
-    const error = thrown as SimpleWebsiteBuilderError;
-    expect(error.code).toBe("SOURCE_INCOMPLETE");
-    expect(error.message).toContain("frozen shared chrome");
-    // the four pages ran; css and js never happened (fail closed before them)
-    expect(seam.calls).toEqual(["home", "about", "services", "contact"]);
-    expect(await getBuildStageArtifact<SiteBundle>(env, ctx.buildVersionId, "site_bundle")).toBeNull();
-    expect(classifyStageFailure(error)).toBe("DETERMINISTIC_REVIEW_REQUIRED");
+    const result = await runSimpleWebsiteBuilderStage(env, stageInput(ctx, blueprint(), seam.generate) as Parameters<typeof runSimpleWebsiteBuilderStage>[1]);
+    // the drifted footer was replaced by the frozen chrome, not rejected
+    expect(result.bundle.pages.about).toContain(FOOTER);
+    expect(result.bundle.pages.about).not.toContain("Different Business");
+    // the aria-current marker moved to the canonicalized page's own link
+    expect(result.bundle.pages.about).toContain('href="/about" aria-current="page"');
+    // all six calls ran — the build is not shortened by drift
+    expect(seam.calls).toEqual(["home", "about", "services", "contact", "site-css", "site-js"]);
+    const stored = await getBuildStageArtifact<SiteBundle>(env, ctx.buildVersionId, "site_bundle");
+    expect(stored).not.toBeNull();
+    expect(stored!.value.notes).toContain("canonicalized");
   });
 
   it("§8b insignificant whitespace variance is NOT redesign — normalized chrome still matches", async () => {
@@ -348,7 +354,10 @@ describe("frozen shared chrome (GO §6/§18)", () => {
     );
     const seam = scriptedSixCallSeam({ pages: { services: reflowed } });
     const result = await runSimpleWebsiteBuilderStage(env, stageInput(ctx, blueprint(), seam.generate) as Parameters<typeof runSimpleWebsiteBuilderStage>[1]);
-    expect(result.bundle.pages.services).toBe(reflowed);
+    // the whitespace-varied header is canonicalized to home's byte-exact
+    // chrome (with the marker moved); the page's own content is untouched
+    expect(result.bundle.pages.services).toBe(canonical("services"));
+    expect(result.bundle.pages.services).not.toBe(reflowed);
   });
 
   it("§8c the aria-current marker MOVES to the current page's nav link — required accessibility, not redesign (live qualification evidence)", async () => {
@@ -357,7 +366,8 @@ describe("frozen shared chrome (GO §6/§18)", () => {
     const reflowed = FULL_PAGE("services").replace(HEADER, servicesNav);
     const seam = scriptedSixCallSeam({ pages: { services: reflowed } });
     const result = await runSimpleWebsiteBuilderStage(env, stageInput(ctx, blueprint(), seam.generate) as Parameters<typeof runSimpleWebsiteBuilderStage>[1]);
-    expect(result.bundle.pages.services).toBe(reflowed);
+    // the model's own marker placement is normalized to the canonical splice
+    expect(result.bundle.pages.services).toBe(canonical("services"));
   });
 
   it("§8d the current-page marker CLASS moves with aria-current — required accessibility, not redesign (live A/B evidence: class=\"nav-link is-active\")", async () => {
@@ -377,8 +387,12 @@ describe("frozen shared chrome (GO §6/§18)", () => {
       },
     });
     const result = await runSimpleWebsiteBuilderStage(env, stageInput(ctx, blueprint(), seam.generate) as Parameters<typeof runSimpleWebsiteBuilderStage>[1]);
-    expect(result.bundle.pages.about).toContain('aria-current="page" class="nav-link is-active"');
-    expect(result.bundle.pages.contact).toContain('aria-current="page" class="nav-link is-active"');
+    // the canonical splice moves BOTH the marker attribute and the marker
+    // class idiom to each page's own nav link
+    expect(result.bundle.pages.about).toContain('href="/about" class="nav-link is-active" aria-current="page">About');
+    expect(result.bundle.pages.contact).toContain('href="/contact" class="nav-link is-active" aria-current="page">Contact');
+    // the home link loses the marker on inner pages
+    expect(result.bundle.pages.about).toContain('<a href="/" class="nav-link">Home</a>');
   });
 });
 
@@ -567,7 +581,7 @@ describe("provenance, cost telemetry and resume", () => {
     // exactly css + js were generated — all four pages reused
     expect(seam.calls).toEqual(["site-css", "site-js"]);
     for (const page of ["home", "about", "services", "contact"] as const) {
-      expect(core.pages[page]).toBe(FULL_PAGE(page));
+      expect(core.pages[page]).toBe(canonical(page));
       const metrics = core.calls.find((c) => c.call === `page-${page}`)!;
       expect(metrics.reused).toBe(true);
       expect(metrics.durationMs).toBe(0);
@@ -575,10 +589,10 @@ describe("provenance, cost telemetry and resume", () => {
     }
     // the resumed CSS call still receives ALL FOUR final documents —
     // dependency semantics hold across resume
-    expect(seenUsers["site-css"]).toContain(FULL_PAGE("home"));
-    expect(seenUsers["site-css"]).toContain(FULL_PAGE("about"));
-    expect(seenUsers["site-css"]).toContain(FULL_PAGE("services"));
-    expect(seenUsers["site-css"]).toContain(FULL_PAGE("contact"));
+    expect(seenUsers["site-css"]).toContain(canonical("home"));
+    expect(seenUsers["site-css"]).toContain(canonical("about"));
+    expect(seenUsers["site-css"]).toContain(canonical("services"));
+    expect(seenUsers["site-css"]).toContain(canonical("contact"));
     const cssMetrics = core.calls.find((c) => c.call === "site-css")!;
     expect(cssMetrics.reused).toBeFalsy();
     expect(cssMetrics.outputTokens).toBeGreaterThan(0);
@@ -616,8 +630,8 @@ describe("provenance, cost telemetry and resume", () => {
 
     // services, contact, css and js generated; home and about reused
     expect(seam.calls).toEqual(["services", "contact", "site-css", "site-js"]);
-    expect(core.pages.home).toBe(FULL_PAGE("home"));
-    expect(core.pages.about).toBe(FULL_PAGE("about"));
+    expect(core.pages.home).toBe(canonical("home"));
+    expect(core.pages.about).toBe(canonical("about"));
     const aboutMetrics = core.calls.find((c) => c.call === "page-about")!;
     expect(aboutMetrics.reused).toBe(true);
     const servicesMetrics = core.calls.find((c) => c.call === "page-services")!;
