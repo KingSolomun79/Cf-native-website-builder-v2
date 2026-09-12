@@ -101,49 +101,37 @@ describe("Coding Plan credential routing", () => {
     expect(captured[0].authorization).toMatch(/^Bearer /);
   });
 
-  it("prefers the canonical ZAI_CODING_API_KEY credential over the legacy ZHIPU_API_KEY name", async () => {
+  it("sends the ZAI_CODING_API_KEY credential — the ONE secret name, no legacy alias", async () => {
     const { captured, fetchImpl } = codingPlanFetch();
-    const bothKeysEnv = {
-      ...env,
-      ZAI_CODING_API_KEY: "canonical-coding-plan-key",
-      ZHIPU_API_KEY: "legacy-zhipu-name",
-    } as unknown as Env;
+    const canonicalEnv = { ...env, ZAI_CODING_API_KEY: "canonical-coding-plan-key" } as unknown as Env;
 
-    await generateZaiCodingPlan(bothKeysEnv, {
+    await generateZaiCodingPlan(canonicalEnv, {
       model: "glm-5.3",
       messages: [{ role: "user", content: "u" }],
       maxTokens: 16,
       stream: false,
-      label: "credential-preference-test",
+      label: "canonical-credential-test",
       fetchImpl,
     });
 
     expect(captured).toHaveLength(1);
-    // The canonical secret wins — asserted by NAME shape, never by printing
-    // any real credential (these are fixture values).
+    // Fixture value asserted by name only — never a real credential.
     expect(captured[0].authorization).toBe("Bearer canonical-coding-plan-key");
   });
 
-  it("still serves the sandbox reality: the legacy ZHIPU_API_KEY name alone is accepted", async () => {
-    const { captured, fetchImpl } = codingPlanFetch();
-    const legacyOnlyEnv = {
-      ...env,
-      ZAI_CODING_API_KEY: undefined,
-      ZHIPU_API_KEY: "legacy-zhipu-name",
-    } as unknown as Env;
-
-    const result = await generateZaiCodingPlan(legacyOnlyEnv, {
-      model: "glm-5.3-flash",
-      messages: [{ role: "user", content: "u" }],
-      maxTokens: 16,
-      stream: false,
-      label: "legacy-credential-test",
-      fetchImpl,
-    });
-
-    expect(result.provider).toBe("zai-coding-plan");
-    expect(captured).toHaveLength(1);
-    expect(captured[0].authorization).toBe("Bearer legacy-zhipu-name");
+  it("fails closed when ZAI_CODING_API_KEY is absent — no alias, no fallback, no network call", async () => {
+    // Production path (no fetchImpl stub): the missing-credential guard fires
+    // before fetch is ever reached; the bounded retry classifies every attempt
+    // as the missing-credential fault and rejects as a transport error.
+    await expect(
+      generateZaiCodingPlan({ ...env, ZAI_CODING_API_KEY: undefined } as unknown as Env, {
+        model: "glm-5.3",
+        messages: [{ role: "user", content: "u" }],
+        maxTokens: 16,
+        stream: false,
+        label: "fail-closed-routing-test",
+      })
+    ).rejects.toThrow(/no Coding Plan API key configured \(ZAI_CODING_API_KEY\)/);
   });
 
   it("classifies output exhaustion as OUTPUT_EXHAUSTED — never retried, never substituted", async () => {

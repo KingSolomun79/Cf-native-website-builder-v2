@@ -2,7 +2,7 @@
 // UNIFICATION §5/§13/§14), proven at the transport seam:
 //
 //   §1-§4   request shape: Coding Plan endpoint path, Bearer credential
-//           (ZAI_CODING_API_KEY, ZHIPU_API_KEY as the legacy sandbox name),
+//           (ZAI_CODING_API_KEY — the ONE secret name on every environment),
 //           thinking disabled, model + max_tokens; base URL configurable
 //   §5-§7   synchronous mode: content/model-echo/finish/usage/request-id
 //           extraction; reasoning_content NEVER enters content
@@ -95,21 +95,37 @@ describe("Coding Plan request shape (GO §1/§5)", () => {
     expect(seen[1].temperature).toBe(0.3);
   });
 
-  it("§2 the legacy sandbox credential name (ZHIPU_API_KEY) is accepted; the base URL is configurable for a future proxy", async () => {
+  it("§2 the credential rides ZAI_CODING_API_KEY only; the base URL is configurable for a future proxy", async () => {
     const seen: string[] = [];
-    await generateZaiCodingPlan({ ZHIPU_API_KEY: "legacy-key", ZAI_CODING_BASE_URL: "https://proxy.morabeza.example/coding" } as Env, {
+    await generateZaiCodingPlan({ ZAI_CODING_API_KEY: "canonical-key", ZAI_CODING_BASE_URL: "https://proxy.morabeza.example/coding" } as Env, {
       model: "glm-5.3",
       messages: [{ role: "user", content: "u" }],
       maxTokens: 64,
       stream: false,
-      label: "compat-probe",
+      label: "canonical-credential-probe",
       fetchImpl: async (url, init) => {
         seen.push(String(url));
-        expect(((init as RequestInit).headers as Record<string, string>).Authorization).toBe("Bearer legacy-key");
+        expect(((init as RequestInit).headers as Record<string, string>).Authorization).toBe("Bearer canonical-key");
         return jsonBodyResponse({ choices: [{ message: { content: "ok" }, finish_reason: "stop" }] });
       },
     });
     expect(seen[0]).toBe("https://proxy.morabeza.example/coding/chat/completions");
+  });
+
+  it("§2b fails closed with no credential: transport error before any network call, no alias and no fallback", async () => {
+    // No fetchImpl: this exercises the PRODUCTION guard (a missing key fails
+    // closed before fetch is ever reached). The bounded retry schedule runs
+    // its full 3 attempts (~3s), all classified as the missing-credential
+    // network fault — never an outbound call, never an alias lookup.
+    await expect(
+      generateZaiCodingPlan({} as Env, {
+        model: "glm-5.3",
+        messages: [{ role: "user", content: "u" }],
+        maxTokens: 16,
+        stream: false,
+        label: "fail-closed-probe",
+      })
+    ).rejects.toThrow(/no Coding Plan API key configured \(ZAI_CODING_API_KEY\)/);
   });
 
   it("§3 stage models resolve from the canonical vars with the GO defaults", () => {

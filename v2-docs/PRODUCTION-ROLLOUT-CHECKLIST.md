@@ -13,9 +13,10 @@ the 2026-09-11 production-rollout GO from main `4127500`).
 - `ZAI_MULTIMODAL_MODEL = glm-5.3-flash` — Design Blueprint (design-blueprint/2)
   and Visual QA.
 - Credential: the Worker SECRET `ZAI_CODING_API_KEY` — never a config var,
-  never committed. The legacy `ZHIPU_API_KEY` name is tolerated in code for
-  older sandbox environments ONLY; a production deployment is not ready unless
-  `ZAI_CODING_API_KEY` is explicitly configured (verify with
+  never committed. Since the final secret hygiene (2026-09-12) it is the ONE
+  credential name on EVERY environment; the legacy `ZHIPU_API_KEY` alias is
+  removed from source and from both Workers, and the transport fails closed
+  when the canonical secret is absent (verify with
   `npx wrangler secret list --name cf-website-factory-v2`, names only).
 - NO automatic fallback, Workers AI, AI Gateway, OpenRouter, Z.AI General API,
   or Kimi. The retired multi-provider config vars (`LLM_MODEL`,

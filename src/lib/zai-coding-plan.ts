@@ -50,10 +50,11 @@ function baseUrlOf(env: Env): string {
 }
 
 function apiKeyOf(env: Env): string | undefined {
-  // Canonical secret is ZAI_CODING_API_KEY; ZHIPU_API_KEY is accepted as the
-  // configured Coding Plan credential on environments that predate the
-  // rename (the sandbox). Production sets ZAI_CODING_API_KEY explicitly.
-  return env.ZAI_CODING_API_KEY || env.ZHIPU_API_KEY;
+  // The ONE credential name (final secret hygiene, 2026-09-12): production
+  // and sandbox both configure ZAI_CODING_API_KEY. The legacy ZHIPU_API_KEY
+  // alias was removed after both Workers verified canaries on the canonical
+  // secret. Absent key = fail closed at call time (no alias, no fallback).
+  return env.ZAI_CODING_API_KEY;
 }
 
 export type ZaiCodingPlanContentPart =

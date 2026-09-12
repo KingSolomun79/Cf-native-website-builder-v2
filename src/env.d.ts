@@ -43,17 +43,13 @@ export interface Env {
 
   // ZAI GLM Coding Plan — the ONE LLM provider (operator GO 2026-09-11).
   // Base URL defaults to the Coding Plan endpoint; the key is the Coding
-  // Plan credential. NEVER the general API (/api/paas/v4).
+  // Plan credential (ZAI_CODING_API_KEY, the ONE secret name on every
+  // environment — final secret hygiene 2026-09-12). NEVER the general API
+  // (/api/paas/v4). Absent key fails closed at call time.
   ZAI_CODING_BASE_URL?: string;
   ZAI_CODING_API_KEY?: string;
   ZAI_CODING_MODEL?: string;
   ZAI_MULTIMODAL_MODEL?: string;
-  // TEMPORARY (post-rollout hardening 2026-09-12): ZHIPU_API_KEY is accepted
-  // by src/lib/zai-coding-plan.ts apiKeyOf ONLY as the configured Coding
-  // Plan credential name on environments that predate the rename (the
-  // sandbox). The canonical secret is ZAI_CODING_API_KEY; once the sandbox
-  // carries it, this legacy name and the source fallback are removed.
-  ZHIPU_API_KEY?: string;
   // Coding Plan transport cap for ONE streamed/synchronous completion
   // (consumed by src/lib/zai-coding-plan.ts maxDurationMs). Defaults to
   // 600_000ms when unset.

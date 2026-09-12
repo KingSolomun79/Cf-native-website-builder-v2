@@ -40,8 +40,9 @@ ZAI_CODING_MODEL=glm-5.3            # optional pin
 ZAI_MULTIMODAL_MODEL=<verified>     # optional pin
 ```
 
-`ZHIPU_API_KEY` is the accepted legacy name for the same Coding Plan
-credential on the sandbox; production sets `ZAI_CODING_API_KEY` explicitly.
+The credential is `ZAI_CODING_API_KEY` on EVERY environment — the legacy
+`ZHIPU_API_KEY` alias was removed from source and from both Workers after
+canonical-secret canaries passed (final secret hygiene, 2026-09-12).
 
 ## Transport rules
 
