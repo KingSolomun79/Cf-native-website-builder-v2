@@ -1,6 +1,10 @@
 import { defineWorkersConfig, readD1Migrations } from "@cloudflare/vitest-pool-workers/config";
 import { resolve } from "node:path";
-import { writeFileSync, readdirSync, readFileSync, mkdirSync, existsSync } from "node:fs";
+import { writeFileSync, readFileSync, mkdirSync } from "node:fs";
+// Deterministic prompt-body transport (canonical LF on every platform) — the
+// SAME generator the CLI script uses, so test runs can never rewrite the
+// tracked module with platform-dependent line endings.
+import { writePromptBodiesModule, normalizeToLf } from "./scripts/generate-prompt-bodies.mjs";
 
 // Read all D1 migrations once (in Node) and emit a generated module the
 // persistence test imports. The worker isolate cannot reliably read the repo
@@ -32,8 +36,12 @@ writeFileSync(
 
 // Transport the machine-readable capability envelope so runtime tests can
 // assert that human- and machine-readable envelopes agree with behavior.
+// LF-normalized like the prompt bodies: a platform-smudged JSON source must
+// not rewrite the tracked generated module between checkouts.
 {
-  const envelope = readFileSync(resolve(process.cwd(), "v2-docs", "capability-envelope.json"), "utf8");
+  const envelope = normalizeToLf(
+    readFileSync(resolve(process.cwd(), "v2-docs", "capability-envelope.json"), "utf8")
+  );
   writeFileSync(
     resolve(process.cwd(), "src", "domain", "generated", "capability-envelope.ts"),
     `// AUTO-GENERATED from v2-docs/capability-envelope.json — do not edit.
@@ -61,27 +69,13 @@ export const WRANGLER_CONFIG_RAW = ${JSON.stringify(raw)} as const;
 // composed runtime prompts under test always match the markdown sources
 // (same output as scripts/generate-prompt-bodies.mjs, including the
 // experiment branch's simple-design bodies under v2-docs/prompts/simple/).
+// Generation is LF-normalized on input and output: Windows autocrlf-smudged
+// markdown or PowerShell-authored files can no longer leak CR into the
+// embedded strings, so repeated runs are byte-identical to the tracked file.
 {
-  const promptsDir = resolve(process.cwd(), "v2-docs", "prompts");
-  const simpleDir = resolve(promptsDir, "simple");
-  const files = [
-    ...readdirSync(promptsDir)
-      .filter((name) => name.endsWith(".md") && name !== "PROMPT-MANIFEST.md")
-      .sort(),
-    ...(existsSync(simpleDir)
-      ? readdirSync(simpleDir)
-          .filter((name) => name.endsWith(".md"))
-          .sort()
-          .map((name) => `simple/${name}`)
-      : []),
-  ];
-  const entries = files
-    .map((name) => `  ${JSON.stringify(name)}: ${JSON.stringify(readFileSync(resolve(promptsDir, name), "utf8"))},`)
-    .join("\n");
-  mkdirSync(resolve(process.cwd(), "src", "domain", "generated"), { recursive: true });
-  writeFileSync(
-    resolve(process.cwd(), "src", "domain", "generated", "prompt-bodies.ts"),
-    `// AUTO-GENERATED from v2-docs/prompts/*.md — do not edit.\n// Source of truth: v2-docs/prompts/ + v2-docs/prompts/PROMPT-MANIFEST.md.\nexport const PROMPT_BODY_FILES: Record<string, string> = {\n${entries}\n};\n`
+  writePromptBodiesModule(
+    resolve(process.cwd(), "v2-docs", "prompts"),
+    resolve(process.cwd(), "src", "domain", "generated", "prompt-bodies.ts")
   );
 }
 

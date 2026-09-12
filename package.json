@@ -9,7 +9,7 @@
     "db:migrate:local": "wrangler d1 migrations apply DB --local",
     "db:migrate:remote": "wrangler d1 migrations apply DB --remote",
     "db:migrate:test": "wrangler d1 migrations apply DB --local --config wrangler.test.jsonc",
-    "test": "node scripts/verify-llm-model-routing.mjs && node scripts/verify-resource-isolation.mjs && vitest run",
+    "test": "node scripts/verify-llm-model-routing.mjs && node scripts/verify-resource-isolation.mjs && node scripts/verify-prompt-bodies-idempotence.mjs && vitest run",
     "typecheck": "tsc --noEmit",
     "lint": "tsc --noEmit",
     "deploy:staging": "wrangler deploy --env staging",
