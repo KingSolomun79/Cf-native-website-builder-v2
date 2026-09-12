@@ -36,11 +36,9 @@
     "KIE_API_URL": "https://kie.example.com",
     "KIE_API_KEY": "test-kie-key",
     "KIE_MODEL": "nano-banana-2-lite",
-    "LLM_MODEL": "glm-5.3-flash",
-    "DESIGN_PIPELINE_VERSION": "simple_blueprint_v1",
+    "ZAI_CODING_MODEL": "glm-5.3",
+    "ZAI_MULTIMODAL_MODEL": "glm-5.3-flash",
     "CF_ACCOUNT_ID": "test-account",
-    "CF_DEPLOY_API_TOKEN": "test-deploy-token",
-    "OPENROUTER_API_KEY": "test-or-key",
-    "CF_AIG_TOKEN": "test-aig"
+    "CF_DEPLOY_API_TOKEN": "test-deploy-token"
   }
 }

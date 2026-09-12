@@ -68,10 +68,10 @@ export class StageExecutionCollisionError extends Error {
 
 // Lease sizing (issue #54 §8): the lease must outcover the longest legitimate
 // owner path — one runSchemaValidatedAiStage section, which is at most TWO
-// provider attempts (the boundary's one targeted structural repair). The text
-// gateway aborts each provider attempt at 300s (lib/ai-gateway), and the
-// vision path is bounded by VISION_REQUEST_TIMEOUT_MS (≤120s). Two attempts at
-// the largest bound plus parse/validation/immutable-store overhead gives the
+// provider attempts (the boundary's one targeted structural repair). The Coding
+// Plan transport aborts each attempt at SIMPLE_STREAM_MAX_DURATION_MS (default
+// 600s) and the vision path is bounded by VISION_REQUEST_TIMEOUT_MS (≤120s), so
+// the enclosing workflow step's own timeout bounds the real per-invocation
 // floor; headroom keeps a live owner safe. The workflow step's explicit
 // per-attempt timeout ("10 minutes") is deliberately SHORTER than the lease,
 // so an attempt is always dead before its claim could be stolen while still

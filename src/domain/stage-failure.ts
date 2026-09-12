@@ -102,8 +102,8 @@ export function classifyStageFailure(error: unknown): StageFailureClass {
     return "DETERMINISTIC_REVIEW_REQUIRED";
   }
   // Everything else — including StageExecutionInProgressError (single-flight
-  // yield), VisionGatewayError (the gateway already bounded its own
-  // per-provider attempts; the engine retry is the bounded outer wait),
+  // yield), ZaiCodingPlanTransportError (the transport already bounded its
+  // own attempts; the engine retry is the bounded outer wait),
   // non-terminal ReferenceAnalysisError codes, provider/network/D1 faults,
   // and any unknown error — stays retryable under the repo-owned schedule
   // (#62 §17: never route operational transients to human review).

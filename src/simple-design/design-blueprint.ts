@@ -169,7 +169,6 @@ export async function runSimpleDesignBlueprintStage(
       buildVersionId: input.buildVersionId,
       buildVersionNumber: input.buildVersionNumber,
       inputArtifactIds: ordered.map((entry) => entry.sha256),
-      maxTokens: 12288,
       generate,
       // json_object rides response_format; the JSON Schema itself travels in
       // the boundary's prose output contract (Coding Plan evidence above).

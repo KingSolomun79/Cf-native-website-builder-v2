@@ -31,7 +31,7 @@ import { StageArtifactError } from "../src/domain/stage-artifacts";
 import { ImageBudgetExceededError } from "../src/domain/image-pipeline";
 import { AiStageSchemaInvalidError } from "../src/domain/ai-boundary";
 import { OriginalDesignNotEnabledError } from "../src/domain/original-design-lock";
-import { VisionGatewayError } from "../src/lib/ai-gateway";
+import { ZaiCodingPlanTransportError } from "../src/lib/zai-coding-plan";
 
 describe("stageInProgressRetryAfterMs", () => {
   const future = new Date(Date.now() + 600_000).toISOString();
@@ -146,7 +146,9 @@ describe("stage-failure classification (issue #62 §5, legacy stages removed)", 
       "TRANSIENT_RETRYABLE"
     );
     expect(classifyStageFailure(new Error("temporary provider outage: 503"))).toEqual("TRANSIENT_RETRYABLE");
-    expect(classifyStageFailure(new VisionGatewayError([]))).toEqual("TRANSIENT_RETRYABLE");
+    // The Coding Plan transport already bounded its own attempts; a spent
+    // transport budget stays an operational transient for the engine schedule.
+    expect(classifyStageFailure(new ZaiCodingPlanTransportError("stage", []))).toEqual("TRANSIENT_RETRYABLE");
     expect(classifyStageFailure(null)).toEqual("TRANSIENT_RETRYABLE");
   });
 

@@ -27,23 +27,25 @@ const { values } = parseArgs({
 // Required by the V2 runtime (src/env.d.ts + route/domain usage). Each name
 // is audited against actual source references — no stale doc names.
 const REQUIRED = [
-  "ZHIPU_API_KEY",            // Z.ai / Zhipu LLM provider (primary text + vision provider leg)
+  "ZAI_CODING_API_KEY",       // Z.AI Coding Plan — the ONE LLM provider (operator GO 2026-09-11)
   "KIE_API_KEY",              // KIE.ai image generation
-  "CF_AIG_TOKEN",             // Cloudflare AI Gateway auth (the working fallback leg)
   "CF_DEPLOY_API_TOKEN",      // Cloudflare Workers/static-assets deploy API
   "OPERATOR_CAPABILITY_SECRET", // Operator capability HMAC (approve/publish/rollback)
   "WEBHOOK_SECRET",           // Intake route HMAC (onboarding/build/revision)
 ];
 
 // Optional: coded paths that activate only when the credential exists.
-// OPENROUTER_API_KEY: operator decision 2026-09-02 — ZAI is primary and the
-// AI Gateway is the working fallback; provider chains are key-driven, so an
-// absent key skips the OpenRouter leg without error. TURNSTILE_SECRET_KEY:
-// only required once any Site Configuration sets turnstile_required = 1.
-const OPTIONAL = ["OPENROUTER_API_KEY", "TURNSTILE_SECRET_KEY"];
+// ZHIPU_API_KEY: TEMPORARY legacy credential name — the sandbox Worker still
+// carries its Coding Plan credential under this pre-rename name
+// (src/lib/zai-coding-plan.ts apiKeyOf accepts it). Once the sandbox is
+// canonicalized onto ZAI_CODING_API_KEY, this name is retired. Production
+// no longer depends on it. TURNSTILE_SECRET_KEY: only required once any
+// Site Configuration sets turnstile_required = 1.
+const OPTIONAL = ["ZHIPU_API_KEY", "TURNSTILE_SECRET_KEY"];
 
 // Retired V1/interim integrations that must never exist on the V2 Worker
-// (issue #33; corrected #28 removed the email-router architecture).
+// (issue #33; corrected #28 removed the email-router architecture; the
+// multi-provider gateway seams were removed 2026-09-12).
 const RETIRED = [
   "SMTP2GO_API_KEY",
   "GITHUB_TOKEN",
@@ -51,6 +53,8 @@ const RETIRED = [
   "APPROVAL_SECRET",
   "CANDIDATE_VALIDATION_SECRET",
   "WAZIBIZ_EMAIL_TRANSPORT_TOKEN",
+  "OPENROUTER_API_KEY",
+  "CF_AIG_TOKEN",
 ];
 
 let names;

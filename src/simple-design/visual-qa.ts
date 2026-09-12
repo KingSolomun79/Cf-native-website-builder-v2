@@ -90,7 +90,6 @@ export async function runSimpleVisualQaStage(env: Env, input: RunSimpleVisualQaI
     buildVersionId: input.buildVersionId,
     buildVersionNumber: input.buildVersionNumber,
     inputArtifactIds: [referenceFullPage.sha256],
-    maxTokens: 4096,
     generate,
   });
 

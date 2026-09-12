@@ -1,5 +1,8 @@
--- EXPERIMENT BRANCH ONLY (experiment/simplified-design-pipeline).
--- DO NOT APPLY TO PRODUCTION (see experiment spec sections 58 and 74).
+-- Originally introduced for the SIMPLE design experiment
+-- (experiment/simplified-design-pipeline). PROMOTED TO CANONICAL V2 with the
+-- SIMPLE production rollout (2026-09-12): this migration is part of the
+-- production schema from 2026-09-12 onward, and its artifact kinds are
+-- required by the canonical SIMPLE pipeline.
 --
 -- Adds the SIMPLE design pipeline's three new Build Version stage artifact
 -- kinds:
