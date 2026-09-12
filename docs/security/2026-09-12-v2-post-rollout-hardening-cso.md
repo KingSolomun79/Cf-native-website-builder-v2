@@ -15,7 +15,7 @@ Full working-tree diff on the branch (~6,100 insertions / ~3,880 deletions acros
 - `src/domain/ai-boundary.ts`: `repairTruncatedJson` relocated verbatim from the deleted gateway; `generate` seam now REQUIRED (no default provider path); dead `model`/`temperature`/`maxTokens` option fields removed.
 - `src/domain/qa-stages.ts`: dead `createProductionQaVisionGenerate` factory (zero callers) removed.
 - `src/env.d.ts` / `src/types.ts` / `wrangler.test.jsonc`: dead provider fields removed.
-- `scripts/verify-v2-secrets.mjs`: required set now `ZAI_CODING_API_KEY`-canonical; `CF_AIG_TOKEN`/`OPENROUTER_API_KEY` moved to retired; `ZHIPU_API_KEY` optional-temporary.
+- `scripts/verify-v2-secrets.mjs`: required set now `ZAI_CODING_API_KEY`-canonical; `OPENROUTER_API_KEY` retired; `ZHIPU_API_KEY` and `CF_AIG_TOKEN` optional-temporary (deferred Worker-secret deletions — the deployed runtime has zero references to either).
 - New gates: `scripts/verify-resource-isolation.mjs` (wired into `npm test`), strengthened `scripts/verify-llm-model-routing.mjs`.
 - Migration `0035` header: comment-only correction (SQL/checksum/bookkeeping untouched).
 - New runbook: `v2-docs/CLOUDFLARE-RESOURCE-ISOLATION-RUNBOOK.md`.
@@ -34,6 +34,8 @@ No Critical or High findings.
 
 **Medium (accepted, temporary, documented): `ZHIPU_API_KEY` code fallback retained.**
 `apiKeyOf()` still accepts `ZAI_CODING_API_KEY || ZHIPU_API_KEY`. This is intentional per the operator brief (§13/§14): the sandbox Worker carries its Coding Plan credential only under the legacy name, and this autonomous run cannot perform the interactive `wrangler secret put` without the operator. Preference order is canonical-first; production uses and prefers `ZAI_CODING_API_KEY`. Exposure is negligible (requires Worker-env write access, which is already game-over). Disposition: fallback removed in a follow-up once the sandbox is canonicalized; `verify-v2-secrets.mjs` tracks the name as optional-temporary; production's legacy `ZHIPU_API_KEY` secret deletion is explicitly deferred hygiene (brief §15), never a blocker.
+
+**Watch item: legacy Worker secrets pending deletion.** Production carries `ZHIPU_API_KEY` (superseded by `ZAI_CODING_API_KEY`; still required by the sandbox fallback) and `CF_AIG_TOKEN` (zero source references since this cleanup). Per operator brief §15, Worker-secret deletion is deferred hygiene, sequenced after sandbox canonicalization. The sandbox Worker additionally carries dormant V1/experiment-era secrets (`SMTP2GO_API_KEY`, `GITHUB_TOKEN`, `GITHUB_WEBHOOK_SECRET`, `APPROVAL_SECRET`, `OPENROUTER_API_KEY`, `EXP_BENCHMARK_SECRET`) — no code path reads any of them on the deployed V2 runtime; queued for the operator's secret-cleanup pass.
 
 **Watch item: `WebsiteAgent` DO-namespace compat export retained.** `src/exp-compat-website-agent.ts` is an empty `DurableObject` subclass satisfying the sandbox Worker's V1-era DO namespace (Cloudflare error 10064 otherwise). No route reaches it; it is deploy-compatibility, not dead code. Removing it requires a DO-namespace migration on the sandbox Worker — deliberately out of scope.
 

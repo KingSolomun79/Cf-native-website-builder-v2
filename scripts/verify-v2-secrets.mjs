@@ -39,9 +39,13 @@ const REQUIRED = [
 // carries its Coding Plan credential under this pre-rename name
 // (src/lib/zai-coding-plan.ts apiKeyOf accepts it). Once the sandbox is
 // canonicalized onto ZAI_CODING_API_KEY, this name is retired. Production
-// no longer depends on it. TURNSTILE_SECRET_KEY: only required once any
-// Site Configuration sets turnstile_required = 1.
-const OPTIONAL = ["ZHIPU_API_KEY", "TURNSTILE_SECRET_KEY"];
+// no longer depends on it. CF_AIG_TOKEN: retired with the gateway seams
+// (2026-09-12) — ZERO source references remain; the copy still sitting on
+// the production Worker is deferred-hygiene deletion (operator brief §15:
+// secret deletion is hygiene, never a deploy blocker) and must be removed
+// in the follow-up secret cleanup. TURNSTILE_SECRET_KEY: only required once
+// any Site Configuration sets turnstile_required = 1.
+const OPTIONAL = ["ZHIPU_API_KEY", "CF_AIG_TOKEN", "TURNSTILE_SECRET_KEY"];
 
 // Retired V1/interim integrations that must never exist on the V2 Worker
 // (issue #33; corrected #28 removed the email-router architecture; the
@@ -54,7 +58,6 @@ const RETIRED = [
   "CANDIDATE_VALIDATION_SECRET",
   "WAZIBIZ_EMAIL_TRANSPORT_TOKEN",
   "OPENROUTER_API_KEY",
-  "CF_AIG_TOKEN",
 ];
 
 let names;
