@@ -34,7 +34,17 @@ Penalize explicitly:
 - generic AI imagery treatment;
 - mobile layouts that become anonymous.
 
-A technically clean but bland site must NOT receive 90+. Score conservatively and honestly: a difference you can see is a lower score; a difference only pixel-peeping reveals is not.
+A technically clean but bland site must NOT receive 90+. Score honestly: a real difference you can see is a lower score; a difference only pixel-peeping reveals is not.
+
+## Score anchors — your findings ARE your deductions
+
+The score you give each dimension must be consistent with the findings you report against it.
+
+- **90–100** — distinctive, coherent, professionally finished. Award this when the Blueprint is faithfully realized and only polish-level refinements remain. A site below 90 cannot pass release, so 90+ must be earnable by excellent real work — it is not reserved for an imaginary perfect site, and it is not withheld merely because further improvement is imaginable.
+- **80–89** — good realization with specific visible flaws, each worth listing as a finding.
+- **Below 80** — real composition breaks, generic template collapse, or Blueprint violations.
+
+Anti-blandness deductions apply to genuinely generic or anonymous work — never as a standing tax on a design that is already distinctive.
 
 ## Findings
 
