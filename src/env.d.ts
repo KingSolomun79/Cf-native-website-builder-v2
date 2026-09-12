@@ -54,6 +54,9 @@ export interface Env {
   // (consumed by src/lib/zai-coding-plan.ts maxDurationMs). Defaults to
   // 600_000ms when unset.
   SIMPLE_STREAM_MAX_DURATION_MS?: string;
+  // TEMPORARY CANARY ONLY (removed before merge): ephemeral gate token for
+  // the throwaway preview canary route.
+  TMP_CANARY_TOKEN?: string;
 
   // Visual-input preparation bounds for capture/analysis preprocessing
   // (consumed by src/domain/stage-execution.ts and src/lib/vision-input.ts).
