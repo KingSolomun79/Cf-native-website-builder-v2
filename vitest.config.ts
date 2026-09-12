@@ -4,7 +4,7 @@ import { writeFileSync, readFileSync, mkdirSync } from "node:fs";
 // Deterministic prompt-body transport (canonical LF on every platform) — the
 // SAME generator the CLI script uses, so test runs can never rewrite the
 // tracked module with platform-dependent line endings.
-import { writePromptBodiesModule } from "./scripts/generate-prompt-bodies.mjs";
+import { writePromptBodiesModule, normalizeToLf } from "./scripts/generate-prompt-bodies.mjs";
 
 // Read all D1 migrations once (in Node) and emit a generated module the
 // persistence test imports. The worker isolate cannot reliably read the repo
@@ -36,8 +36,12 @@ writeFileSync(
 
 // Transport the machine-readable capability envelope so runtime tests can
 // assert that human- and machine-readable envelopes agree with behavior.
+// LF-normalized like the prompt bodies: a platform-smudged JSON source must
+// not rewrite the tracked generated module between checkouts.
 {
-  const envelope = readFileSync(resolve(process.cwd(), "v2-docs", "capability-envelope.json"), "utf8");
+  const envelope = normalizeToLf(
+    readFileSync(resolve(process.cwd(), "v2-docs", "capability-envelope.json"), "utf8")
+  );
   writeFileSync(
     resolve(process.cwd(), "src", "domain", "generated", "capability-envelope.ts"),
     `// AUTO-GENERATED from v2-docs/capability-envelope.json — do not edit.

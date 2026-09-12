@@ -81,8 +81,12 @@ function runAsCli() {
   console.log(`Wrote ${outPath} from ${collectPromptFiles(promptsDir).length} prompt bodies (LF-normalized).`);
 
   // Also transport the machine-readable capability envelope (mirrors the
-  // generation vitest.config.ts performs for tests).
-  const envelope = readFileSync(resolve(process.cwd(), "v2-docs", "capability-envelope.json"), "utf8");
+  // generation vitest.config.ts performs for tests). LF-normalized like the
+  // prompt bodies so a platform-smudged JSON source cannot rewrite the
+  // tracked generated module between checkouts.
+  const envelope = normalizeToLf(
+    readFileSync(resolve(process.cwd(), "v2-docs", "capability-envelope.json"), "utf8")
+  );
   writeFileSync(
     resolve(process.cwd(), "src", "domain", "generated", "capability-envelope.ts"),
     `// AUTO-GENERATED from v2-docs/capability-envelope.json — do not edit.

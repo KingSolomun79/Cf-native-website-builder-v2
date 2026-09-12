@@ -4,4 +4,6 @@
 # must never vary their on-disk line endings, or test runs would rewrite the
 # tracked generated module. Enforced by scripts/verify-prompt-bodies-idempotence.mjs.
 v2-docs/prompts/**/*.md text eol=lf
+v2-docs/capability-envelope.json text eol=lf
 src/domain/generated/prompt-bodies.ts text eol=lf
+src/domain/generated/capability-envelope.ts text eol=lf

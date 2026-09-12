@@ -102,3 +102,19 @@ for (const name of canonicalBodies) {
 console.log(
   `prompt bodies idempotent: generation 1 clean, generation 2 clean, ${allFiles.length} bodies intact (${canonicalBodies.length} canonical stage bodies byte-verified)`
 );
+
+// Capability envelope (written by the same generator): tracked module must
+// equal the LF-normalized generation from the JSON source.
+const envelopePath = resolve(process.cwd(), "src", "domain", "generated", "capability-envelope.ts");
+const envelopeJson = normalizeToLf(
+  readFileSync(resolve(process.cwd(), "v2-docs", "capability-envelope.json"), "utf8")
+);
+const expectedEnvelope =
+  `// AUTO-GENERATED from v2-docs/capability-envelope.json — do not edit.\nexport const CAPABILITY_ENVELOPE = ${envelopeJson.trim()} as const;\n`;
+const trackedEnvelope = readFileSync(envelopePath, "utf8");
+if (trackedEnvelope !== expectedEnvelope) {
+  fail(
+    "capability-envelope generation is not idempotent against the tracked module (newline drift or content drift)"
+  , trackedEnvelope, expectedEnvelope);
+}
+console.log("capability envelope idempotent: generation clean");
