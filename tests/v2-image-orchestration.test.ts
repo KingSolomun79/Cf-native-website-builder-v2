@@ -1,3 +1,4 @@
+import { canonicalStructuredFacts } from "./helpers/canonical-facts";
 // Durable KIE image job lifecycle tests (issue #58).
 //
 // The production image stage is a durable submit → sleep → poll state machine
@@ -150,7 +151,7 @@ async function newBuild(prefix: string): Promise<{ buildId: string; buildVersion
   const started = await startSiteGeneration(env, {
     payload: {
       buildMode: "REFERENCE_BOUND",
-      facts: { businessName: "Orchestration Roasters", contactEmail: "hi@orch.example" },
+      facts: { businessName: "Orchestration Roasters", contactEmail: "hi@orch.example" , ...(canonicalStructuredFacts()) },
       reference: { screenshotR2Key: `references/uploads/${prefix}-${Math.random().toString(36).slice(2)}.png` },
     },
   });
@@ -464,7 +465,7 @@ async function startPipelineGeneration(screenshotKey: string): Promise<string> {
   const started = await startSiteGeneration(env, {
     payload: {
       buildMode: "REFERENCE_BOUND",
-      facts: { businessName: SIMPLE_SCRIPTS_BUSINESS, contactEmail: "ops@wazibizwebsites.example" },
+      facts: { businessName: SIMPLE_SCRIPTS_BUSINESS, contactEmail: "ops@wazibizwebsites.example" , ...(canonicalStructuredFacts()) },
       reference: { screenshotR2Key: screenshotKey, url: "https://meridian-atelier.example.com/" },
     },
   });

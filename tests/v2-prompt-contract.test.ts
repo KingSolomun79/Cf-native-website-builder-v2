@@ -1,3 +1,4 @@
+import { canonicalStructuredFacts } from "./helpers/canonical-facts";
 import { beforeAll, describe, expect, it } from "vitest";
 import { env as providedEnv } from "cloudflare:test";
 import { Type, type Static } from "@sinclair/typebox";
@@ -39,7 +40,7 @@ async function newBuildContext(env: Env): Promise<{
       facts: {
         businessName: "Rift Valley Roasters",
         contactEmail: "hello@riftvalleyroasters.example",
-      },
+      ...(canonicalStructuredFacts())},
       reference: { screenshotR2Key: "references/uploads/abc.png" },
     },
   });

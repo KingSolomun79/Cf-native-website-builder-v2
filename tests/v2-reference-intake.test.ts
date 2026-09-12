@@ -1,3 +1,4 @@
+import { canonicalStructuredFacts } from "./helpers/canonical-facts";
 import { beforeAll, describe, expect, it } from "vitest";
 import { env as providedEnv } from "cloudflare:test";
 import type { Env } from "../src/env.d";
@@ -91,7 +92,7 @@ async function newGeneration(options: {
   const started = await startSiteGeneration(env, {
     payload: {
       buildMode: "REFERENCE_BOUND",
-      facts: { businessName: "Rift Valley Roasters", contactEmail: "hello@rvr.example" },
+      facts: { businessName: "Rift Valley Roasters", contactEmail: "hello@rvr.example" , ...(canonicalStructuredFacts()) },
       reference:
         options.reference === undefined
           ? { screenshotR2Key: options.putScreenshot ?? screenshotKey }
@@ -408,7 +409,7 @@ describe("Reference intake and evidence freeze", () => {
     const started = await startSiteGeneration(env, {
       payload: {
         buildMode: "ORIGINAL_DESIGN",
-        facts: { businessName: "No Reference Co", contactEmail: "hi@nr.example" },
+        facts: { businessName: "No Reference Co", contactEmail: "hi@nr.example" , ...(canonicalStructuredFacts()) },
         creativeDirection: { direction: "Handcrafted warm minimalism" },
       },
     });

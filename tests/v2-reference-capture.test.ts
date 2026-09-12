@@ -1,3 +1,4 @@
+import { canonicalStructuredFacts } from "./helpers/canonical-facts";
 import { describe, expect, it } from "vitest";
 import { env as providedEnv } from "cloudflare:test";
 import type { Env } from "../src/env.d";
@@ -82,7 +83,7 @@ describe("production capture wiring (issue #40)", () => {
     const started = await startSiteGeneration(env, {
       payload: {
         buildMode: "REFERENCE_BOUND",
-        facts: { businessName: "Capture Wire Co", contactEmail: "wire@capture.example" },
+        facts: { businessName: "Capture Wire Co", contactEmail: "wire@capture.example" , ...(canonicalStructuredFacts()) },
         reference: { url: "https://fixture.test/intake-default" },
       },
     });
@@ -178,7 +179,7 @@ describe("unreliable flattening affects Reference Suitability (issue #40)", () =
     const started = await startSiteGeneration(env, {
       payload: {
         buildMode: "REFERENCE_BOUND",
-        facts: { businessName: "Flatten Probe Co", contactEmail: "flat@probe.example" },
+        facts: { businessName: "Flatten Probe Co", contactEmail: "flat@probe.example" , ...(canonicalStructuredFacts()) },
         reference: { screenshotR2Key: screenshotKey, url: "https://fixture.test/scroll-jacked" },
       },
     });

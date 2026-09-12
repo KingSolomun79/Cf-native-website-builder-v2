@@ -1,3 +1,4 @@
+import { canonicalStructuredFacts } from "./helpers/canonical-facts";
 // Blueprint hero-link canonicalization for HISTORICAL design-blueprint/1
 // artifacts (operator GO, 2026-09-10): pure-function proofs of the v1
 // referential repair, retained because the frozen-artifact compat path
@@ -176,7 +177,7 @@ describe("hero-link canonicalization: scope and provenance", () => {
           contactEmail: "ops@rankforge.example",
           businessType: "SEO agency",
           businessDescription: "An SEO agency in Nairobi helping Kenyan businesses grow.",
-        },
+        ...(canonicalStructuredFacts())},
         reference: { screenshotR2Key: "references/simple/hero-canon.png" },
       },
     });
@@ -205,7 +206,7 @@ describe("hero-link canonicalization: scope and provenance", () => {
           contactEmail: "ops@rankforge.example",
           businessType: "SEO agency",
           businessDescription: "An SEO agency in Nairobi helping Kenyan businesses grow.",
-        },
+        ...(canonicalStructuredFacts())},
         reference: { screenshotR2Key: "references/simple/hero-v1-compat.png" },
       },
     });

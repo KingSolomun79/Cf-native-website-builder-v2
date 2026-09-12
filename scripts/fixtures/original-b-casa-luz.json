@@ -16,7 +16,56 @@
         "Practical notes the site may state: adults-only; check-in from 15:00; the cove is a three-minute walk; closed December to February.",
         "Things to emphasize: the light, the quiet, the single long table, walking the cove path at dawn.",
         "Strict content constraints: do not invent guest reviews, ratings, press mentions, awards, room prices, availability claims or any statistics."
-      ]
+      ],
+      "services": [
+        {
+          "name": "Rooms"
+        },
+        {
+          "name": "Breakfast Table"
+        },
+        {
+          "name": "Terrace & Pool"
+        },
+        {
+          "name": "Boat Coves & Walks"
+        }
+      ],
+      "businessHours": {
+        "monday": {
+          "status": "OPEN",
+          "open": "08:00",
+          "close": "17:00"
+        },
+        "tuesday": {
+          "status": "OPEN",
+          "open": "08:00",
+          "close": "17:00"
+        },
+        "wednesday": {
+          "status": "OPEN",
+          "open": "08:00",
+          "close": "17:00"
+        },
+        "thursday": {
+          "status": "OPEN",
+          "open": "08:00",
+          "close": "17:00"
+        },
+        "friday": {
+          "status": "OPEN",
+          "open": "08:00",
+          "close": "17:00"
+        },
+        "saturday": {
+          "status": "OPEN",
+          "open": "09:00",
+          "close": "13:00"
+        },
+        "sunday": {
+          "status": "CLOSED"
+        }
+      }
     },
     "creativeDirection": {
       "direction": "Salt-bleached Mediterranean postcard: whitewashed plaster surfaces with cobalt and sea-glass accents, airy full-bleed coastal photography, wide margins like a loosely printed travel journal, and one recurring hand-drawn map motif",

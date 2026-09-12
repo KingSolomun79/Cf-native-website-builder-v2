@@ -11,6 +11,9 @@ import type { Env } from "../env.d";
 import { generateId, nowIso } from "../lib/crypto";
 import {
   BusinessFactsSchema,
+  BusinessHoursSchema,
+  ServicesSchema,
+  validateBusinessFactsSemantics,
   normalizeBusinessFacts,
   type BusinessFacts,
 } from "./lifecycle-schema";
@@ -52,6 +55,20 @@ const FACT_SINGLE_KEYS = [
   "extraInformation",
 ] as const;
 
+// Canonical structured facts (operator GO 2026-09-12): whole-field replacement
+// only. A patch supplies the complete new services list / business-hours
+// object (or null to remove where the snapshot stays valid) — deliberately NO
+// element-level JSON patch machinery.
+const FACT_STRUCTURED_KEYS = ["services", "businessHours", "competitiveDifferentiator"] as const;
+
+const FACT_PATCH_STRUCTURED = {
+  services: Type.Optional(Type.Union([ServicesSchema, Type.Null()])),
+  businessHours: Type.Optional(Type.Union([BusinessHoursSchema, Type.Null()])),
+  competitiveDifferentiator: Type.Optional(
+    Type.Union([Type.String({ minLength: 1, maxLength: 2000 }), Type.Null()])
+  ),
+} as const;
+
 const SOCIAL_KEYS = ["facebook", "instagram", "twitter", "linkedin", "other"] as const;
 
 type FactSingleKey = (typeof FACT_SINGLE_KEYS)[number];
@@ -91,6 +108,7 @@ export const FactPatchSchema = Type.Object(
         { additionalProperties: false }
       )
     ),
+    ...FACT_PATCH_STRUCTURED,
   },
   { additionalProperties: false }
 );
@@ -165,6 +183,13 @@ function applyFactUpdate(facts: BusinessFacts, field: string, value: unknown): v
     else delete facts.socials;
     return;
   }
+  if ((FACT_STRUCTURED_KEYS as readonly string[]).includes(field)) {
+    // Whole-field replacement: the stored value is the complete new array /
+    // object / string, or null to remove the fact for this lineage.
+    if (value === null) delete (facts as Record<string, unknown>)[field];
+    else (facts as Record<string, unknown>)[field] = value;
+    return;
+  }
   if (!(FACT_SINGLE_KEYS as readonly string[]).includes(field)) return;
   if (value === null) delete (facts as Record<string, unknown>)[field];
   else (facts as Record<string, unknown>)[field] = value;
@@ -184,6 +209,13 @@ function diffFactsToFactsUpdates(base: BusinessFacts, next: BusinessFacts): Arra
     const after = next.socials?.[key] ?? null;
     if (JSON.stringify(before) !== JSON.stringify(after)) {
       updates.push({ field: `socials.${key}`, value: after });
+    }
+  }
+  for (const key of FACT_STRUCTURED_KEYS) {
+    const before = (base as Record<string, unknown>)[key] ?? null;
+    const after = (next as Record<string, unknown>)[key] ?? null;
+    if (JSON.stringify(before) !== JSON.stringify(after)) {
+      updates.push({ field: key, value: after });
     }
   }
   return updates;
@@ -310,6 +342,14 @@ export async function createRevisionBuild(
       if (value === null) delete (merged as Record<string, unknown>)[key];
       else (merged as Record<string, unknown>)[key] = value;
     }
+    for (const key of FACT_STRUCTURED_KEYS) {
+      const raw = (patch as Record<string, unknown>)[key];
+      if (raw === undefined) continue;
+      // Whole-field replacement: null removes, otherwise the complete
+      // schema-validated value replaces the field as-is.
+      if (raw === null) delete (merged as Record<string, unknown>)[key];
+      else (merged as Record<string, unknown>)[key] = raw;
+    }
     if (patch.socials) {
       const socials = { ...(merged.socials ?? {}) };
       for (const key of SOCIAL_KEYS) {
@@ -326,7 +366,14 @@ export async function createRevisionBuild(
   if (!Value.Check(BusinessFactsSchema, merged)) {
     throw new RevisionError(
       "FACT_UPDATE_INVALID",
-      "Fact Updates would leave an invalid Business Facts snapshot (businessName/contactEmail must remain supported)"
+      "Fact Updates would leave an invalid Business Facts snapshot (businessName/contactEmail must remain supported; services/businessHours must stay present and valid)"
+    );
+  }
+  const semanticIssues = validateBusinessFactsSemantics(merged);
+  if (semanticIssues.length > 0) {
+    throw new RevisionError(
+      "FACT_UPDATE_INVALID",
+      `Fact Updates would leave an invalid Business Facts snapshot: ${semanticIssues.map((i) => `${i.path} ${i.message}`).join("; ")}`
     );
   }
   const effectiveFacts = normalizeBusinessFacts(merged);

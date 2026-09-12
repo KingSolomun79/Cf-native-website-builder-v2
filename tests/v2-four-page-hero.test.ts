@@ -1,3 +1,4 @@
+import { canonicalStructuredFacts } from "./helpers/canonical-facts";
 // FOUR-PAGE HERO MEDIA (operator GO, 2026-09-09): regression proofs for the
 // inner-page hero requirement —
 //   - the Blueprint contract requires a photographic hero (mediaSlotId) on
@@ -43,6 +44,7 @@ const FACTS = {
   contactEmail: "ops@rankforge.example",
   businessType: "SEO agency",
   businessDescription: "An SEO agency in Nairobi helping Kenyan businesses grow.",
+  ...(canonicalStructuredFacts()),
 } as const;
 
 function heroSectionHtml(slotId: string, variant: "img" | "data-id" | "css-only" = "img"): string {

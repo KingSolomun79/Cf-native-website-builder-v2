@@ -16,7 +16,56 @@
         "Process, four stages: 01 Walk the site — sun, soil, drainage and how you actually want to live outside. 02 Design — planting and hardscape plans, materials and a phased budget. 03 Build — the studio's own crew constructs the hardscape and planting. 04 First season — establishment care and adjustment visits through the first growing season.",
         "Things to emphasize: hand-built stonework, four-season planting interest, working with Portland's rain and shade, small crews who stay on one project start to finish.",
         "Strict content constraints: do not invent testimonials, client names, awards, certifications, years in business, team bios, pricing or any statistics. Never fabricate before/after claims."
-      ]
+      ],
+      "services": [
+        {
+          "name": "Garden Design"
+        },
+        {
+          "name": "Build & Construction"
+        },
+        {
+          "name": "Planting & Care"
+        },
+        {
+          "name": "Outdoor Rooms"
+        }
+      ],
+      "businessHours": {
+        "monday": {
+          "status": "OPEN",
+          "open": "08:00",
+          "close": "17:00"
+        },
+        "tuesday": {
+          "status": "OPEN",
+          "open": "08:00",
+          "close": "17:00"
+        },
+        "wednesday": {
+          "status": "OPEN",
+          "open": "08:00",
+          "close": "17:00"
+        },
+        "thursday": {
+          "status": "OPEN",
+          "open": "08:00",
+          "close": "17:00"
+        },
+        "friday": {
+          "status": "OPEN",
+          "open": "08:00",
+          "close": "17:00"
+        },
+        "saturday": {
+          "status": "OPEN",
+          "open": "09:00",
+          "close": "13:00"
+        },
+        "sunday": {
+          "status": "CLOSED"
+        }
+      }
     },
     "creativeDirection": {
       "direction": "Northwest craft almanac: a warm, botanical field-guide feel — deep forest greens against warm cedar and paper tones, oversized serif display type, generous hand-set-looking margins, and close-crop garden photography that bleeds off the container edge like pressed specimens",

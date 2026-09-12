@@ -80,6 +80,77 @@ export const ReferenceInputSchema = Type.Object(
 );
 export type ReferenceInput = Static<typeof ReferenceInputSchema>;
 
+// ── Canonical Business Facts: services / business hours / differentiator ────
+//
+// Operator GO 2026-09-12 (client intake layer): the public client intake
+// collects these three facts and they become CONTENT AUTHORITY for BOTH Build
+// Modes. 24-hour HH:MM is the canonical storage — display formatting is a
+// frontend concern and is never stored as source truth.
+
+export const HH_MM_PATTERN = "^([01][0-9]|2[0-3]):[0-5][0-9]$";
+
+const ServiceItemSchema = Type.Object(
+  {
+    name: Type.String({ minLength: 1, maxLength: 200 }),
+    description: Type.Optional(Type.String({ minLength: 1, maxLength: 1000 })),
+  },
+  { additionalProperties: false }
+);
+export type ServiceItem = Static<typeof ServiceItemSchema>;
+
+// A service list carries at least 3 service names (the four-page site's
+// Services page has no content without them) and a suggested maximum of 20 —
+// the hard cap keeps one public form from flooding the content authority.
+export const SERVICES_MIN_ITEMS = 3;
+export const SERVICES_MAX_ITEMS = 20;
+
+export const BusinessHourDaySchema = Type.Union(
+  [
+    Type.Object({ status: Type.Literal("CLOSED") }, { additionalProperties: false }),
+    Type.Object(
+      {
+        status: Type.Literal("OPEN"),
+        open: Type.String({ pattern: HH_MM_PATTERN }),
+        close: Type.String({ pattern: HH_MM_PATTERN }),
+      },
+      { additionalProperties: false }
+    ),
+  ],
+  { additionalProperties: false }
+);
+export type BusinessHourDay = Static<typeof BusinessHourDaySchema>;
+
+export const WEEKDAYS = [
+  "monday",
+  "tuesday",
+  "wednesday",
+  "thursday",
+  "friday",
+  "saturday",
+  "sunday",
+] as const;
+export type Weekday = (typeof WEEKDAYS)[number];
+
+export const BusinessHoursSchema = Type.Object(
+  {
+    monday: BusinessHourDaySchema,
+    tuesday: BusinessHourDaySchema,
+    wednesday: BusinessHourDaySchema,
+    thursday: BusinessHourDaySchema,
+    friday: BusinessHourDaySchema,
+    saturday: BusinessHourDaySchema,
+    sunday: BusinessHourDaySchema,
+  },
+  { additionalProperties: false }
+);
+export type BusinessHours = Static<typeof BusinessHoursSchema>;
+
+export const ServicesSchema = Type.Array(ServiceItemSchema, {
+  minItems: SERVICES_MIN_ITEMS,
+  maxItems: SERVICES_MAX_ITEMS,
+});
+export type Services = Static<typeof ServicesSchema>;
+
 export const BusinessFactsSchema = Type.Object(
   {
     businessName: Type.String({ minLength: 1, maxLength: 200 }),
@@ -106,6 +177,14 @@ export const BusinessFactsSchema = Type.Object(
       )
     ),
     extraInformation: optionalTrimmedString(5000),
+    // REQUIRED content authority: at least three real service names supplied by
+    // the business. Missing services are never invented (intake semantics).
+    services: ServicesSchema,
+    // REQUIRED content authority: all seven days, CLOSED or explicit OPEN window.
+    businessHours: BusinessHoursSchema,
+    // OPTIONAL human-supplied positioning text ("what sets you apart"). Absent
+    // stays absent — never fabricated.
+    competitiveDifferentiator: optionalTrimmedString(2000),
   },
   { additionalProperties: false }
 );
@@ -130,6 +209,35 @@ export interface SubmissionValidationIssue {
   message: string;
 }
 
+// Semantic rules the TypeBox shape cannot express: no duplicate service names
+// and OPEN days must open before close (canonical 24-hour windows do not wrap
+// midnight). Shared by canonical intake and Fact Update application so a
+// merged snapshot can never violate them either.
+export function validateBusinessFactsSemantics(facts: BusinessFacts): SubmissionValidationIssue[] {
+  const issues: SubmissionValidationIssue[] = [];
+  const seen = new Set<string>();
+  for (const [index, service] of (facts.services ?? []).entries()) {
+    const key = service.name.trim().toLowerCase();
+    if (seen.has(key)) {
+      issues.push({
+        path: `$.facts.services[${index}].name`,
+        message: `duplicate service name '${service.name.trim()}'`,
+      });
+    }
+    seen.add(key);
+  }
+  for (const day of WEEKDAYS) {
+    const entry = facts.businessHours?.[day];
+    if (entry && entry.status === "OPEN" && entry.open >= entry.close) {
+      issues.push({
+        path: `$.facts.businessHours.${day}`,
+        message: `OPEN day '${day}' must open before close (canonical 24-hour windows do not wrap midnight)`,
+      });
+    }
+  }
+  return issues;
+}
+
 export function validateOnboardingSubmissionPayload(
   payload: unknown
 ): { valid: true; value: OnboardingSubmissionPayload } | { valid: false; issues: SubmissionValidationIssue[] } {
@@ -145,6 +253,12 @@ export function validateOnboardingSubmissionPayload(
     return { valid: false, issues };
   }
   const value = payload as OnboardingSubmissionPayload;
+
+  // New canonical Business Facts semantics (services / business hours /
+  // differentiator) — the same rules the Fact Update path enforces on merged
+  // snapshots.
+  const semanticIssues = validateBusinessFactsSemantics(value.facts);
+  if (semanticIssues.length > 0) return { valid: false, issues: semanticIssues };
 
   // A REFERENCE_BOUND Site Generation must carry a design origin: a Reference
   // Screenshot, a Reference URL, or both. URL-only input becomes valid only
@@ -240,5 +354,20 @@ export function normalizeBusinessFacts(facts: BusinessFacts): BusinessFacts {
     }
     if (Object.keys(socials).length > 0) normalized.socials = socials;
   }
+  // Canonical structured facts: trim names/descriptions, drop emptied
+  // descriptions, keep canonical 24-hour windows exactly as supplied (they are
+  // already pattern-validated; storage is canonical, never display-formatted).
+  if (facts.services) {
+    normalized.services = facts.services.map((service) => {
+      const name = service.name.trim();
+      const description = trimmed(service.description);
+      return description ? { name, description } : { name };
+    });
+  }
+  if (facts.businessHours) {
+    normalized.businessHours = { ...facts.businessHours };
+  }
+  const differentiator = trimmed(facts.competitiveDifferentiator);
+  if (differentiator !== undefined) normalized.competitiveDifferentiator = differentiator;
   return normalized;
 }

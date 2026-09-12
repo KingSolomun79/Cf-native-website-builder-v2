@@ -1,3 +1,4 @@
+import { canonicalStructuredFacts } from "./helpers/canonical-facts";
 import { describe, expect, it } from "vitest";
 import { env as providedEnv } from "cloudflare:test";
 import type { Env } from "../src/env.d";
@@ -19,6 +20,7 @@ const env = providedEnv as unknown as Env;
 const FACTS: BusinessFacts = {
   businessName: "Reconciliation Test Co",
   contactEmail: "hello@reconciliation.example",
+  ...(canonicalStructuredFacts()),
 };
 
 let instanceCounter = 0;
