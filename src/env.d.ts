@@ -88,11 +88,14 @@ export interface Env {
   ADMIN_EMAIL?: CloudflareEmailSender;
   WAZIBIZ_ADMIN_EMAIL?: string;
   // Cloudflare Access verification for the admin surface (defense in depth;
-  // the edge Access policy is the primary control). When the team domain is
-  // configured, admin requests must carry a validly-signed, unexpired
-  // Cf-Access-Jwt-Assertion; when CF_ACCESS_AUD is configured its aud must
-  // match too. Unset team domain = presence-only enforcement (fail closed on
-  // a missing header).
+  // the edge Access policy is the primary control). BOTH values are REQUIRED:
+  // with either unset, every /admin/* and /api/admin/* route answers 503
+  // ADMIN_ACCESS_NOT_CONFIGURED (fail closed — a browser can manufacture any
+  // header). With both set, admin requests must carry a
+  // Cf-Access-Jwt-Assertion that parses, declares alg=RS256, whose signature
+  // verifies against the team's published certs, and whose exp, iss and aud
+  // claims verify (exp present and unexpired; iss = the configured team; aud
+  // includes the exact CF_ACCESS_AUD).
   CF_ACCESS_TEAM_DOMAIN?: string;
   CF_ACCESS_AUD?: string;
   // Base URL for admin-dashboard deep links in notification emails.

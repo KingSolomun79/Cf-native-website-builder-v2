@@ -19,12 +19,17 @@ import {
 import { getAdminSiteReview } from "../domain/admin-review";
 import { parseCreativeDirection } from "../domain/creative-direction";
 
-// Operator admin APIs (operator GO 2026-09-12). Every route is gated by the
-// Cloudflare Access guard (assertion header; signature verified when
-// CF_ACCESS_TEAM_DOMAIN is configured). The admin hostname itself must sit
-// behind Cloudflare Access at the edge — the guard is defense in depth, not
-// the primary authz. Approval/Publication stay on their canonical
-// capability-token routes; the dashboard only DISPLAYS state in this ticket.
+// Operator admin APIs (operator GO 2026-09-12; fail-closed Access
+// verification per the 2026-09-12 integration blocker correction). Every
+// route is gated by the Cloudflare Access guard: with CF_ACCESS_TEAM_DOMAIN
+// or CF_ACCESS_AUD unset, admin routes answer 503
+// ADMIN_ACCESS_NOT_CONFIGURED; with both set, requests must carry a
+// Cf-Access-Jwt-Assertion whose RS256 signature verifies against the team's
+// published certs and whose exp, iss and aud claims verify. The admin
+// hostname itself must sit behind Cloudflare Access at the edge — the guard
+// is defense in depth, not the primary authz. Approval/Publication stay on
+// their canonical capability-token routes; the dashboard only DISPLAYS state
+// in this ticket.
 
 function draftErrorResponse(error: IntakeDraftError): Response {
   const status = error.code === "DRAFT_NOT_FOUND" ? 404 : error.code === "DRAFT_IMMUTABLE" || error.code === "DRAFT_ALREADY_CONVERTED" ? 409 : 400;

@@ -180,7 +180,10 @@ export const BusinessFactsSchema = Type.Object(
     // REQUIRED content authority: at least three real service names supplied by
     // the business. Missing services are never invented (intake semantics).
     services: ServicesSchema,
-    // REQUIRED content authority: all seven days, CLOSED or explicit OPEN window.
+    // REQUIRED content authority: all seven days, CLOSED or an explicit OPEN
+    // window. OPEN intervals MAY cross midnight — the open/close order is
+    // never compared (public contract 2026-09-12); the canonical HH:MM pair
+    // is stored exactly as supplied.
     businessHours: BusinessHoursSchema,
     // OPTIONAL human-supplied positioning text ("what sets you apart"). Absent
     // stays absent — never fabricated.
@@ -209,10 +212,12 @@ export interface SubmissionValidationIssue {
   message: string;
 }
 
-// Semantic rules the TypeBox shape cannot express: no duplicate service names
-// and OPEN days must open before close (canonical 24-hour windows do not wrap
-// midnight). Shared by canonical intake and Fact Update application so a
-// merged snapshot can never violate them either.
+// Semantic rules the TypeBox shape cannot express: no duplicate service names.
+// Business hours deliberately carry NO ordering rule — an OPEN interval MAY
+// cross midnight (18:00→02:00 is valid); both times need only be canonical
+// 24-hour HH:MM (pattern-enforced in the schema above). Shared by canonical
+// intake, the public Draft and Fact Update application so every path
+// validates identically.
 export function validateBusinessFactsSemantics(facts: BusinessFacts): SubmissionValidationIssue[] {
   const issues: SubmissionValidationIssue[] = [];
   const seen = new Set<string>();
@@ -225,15 +230,6 @@ export function validateBusinessFactsSemantics(facts: BusinessFacts): Submission
       });
     }
     seen.add(key);
-  }
-  for (const day of WEEKDAYS) {
-    const entry = facts.businessHours?.[day];
-    if (entry && entry.status === "OPEN" && entry.open >= entry.close) {
-      issues.push({
-        path: `$.facts.businessHours.${day}`,
-        message: `OPEN day '${day}' must open before close (canonical 24-hour windows do not wrap midnight)`,
-      });
-    }
   }
   return issues;
 }

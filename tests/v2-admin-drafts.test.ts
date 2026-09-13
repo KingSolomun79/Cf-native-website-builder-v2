@@ -17,10 +17,12 @@ import {
   listDrafts,
 } from "../src/routes/admin-api";
 import { canonicalStructuredFacts } from "./helpers/canonical-facts";
+import { createAccessHarness, type AccessHarness } from "./helpers/access-test";
 
 function runtimeEnv(createWorkflow: ReturnType<typeof vi.fn> = vi.fn()): Env {
   return {
     ...(providedEnv as unknown as Env),
+    ...access.envVars,
     WEBHOOK_SECRET: "test-webhook-secret",
     TURNSTILE_SECRET_KEY: "test-turnstile-secret",
     SITE_BUCKET: (providedEnv as unknown as Env).SITE_BUCKET,
@@ -39,7 +41,11 @@ function fullApp(env: Env): Hono<{ Bindings: Env }> {
   return app;
 }
 
-const ACCESS_HEADERS = { "Cf-Access-Jwt-Assertion": "test-assertion" };
+// Unique team domain per file keeps the guard's per-host cert cache isolated.
+const access: AccessHarness = await createAccessHarness("admin-drafts");
+// Filled in beforeAll with a genuinely signed Access assertion (the guard
+// cryptographically verifies every admin request — no presence-only mode).
+const ACCESS_HEADERS: Record<string, string> = {};
 const ORIGIN = "https://wazibiz.ke";
 
 async function createDraftViaPublicForm(env: Env, businessName: string): Promise<string> {
@@ -71,9 +77,11 @@ function tinyPngBase64(): string {
   return "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==";
 }
 
-beforeAll(() => {
-  // Deterministic Turnstile success for the public-intake setup path.
-  vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ success: true }), { status: 200 })));
+beforeAll(async () => {
+  // The team certs URL is served the harness JWKS; every other URL (Turnstile
+  // siteverify) succeeds deterministically for the public-intake setup path.
+  access.stubFetch();
+  ACCESS_HEADERS["Cf-Access-Jwt-Assertion"] = await access.signToken();
 });
 
 describe("admin draft review, edit and conversion", () => {
