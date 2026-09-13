@@ -68,6 +68,12 @@
   "send_email": [
     {
       "name": "EMAIL"
+    },
+    // Admin notifications (client intake layer, operator GO 2026-09-12): a
+    // SEPARATE binding for Wazibiz internal mail (new client briefs, site
+    // ready / human review / generation failed). Never visitor-controlled.
+    {
+      "name": "ADMIN_EMAIL"
     }
   ],
 
@@ -102,6 +108,11 @@
     // on wazibiz.ke, the domain onboarded to Cloudflare Email Service Email
     // Sending (Enabled, 2026-09-02). Configuration, not a secret.
     "WAZIBIZ_SENDER_EMAIL": "notifications@wazibiz.ke",
+    // Admin notification recipient (client intake layer, operator GO
+    // 2026-09-12): the operator mailbox that receives new client briefs and
+    // site-ready / human-review / generation-failed notices. Configuration,
+    // not a secret — swap per environment here.
+    "WAZIBIZ_ADMIN_EMAIL": "hello@wazibiz.ke",
     "KIE_API_URL": "https://api.kie.ai",
     // Canonical SIMPLE image model (operator GO 2026-09-11, production
     // rollout): Nano Banana 2 Lite via the KIE durable lifecycle. The

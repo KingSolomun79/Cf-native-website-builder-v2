@@ -333,19 +333,22 @@ export function createDefaultEmailTransport(env: Env): EmailTransport {
     } catch (error) {
       const code = (error as { code?: unknown }).code;
       const errorCode = typeof code === "string" ? code : "";
-      if (errorCode && PERMANENT_EMAIL_ERROR_CODES.has(errorCode)) {
-        return { ok: false, classification: "permanent", error: errorCode };
-      }
-      if (errorCode && TRANSIENT_EMAIL_ERROR_CODES.has(errorCode)) {
-        return { ok: false, classification: "transient", error: errorCode };
-      }
+      const classification = classifyEmailErrorCode(errorCode);
       return {
         ok: false,
-        classification: "transient",
+        classification,
         error: errorCode || "email send failed without a documented code",
       };
     }
   };
+}
+
+/** Maps a documented Email Service error code onto transient/permanent semantics
+ *  (see the transport mapping above). Unknown/empty codes stay transient —
+ *  permanence is unproven and callers cap their own attempts. */
+export function classifyEmailErrorCode(errorCode: string): "transient" | "permanent" {
+  if (errorCode && PERMANENT_EMAIL_ERROR_CODES.has(errorCode)) return "permanent";
+  return "transient";
 }
 
 async function sha256Hex(data: string): Promise<string> {

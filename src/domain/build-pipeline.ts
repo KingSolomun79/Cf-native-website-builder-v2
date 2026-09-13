@@ -109,7 +109,26 @@ export async function runBuildPipeline(
     ...(input.deps.step ? { step: input.deps.step } : {}),
     ...(input.deps.sleep ? { sleep: input.deps.sleep } : {}),
   };
-  return runSimpleBuildPipeline(env, { siteGenerationId: input.siteGenerationId, buildId: input.buildId, deps: simpleDeps }).then(
-    (outcome): BuildPipelineOutcome => ({ ...outcome, qaA: null, qaB: null })
+  const outcome = await runSimpleBuildPipeline(env, { siteGenerationId: input.siteGenerationId, buildId: input.buildId, deps: simpleDeps }).then(
+    (result): BuildPipelineOutcome => ({ ...result, qaA: null, qaB: null })
   );
+
+  // Admin terminal notifications (operator GO 2026-09-12): idempotent ledger
+  // + best-effort send. Delivery failure never affects the pipeline outcome —
+  // a swallowed error leaves the PENDING ledger row for the bounded cron sweep.
+  try {
+    const { notifyBuildTerminal } = await import("./admin-notifications");
+    await notifyBuildTerminal(env, {
+      buildId: outcome.buildId,
+      siteId: outcome.siteId,
+      terminal: outcome.terminal,
+      buildVersionId: outcome.releaseReadyBuildVersionId,
+      previewUrl: outcome.previewUrl,
+      reasons: outcome.reasons,
+    });
+  } catch (error) {
+    console.error(`(error) admin_terminal_notification_failed { buildId: '${input.buildId}', message: '${(error as Error).message.replace(/'/g, "")}' }`);
+  }
+
+  return outcome;
 }

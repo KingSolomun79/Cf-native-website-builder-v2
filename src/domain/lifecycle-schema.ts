@@ -326,10 +326,9 @@ export function normalizeBusinessFacts(facts: BusinessFacts): BusinessFacts {
     const trimmedValue = value.trim();
     return trimmedValue.length > 0 ? (trimmedValue as T) : undefined;
   };
-  const normalized: BusinessFacts = {
-    businessName: facts.businessName.trim(),
-    contactEmail: facts.contactEmail.trim(),
-  };
+  const normalized = {} as BusinessFacts;
+  normalized.businessName = facts.businessName.trim();
+  normalized.contactEmail = facts.contactEmail.trim();
   const singles = [
     "businessType",
     "businessDescription",

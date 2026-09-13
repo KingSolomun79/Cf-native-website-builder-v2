@@ -78,6 +78,31 @@ export async function failBuildForWorkflowTermination(
     stage: "workflow_execution",
     detail: `${input.reason}: workflow instance ${input.workflowInstanceId ?? "unknown"} terminated the pipeline${input.detail ? ` — ${input.detail}` : ""}`.slice(0, 500),
   });
+
+  // Admin failure notification (operator GO 2026-09-12): best-effort and
+  // idempotent (ledger dedupe) — the exactly-once transition above guarantees
+  // at most one enqueue per Build.
+  try {
+    const buildRow = await env.DB.prepare(
+      "SELECT g.site_id FROM builds b JOIN site_generations g ON g.id = b.site_generation_id WHERE b.id = ?"
+    )
+      .bind(input.buildId)
+      .first<{ site_id: string }>();
+    if (buildRow) {
+      const { notifyBuildTerminal } = await import("./admin-notifications");
+      await notifyBuildTerminal(env, {
+        buildId: input.buildId,
+        siteId: buildRow.site_id,
+        terminal: "FAILED",
+        buildVersionId: null,
+        previewUrl: null,
+        reasons: [`${input.reason}: workflow instance ${input.workflowInstanceId ?? "unknown"} terminated the pipeline`, input.detail ?? ""].filter(Boolean),
+      });
+    }
+  } catch (error) {
+    console.error(`(error) admin_failure_notification_failed { buildId: '${input.buildId}', message: '${(error as Error).message.replace(/'/g, "")}' }`);
+  }
+
   return { transitioned: true, fromState: build.state };
 }
 

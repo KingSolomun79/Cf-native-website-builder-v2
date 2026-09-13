@@ -80,6 +80,24 @@ export interface Env {
   // and validated at the delivery boundary; missing or malformed fails
   // closed — no fallback address and never a visitor From.
   WAZIBIZ_SENDER_EMAIL?: string;
+  // Admin notifications (client intake layer, operator GO 2026-09-12): a
+  // SEPARATE Cloudflare Email Service binding so operator mail can never be
+  // influenced by browser-controlled visitor data. The recipient is the
+  // operator-approved admin mailbox (VAR, not a secret); the From is the
+  // platform Sender Identity. Missing/invalid configuration fails closed.
+  ADMIN_EMAIL?: CloudflareEmailSender;
+  WAZIBIZ_ADMIN_EMAIL?: string;
+  // Cloudflare Access verification for the admin surface (defense in depth;
+  // the edge Access policy is the primary control). When the team domain is
+  // configured, admin requests must carry a validly-signed, unexpired
+  // Cf-Access-Jwt-Assertion; when CF_ACCESS_AUD is configured its aud must
+  // match too. Unset team domain = presence-only enforcement (fail closed on
+  // a missing header).
+  CF_ACCESS_TEAM_DOMAIN?: string;
+  CF_ACCESS_AUD?: string;
+  // Base URL for admin-dashboard deep links in notification emails.
+  // Defaults to PUBLIC_APP_URL.
+  ADMIN_DASHBOARD_BASE_URL?: string;
   // Days a superseded Published Version stays available as Rollback Version.
   ROLLBACK_WINDOW_DAYS?: string;
   // HMAC secret for operator capability tokens on the Approval/Rollback

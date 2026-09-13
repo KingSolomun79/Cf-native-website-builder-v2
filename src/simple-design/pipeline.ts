@@ -582,6 +582,19 @@ export async function runSimpleBuildPipeline(
       });
     };
 
+    // Governing human revision instruction (operator GO 2026-09-12): a
+    // revision Build carries its Revision Request's requestNote into the
+    // SAME Builder v8/model/path as a bounded intent block. Initial builds
+    // have none.
+    let humanRevisionInstruction: string | undefined;
+    const buildKindRow = await env.DB.prepare("SELECT kind FROM builds WHERE id = ?").bind(buildId).first<{ kind: string }>();
+    if (buildKindRow?.kind === "revision") {
+      const requestRow = await env.DB.prepare("SELECT request_note FROM revision_requests WHERE build_id = ?")
+        .bind(buildId)
+        .first<{ request_note: string | null }>();
+      if (requestRow?.request_note) humanRevisionInstruction = requestRow.request_note;
+    }
+
     const buildOutcome = await stepDo(
       `simple: website build (v${version.buildVersionNumber})`,
       async (): Promise<{ kind: "ok"; strategy: SimplePipelineOutcome["builderStrategy"] } | { kind: "review"; reason: string }> => {
@@ -596,6 +609,7 @@ export async function runSimpleBuildPipeline(
             acceptedImages: acceptedImageDescriptors,
             formServiceEndpoint,
             siteFormId,
+            ...(humanRevisionInstruction ? { humanRevisionInstruction } : {}),
             ...(deps.generate ? { generate: deps.generate } : {}),
           });
           return { kind: "ok" as const, strategy: built.strategy };
