@@ -113,6 +113,19 @@
     // site-ready / human-review / generation-failed notices. Configuration,
     // not a secret — swap per environment here.
     "WAZIBIZ_ADMIN_EMAIL": "hello@wazibiz.ke",
+    // Cloudflare Access (operator GO 2026-09-13, direct production
+    // integration): BOTH are REQUIRED. Every /admin/* and /api/admin/* route
+    // cryptographically verifies the Access JWT (RS256 signature against the
+    // team's cdn-cgi/access/certs keys, exp, issuer https://<team-domain>,
+    // audience containing this exact AUD tag) and fails closed with 503
+    // ADMIN_ACCESS_NOT_CONFIGURED when either var is absent. The AUD is the
+    // Access application's Audience tag, NOT the hostname. These are public
+    // JWT identifiers, not secrets.
+    "CF_ACCESS_TEAM_DOMAIN": "wazibiz.cloudflareaccess.com",
+    "CF_ACCESS_AUD": "1f08e2eefae6a0bb7f4d8d280ac4a73731d43641785261911a7f92ba43c59281",
+    // Browser base for admin deep links in notification emails (ready /
+    // human-review / generation-failed). The Access-fronted admin hostname.
+    "ADMIN_DASHBOARD_BASE_URL": "https://admin-builder.wazibiz.ke",
     "KIE_API_URL": "https://api.kie.ai",
     // Canonical SIMPLE image model (operator GO 2026-09-11, production
     // rollout): Nano Banana 2 Lite via the KIE durable lifecycle. The
