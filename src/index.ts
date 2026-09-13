@@ -5,7 +5,7 @@ import { processDueAdminNotifications } from "./domain/admin-notifications";
 import { reconcileWorkflowTerminations } from "./domain/workflow-reconciliation";
 import { handleKieCallback } from "./routes/internal.kie-callback";
 import { submitOnboardingSubmission } from "./routes/v2.onboarding-submit";
-import { submitClientIntake } from "./routes/public-client-intake";
+import { submitClientIntake, preflightClientIntake } from "./routes/public-client-intake";
 import { registerAdminApiRoutes } from "./routes/admin-api";
 import { registerAdminPageRoutes } from "./routes/admin-pages";
 import { getSiteGeneration } from "./routes/v2.site-generation-get";
@@ -43,8 +43,11 @@ app.post("/api/internal/kie-callback", handleKieCallback);
 
 // PUBLIC client intake (operator GO 2026-09-12): persists a mutable Intake
 // Draft — never a Site Generation. Protected by Turnstile + origin allowlist +
-// hashed-IP rate limiting, NOT by WEBHOOK_SECRET.
+// hashed-IP rate limiting, NOT by WEBHOOK_SECRET. The OPTIONS preflight exists
+// for the wazibiz.ke browser mapper only (allowlisted origins, integration GO
+// 2026-09-13).
 app.post("/api/public/client-intakes", submitClientIntake);
+app.on("OPTIONS", "/api/public/client-intakes", preflightClientIntake);
 
 // Operator admin APIs + dashboard pages (Cloudflare Access-gated).
 registerAdminApiRoutes(app);

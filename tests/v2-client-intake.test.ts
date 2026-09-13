@@ -7,7 +7,7 @@ import { beforeAll, afterEach, describe, expect, it, vi } from "vitest";
 import { env as providedEnv } from "cloudflare:test";
 import { Hono } from "hono";
 import type { Env } from "../src/env.d";
-import { submitClientIntake } from "../src/routes/public-client-intake";
+import { submitClientIntake, preflightClientIntake } from "../src/routes/public-client-intake";
 import { canonicalStructuredFacts } from "./helpers/canonical-facts";
 
 function runtimeEnv(): Env {
@@ -23,6 +23,7 @@ function runtimeEnv(): Env {
 function app(_env: Env): Hono<{ Bindings: Env }> {
   const hono = new Hono<{ Bindings: Env }>();
   hono.post("/api/public/client-intakes", submitClientIntake);
+  hono.on("OPTIONS", "/api/public/client-intakes", preflightClientIntake);
   return hono;
 }
 
@@ -143,6 +144,39 @@ describe("public client intake", () => {
     const closedDay = JSON.parse(JSON.stringify(draftPayload())) as Record<string, unknown>;
     ((closedDay.business as Record<string, unknown>).businessHours as Record<string, unknown>).sunday = { status: "CLOSED" };
     expect((await post(app(env), env, closedDay)).status).toBe(201);
+  });
+
+  it("answers the CORS preflight for the allowlisted origin only", async () => {
+    const env = runtimeEnv();
+    const preflight = await app(env).request("https://test.example.com/api/public/client-intakes", {
+      method: "OPTIONS",
+      headers: { Origin: ORIGIN, "Access-Control-Request-Method": "POST", "Access-Control-Request-Headers": "content-type" },
+    }, env);
+    expect(preflight.status).toBe(204);
+    expect(preflight.headers.get("access-control-allow-origin")).toBe(ORIGIN);
+    expect(preflight.headers.get("access-control-allow-methods")).toContain("POST");
+    expect(preflight.headers.get("access-control-allow-headers")).toContain("content-type");
+
+    const foreign = await app(env).request("https://test.example.com/api/public/client-intakes", {
+      method: "OPTIONS",
+      headers: { Origin: "https://evil.example" },
+    }, env);
+    expect(foreign.status).toBe(403);
+    expect(foreign.headers.get("access-control-allow-origin")).toBeNull();
+  });
+
+  it("marks success and error responses readable for the allowlisted origin", async () => {
+    const env = runtimeEnv();
+    const accepted = await post(app(env), env, draftPayload(), { "CF-Connecting-IP": crypto.randomUUID() });
+    expect(accepted.status).toBe(201);
+    expect(accepted.headers.get("access-control-allow-origin")).toBe(ORIGIN);
+
+    // A Turnstile rejection is still READABLE by the mapper (CORS header
+    // present) — fail closed, not fail opaque.
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ success: false }), { status: 200 })));
+    const rejected = await post(app(env), env, draftPayload(), { "CF-Connecting-IP": crypto.randomUUID() });
+    expect(rejected.status).toBe(403);
+    expect(rejected.headers.get("access-control-allow-origin")).toBe(ORIGIN);
   });
 
   it("rejects a TURNSTILE failure before any durable write", async () => {

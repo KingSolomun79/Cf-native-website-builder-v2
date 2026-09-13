@@ -14,6 +14,14 @@ This document is the single source of truth for the payload the public WAZIBIZ w
 - Rate limit: 5 accepted submissions per source per rolling hour (keyed by a salted hash of the remote address; the raw IP is never persisted).
 - A successful call creates a MUTABLE Intake Draft only. It can NEVER start a Site Generation, Build or workflow — canonical generation starts exclusively through the operator admin surface.
 
+## CORS (browser preflight)
+
+The wazibiz.ke mapper posts JSON cross-origin, so the endpoint answers CORS preflights:
+
+- `OPTIONS /api/public/client-intakes` with an allowlisted `Origin` answers `204` with `Access-Control-Allow-Origin: https://wazibiz.ke`, `Access-Control-Allow-Methods: POST, OPTIONS`, `Access-Control-Allow-Headers: content-type` (cached 24h via `Access-Control-Max-Age`).
+- Any other origin: `403` with no CORS headers.
+- Successful AND error responses to the allowlisted origin carry `Access-Control-Allow-Origin: https://wazibiz.ke`, so the mapper can read the JSON verdict in every case. No credentials are used or allowed (the endpoint is cookie-less).
+
 ## Request shape
 
 ```json
