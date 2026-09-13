@@ -18,14 +18,63 @@
         "About page direction: establish expertise, approach and philosophy under a headline like 'SEO without the noise.' Explain that RankForge combines technical understanding, search behaviour, content strategy, commercial thinking and disciplined prioritisation. Principles: Commercial relevance — prioritise searches and improvements connected to actual business opportunities. Technical clarity — solve structural problems that make websites harder for search engines and users to understand. Useful content — create content around genuine customer questions and search intent. Continuous improvement — treat SEO as an evolving growth channel rather than a one-off checklist.",
         "Contact page direction: headline like 'Let's talk about where search can take your business.' Contact form fields: Name, Company, Email, Phone, Website, 'What would you like help with?' (options: SEO Strategy, Technical SEO, Local SEO, Content Strategy, Ecommerce SEO, SEO Audit, Not sure yet), Message.",
         "Strict content constraints: do not invent testimonials, customers, rankings, traffic growth, revenue results, years in business, founders, team members, certifications, awards, an office address or any quantitative claims. Do not promise guaranteed rankings or specific traffic/revenue increases. The Reference site is a design source only: never copy its name, text, branding, logo, imagery or business content."
-      ]
+      ],
+      "services": [
+        {
+          "name": "Technical SEO Audits"
+        },
+        {
+          "name": "Content Strategy"
+        },
+        {
+          "name": "Local Search Optimization"
+        }
+      ],
+      "businessHours": {
+        "monday": {
+          "status": "OPEN",
+          "open": "08:00",
+          "close": "17:00"
+        },
+        "tuesday": {
+          "status": "OPEN",
+          "open": "08:00",
+          "close": "17:00"
+        },
+        "wednesday": {
+          "status": "OPEN",
+          "open": "08:00",
+          "close": "17:00"
+        },
+        "thursday": {
+          "status": "OPEN",
+          "open": "08:00",
+          "close": "17:00"
+        },
+        "friday": {
+          "status": "OPEN",
+          "open": "08:00",
+          "close": "17:00"
+        },
+        "saturday": {
+          "status": "OPEN",
+          "open": "09:00",
+          "close": "13:00"
+        },
+        "sunday": {
+          "status": "CLOSED"
+        }
+      }
     },
     "reference": {
       "url": "https://morabeza.digital/",
       "adaptationContract": {
         "version": "1",
         "unsupportedFeatures": [
-          { "feature": "heavy_parallax", "reason": "Reference uses scroll-linked parallax choreography outside static-light generated-site dependencies" }
+          {
+            "feature": "heavy_parallax",
+            "reason": "Reference uses scroll-linked parallax choreography outside static-light generated-site dependencies"
+          }
         ],
         "acceptedApproximations": [
           {

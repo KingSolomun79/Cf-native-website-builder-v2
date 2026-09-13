@@ -1,3 +1,4 @@
+import { canonicalStructuredFacts } from "./helpers/canonical-facts";
 import { beforeAll, describe, expect, it, vi } from "vitest";
 import { env as providedEnv } from "cloudflare:test";
 import { Hono } from "hono";
@@ -47,7 +48,7 @@ function submissionPayload(overrides: Record<string, unknown> = {}): Record<stri
       phoneNumber: "+254 700 111 222",
       city: "Nakuru",
       country: "Kenya",
-    },
+    ...(canonicalStructuredFacts())},
     reference: {
       url: "https://reference.example.com/",
       screenshotR2Key: "references/uploads/abc123.png",

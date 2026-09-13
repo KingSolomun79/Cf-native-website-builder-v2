@@ -1,3 +1,4 @@
+import { canonicalStructuredFacts } from "./helpers/canonical-facts";
 import { describe, expect, it } from "vitest";
 import { env as providedEnv } from "cloudflare:test";
 import type { Env } from "../src/env.d";
@@ -155,7 +156,7 @@ describe("AI-stage provenance records the routed Coding Plan identity", () => {
     const started = await startSiteGeneration(env, {
       payload: {
         buildMode: "REFERENCE_BOUND",
-        facts: { businessName: "Model Routing Provenance Business", contactEmail: "ops@wazibizwebsites.example" },
+        facts: { businessName: "Model Routing Provenance Business", contactEmail: "ops@wazibizwebsites.example" , ...(canonicalStructuredFacts()) },
         reference: { screenshotR2Key: "references/model-routing/unused.png" },
       },
     });

@@ -1,3 +1,4 @@
+import { canonicalStructuredFacts } from "./helpers/canonical-facts";
 // ORIGINAL_DESIGN Site Generation (issue #24): the SAME SIMPLE downstream
 // pipeline as REFERENCE_BOUND — only the Blueprint inputs/prompt and the
 // Visual QA authority/prompt diverge. Reference-only stages are SKIPPED, never
@@ -40,7 +41,7 @@ function originalPayload(overrides: Record<string, unknown> = {}): Record<string
       contactEmail: "studio@terrabeam.example",
       businessType: "Architecture and interior renovation studio",
       businessDescription: "A small studio designing warm, modern renovations for family homes.",
-    },
+    ...(canonicalStructuredFacts())},
     creativeDirection: CREATIVE_DIRECTION,
     ...overrides,
   };
@@ -95,7 +96,7 @@ describe("ORIGINAL_DESIGN onboarding input authority (issue #24)", () => {
   it("REJECTS creativeDirection on a REFERENCE_BOUND submission — design-origin inputs never leak across modes", () => {
     const invalid = validateOnboardingSubmissionPayload({
       buildMode: "REFERENCE_BOUND",
-      facts: { businessName: "Rift Roasters", contactEmail: "hello@rift.example" },
+      facts: { businessName: "Rift Roasters", contactEmail: "hello@rift.example" , ...(canonicalStructuredFacts()) },
       reference: { url: "https://reference.example.com/" },
       creativeDirection: { direction: "should not be allowed here" },
     });
@@ -108,7 +109,7 @@ describe("ORIGINAL_DESIGN onboarding input authority (issue #24)", () => {
   it("REFERENCE_BOUND still requires Reference authority (unchanged)", () => {
     const invalid = validateOnboardingSubmissionPayload({
       buildMode: "REFERENCE_BOUND",
-      facts: { businessName: "Rift Roasters", contactEmail: "hello@rift.example" },
+      facts: { businessName: "Rift Roasters", contactEmail: "hello@rift.example" , ...(canonicalStructuredFacts()) },
     });
     expect(invalid.valid).toBe(false);
     if (!invalid.valid) {

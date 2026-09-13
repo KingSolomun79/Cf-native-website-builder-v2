@@ -16,7 +16,56 @@
         "Process, four stages: 01 Survey — map the process line and define measurement points. 02 Instrument — specify probes and edge unit placement. 03 Install & calibrate — fitting, calibration and threshold setup. 04 Monitor — dashboard onboarding and alert tuning with the plant team.",
         "Things to emphasize: measurement accuracy, buffer-then-forward reliability during network outages, engineers who install and calibrate in person.",
         "Strict content constraints: do not invent customers, case studies, uptime percentages, accuracy specs, certifications, awards, pricing or headcount. Describe capabilities without quantitative claims."
-      ]
+      ],
+      "services": [
+        {
+          "name": "Sensor Probes"
+        },
+        {
+          "name": "MF-Edge Unit"
+        },
+        {
+          "name": "Meridian Dashboard"
+        },
+        {
+          "name": "Assessment & Install"
+        }
+      ],
+      "businessHours": {
+        "monday": {
+          "status": "OPEN",
+          "open": "08:00",
+          "close": "17:00"
+        },
+        "tuesday": {
+          "status": "OPEN",
+          "open": "08:00",
+          "close": "17:00"
+        },
+        "wednesday": {
+          "status": "OPEN",
+          "open": "08:00",
+          "close": "17:00"
+        },
+        "thursday": {
+          "status": "OPEN",
+          "open": "08:00",
+          "close": "17:00"
+        },
+        "friday": {
+          "status": "OPEN",
+          "open": "08:00",
+          "close": "17:00"
+        },
+        "saturday": {
+          "status": "OPEN",
+          "open": "09:00",
+          "close": "13:00"
+        },
+        "sunday": {
+          "status": "CLOSED"
+        }
+      }
     },
     "creativeDirection": {
       "direction": "Precision instrument: a technical, engineered aesthetic — cool slate surfaces with a signal-amber accent, a visible layout grid like graph paper, monospaced data labels, schematic line diagrams as section dividers, and dense, well-considered typography that respects the reader",

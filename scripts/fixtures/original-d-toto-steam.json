@@ -15,7 +15,56 @@
         "Programs (exactly these four): Saturday Lab — rotating two-hour build and experiment sessions. Holiday Camps — week-long themed maker camps during school breaks. School Partnerships — curriculum-linked workshops delivered at partner schools. Birthday Builds — a group build project as a birthday party activity.",
         "Things to emphasize: small groups of eight, trained facilitators, every child takes home what they build, all materials and safety gear provided.",
         "Strict content constraints: do not invent testimonials, client names, awards, certifications, years in business, staff bios, pricing or any statistics. Never use real children's names or photos."
-      ]
+      ],
+      "services": [
+        {
+          "name": "Saturday Lab"
+        },
+        {
+          "name": "Holiday Camps"
+        },
+        {
+          "name": "School Partnerships"
+        },
+        {
+          "name": "Birthday Builds"
+        }
+      ],
+      "businessHours": {
+        "monday": {
+          "status": "OPEN",
+          "open": "08:00",
+          "close": "17:00"
+        },
+        "tuesday": {
+          "status": "OPEN",
+          "open": "08:00",
+          "close": "17:00"
+        },
+        "wednesday": {
+          "status": "OPEN",
+          "open": "08:00",
+          "close": "17:00"
+        },
+        "thursday": {
+          "status": "OPEN",
+          "open": "08:00",
+          "close": "17:00"
+        },
+        "friday": {
+          "status": "OPEN",
+          "open": "08:00",
+          "close": "17:00"
+        },
+        "saturday": {
+          "status": "OPEN",
+          "open": "09:00",
+          "close": "13:00"
+        },
+        "sunday": {
+          "status": "CLOSED"
+        }
+      }
     },
     "creativeDirection": {
       "direction": "Toy-box workshop poster: a bright, chunky, screen-free maker feel — mustard yellow, tomato red and cobalt on warm cream, thick rounded outlines, big friendly shapes that look cut from coloured paper, and photos treated like snapshots taped into a scrapbook",

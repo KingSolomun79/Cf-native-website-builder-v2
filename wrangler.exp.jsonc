@@ -63,6 +63,10 @@
   "send_email": [
     {
       "name": "EMAIL"
+    },
+    // Admin notifications (client intake layer) — separate operator binding.
+    {
+      "name": "ADMIN_EMAIL"
     }
   ],
   "triggers": {
@@ -87,6 +91,7 @@
     "CF_ACCOUNT_ID": "c1c0f6b100d55a09ce6a7a3121a19224",
     "PUBLIC_APP_URL": "https://cf-website-factory-sandbox.wazibizwebsites.workers.dev",
     "WAZIBIZ_SENDER_EMAIL": "notifications@wazibiz.ke",
+    "WAZIBIZ_ADMIN_EMAIL": "hello@wazibiz.ke",
     "KIE_API_URL": "https://api.kie.ai",
     "KIE_MODEL": "nano-banana-2-lite",
     "KIE_POLL_INTERVAL_MS": "30000",

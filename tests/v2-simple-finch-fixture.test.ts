@@ -1,3 +1,4 @@
+import { canonicalStructuredFacts } from "./helpers/canonical-facts";
 // Known-good Blueprint builder test (experiment spec section 61): given the
 // Finch-format Design Blueprint as a FIXED fixture, the new Website Builder
 // produces a high-quality coherent four-page bundle that passes the
@@ -34,6 +35,7 @@ const FACTS = {
   contactEmail: "stay@savannahhearth.example",
   businessType: "Luxury tented safari camp",
   businessDescription: "A small luxury tented camp with golden-season visits and quiet evenings.",
+  ...(canonicalStructuredFacts()),
 };
 
 describe("known-good Blueprint builder test (spec section 61)", () => {

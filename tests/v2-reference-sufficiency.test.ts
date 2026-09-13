@@ -1,3 +1,4 @@
+import { canonicalStructuredFacts } from "./helpers/canonical-facts";
 import { describe, expect, it } from "vitest";
 import { env as providedEnv } from "cloudflare:test";
 import type { Env } from "../src/env.d";
@@ -159,7 +160,7 @@ async function newGeneration(reference: Record<string, unknown>): Promise<{
   const started = await startSiteGeneration(env, {
     payload: {
       buildMode: "REFERENCE_BOUND",
-      facts: { businessName: "Sufficiency Probe Co", contactEmail: "probe@suff.example" },
+      facts: { businessName: "Sufficiency Probe Co", contactEmail: "probe@suff.example" , ...(canonicalStructuredFacts()) },
       reference,
     },
   });

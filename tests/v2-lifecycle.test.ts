@@ -1,3 +1,4 @@
+import { canonicalStructuredFacts } from "./helpers/canonical-facts";
 import { beforeAll, describe, expect, it, vi } from "vitest";
 import { env as providedEnv } from "cloudflare:test";
 import { Hono } from "hono";
@@ -48,7 +49,7 @@ function submissionPayload(overrides: Record<string, unknown> = {}): Record<stri
       businessDescription: "Small-batch coffee roasting for cafes and homes.",
       city: "Nakuru",
       country: "Kenya",
-    },
+    ...(canonicalStructuredFacts())},
     reference: {
       url: "https://meridian-atelier.example.com/",
       screenshotR2Key: "references/uploads/abc123.png",

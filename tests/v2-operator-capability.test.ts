@@ -1,3 +1,4 @@
+import { canonicalStructuredFacts } from "./helpers/canonical-facts";
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import { env as providedEnv } from "cloudflare:test";
 import { Hono } from "hono";
@@ -110,7 +111,7 @@ async function newSite(): Promise<{
   const started = await startSiteGeneration(env, {
     payload: {
       buildMode: "REFERENCE_BOUND",
-      facts: { businessName: "Capability Roasters", contactEmail: "hi@cap.example" },
+      facts: { businessName: "Capability Roasters", contactEmail: "hi@cap.example" , ...(canonicalStructuredFacts()) },
       reference: { screenshotR2Key: `references/uploads/cap-${Math.random().toString(36).slice(2)}.png` },
     },
   });

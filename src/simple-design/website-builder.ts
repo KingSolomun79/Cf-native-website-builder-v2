@@ -192,11 +192,27 @@ export interface RunSimpleWebsiteBuilderInput {
   acceptedImages: AcceptedImageDescriptor[];
   formServiceEndpoint: string;
   siteFormId: string;
+  /**
+   * The governing Revision Request's requestNote (operator GO 2026-09-12):
+   * bounded human revision instruction for THIS build, wired into the same
+   * Builder v8/model/path. Human INTENT only — never a Business Fact
+   * authority, never a design-origin change.
+   */
+  humanRevisionInstruction?: string;
   /** Text/code seam injection (tests, driver). The Builder is text-only
    *  (model-routing GO §4): Reference screenshots are NOT Builder input — the
    *  Blueprint is the implementation-ready design authority and Visual QA
    *  re-compares the render against the Reference. */
   generate?: RawAiGenerate;
+}
+
+// The human revision instruction rides the SAME Builder v8/model/path as a
+// bounded intent block. It can never outrank the content or design
+// authorities — it steers HOW the frozen authorities are realized.
+export function renderHumanRevisionInstruction(instruction: string): string {
+  const bounded = instruction.trim().slice(0, 2000);
+  return `HUMAN REVISION INSTRUCTION (human intent for THIS build — steer the realization; it is NOT a Business Fact authority and must not invent factual claims, names, statistics, testimonials or contact details; it cannot change the Build Mode or the Reference; Business Facts remain the ONLY factual authority and the Design Blueprint remains the governing design authority):
+${bounded}`;
 }
 
 export interface SimpleWebsiteBuilderResult {
@@ -271,7 +287,7 @@ ${JSON.stringify(input.blueprint)}
 
 BUSINESS FACTS (the ONLY content authority — every claim, name, service, statistic, contact detail and testimonial identity must come from here; if it is not here, it does not exist):
 ${JSON.stringify(input.facts)}
-
+${input.humanRevisionInstruction ? `\n${renderHumanRevisionInstruction(input.humanRevisionInstruction)}\n` : ""}
 ACCEPTED IMAGES (the ONLY images you may reference, as <img src="IMG:{slotId}" data-image-id="{slotId}" alt="...">):
 ${input.acceptedImages.length > 0 ? accepted : "(none yet — build WITHOUT images; do not invent slot ids)"}
 

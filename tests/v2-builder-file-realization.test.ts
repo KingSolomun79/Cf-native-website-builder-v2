@@ -1,3 +1,4 @@
+import { canonicalStructuredFacts } from "./helpers/canonical-facts";
 // SIX_CALL_FILE_REALIZATION Builder on the Z.AI Coding Plan — DOM-FIRST,
 // CSS-LAST (operator GO 2026-09-11: VISUAL FIDELITY ITERATION), proven at the
 // repository's seams:
@@ -59,6 +60,7 @@ const FACTS = {
   contactEmail: "ops@rankforge.example",
   businessType: "SEO agency",
   businessDescription: "An SEO agency in Nairobi helping Kenyan businesses grow.",
+  ...(canonicalStructuredFacts()),
 } as const;
 
 // ── fixtures ─────────────────────────────────────────────────────────────────

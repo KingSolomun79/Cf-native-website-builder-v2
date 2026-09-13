@@ -1,3 +1,4 @@
+import { canonicalStructuredFacts } from "./helpers/canonical-facts";
 import { describe, expect, it } from "vitest";
 import { env as providedEnv } from "cloudflare:test";
 import type { Env } from "../src/env.d";
@@ -144,7 +145,7 @@ describe("Reference Visual Package at intake (issue #41)", () => {
     const started = await startSiteGeneration(env, {
       payload: {
         buildMode: "REFERENCE_BOUND",
-        facts: { businessName: "Visual Package Co", contactEmail: "vp@visual.example" },
+        facts: { businessName: "Visual Package Co", contactEmail: "vp@visual.example" , ...(canonicalStructuredFacts()) },
         reference: { screenshotR2Key: screenshotKey },
       },
     });

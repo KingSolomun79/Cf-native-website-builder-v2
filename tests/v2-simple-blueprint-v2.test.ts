@@ -1,3 +1,4 @@
+import { canonicalStructuredFacts } from "./helpers/canonical-facts";
 // design-blueprint/2 (operator GO, 2026-09-10): four-page heroes are
 // STRUCTURAL schema invariants with deterministic materialization.
 //   §19 schema: required hero specs + required hero image briefs per page; no
@@ -44,6 +45,7 @@ const FACTS = {
   contactEmail: "ops@rankforge.example",
   businessType: "SEO agency",
   businessDescription: "An SEO agency in Nairobi helping Kenyan businesses grow.",
+  ...(canonicalStructuredFacts()),
 } as const;
 
 // ── §19 schema ──────────────────────────────────────────────────────────────

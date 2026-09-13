@@ -1,3 +1,4 @@
+import { canonicalStructuredFacts } from "./helpers/canonical-facts";
 // SIMPLE design pipeline end-to-end (experiment spec sections 8-9, 37, 48,
 // 49-54, 59, 70, 72): one REFERENCE_BOUND Build through the REAL pipeline
 // seam (runBuildPipeline → simple branch) with only the provider seams
@@ -31,7 +32,7 @@ async function startGeneration(screenshotKey: string): Promise<string> {
         contactEmail: "ops@rankforge.example",
         businessType: "SEO agency",
         businessDescription: "An SEO agency in Nairobi helping Kenyan businesses grow.",
-      },
+      ...(canonicalStructuredFacts())},
       reference: { screenshotR2Key: screenshotKey, url: "https://reference.example.com/" },
     },
   });

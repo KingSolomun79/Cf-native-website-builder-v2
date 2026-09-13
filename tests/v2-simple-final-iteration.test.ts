@@ -1,3 +1,4 @@
+import { canonicalStructuredFacts } from "./helpers/canonical-facts";
 // FINAL SIMPLE ITERATION (operator GO, 2026-09-09): regression proofs for the
 // five scoped changes before the final decision benchmark —
 //   #1  screen-free KIE scene adaptation at the request boundary (+ hashes)
@@ -51,6 +52,7 @@ const FACTS = {
   contactEmail: "ops@rankforge.example",
   businessType: "SEO agency",
   businessDescription: "An SEO agency in Nairobi helping Kenyan businesses grow.",
+  ...(canonicalStructuredFacts()),
 };
 
 // The SIX frozen RankForge slot briefs (benchmark artifact d8fac165 /

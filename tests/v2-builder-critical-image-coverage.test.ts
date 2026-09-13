@@ -1,3 +1,4 @@
+import { canonicalStructuredFacts } from "./helpers/canonical-facts";
 // CRITICAL IMAGE COVERAGE (operator GO, 2026-09-10): the Website Builder's
 // own image contract, proven at the seams the repository tests.
 //
@@ -53,6 +54,7 @@ const FACTS = {
   contactEmail: "ops@rankforge.example",
   businessType: "SEO agency",
   businessDescription: "An SEO agency in Nairobi helping Kenyan businesses grow.",
+  ...(canonicalStructuredFacts()),
 } as const;
 
 // ── fixtures ─────────────────────────────────────────────────────────────────

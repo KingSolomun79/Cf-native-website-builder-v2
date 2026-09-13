@@ -1,9 +1,13 @@
 import { Hono } from "hono";
 import type { Env } from "./env.d";
 import { processDueEmailDeliveries } from "./domain/form-service";
+import { processDueAdminNotifications } from "./domain/admin-notifications";
 import { reconcileWorkflowTerminations } from "./domain/workflow-reconciliation";
 import { handleKieCallback } from "./routes/internal.kie-callback";
 import { submitOnboardingSubmission } from "./routes/v2.onboarding-submit";
+import { submitClientIntake } from "./routes/public-client-intake";
+import { registerAdminApiRoutes } from "./routes/admin-api";
+import { registerAdminPageRoutes } from "./routes/admin-pages";
 import { getSiteGeneration } from "./routes/v2.site-generation-get";
 import { createBuildForSiteGeneration } from "./routes/v2.build-create";
 import { startBuildPipeline } from "./routes/v2.pipeline-start";
@@ -37,6 +41,15 @@ app.post("/api/v2/sites/:siteId/rollback", rollbackSitePublication);
 
 app.post("/api/internal/kie-callback", handleKieCallback);
 
+// PUBLIC client intake (operator GO 2026-09-12): persists a mutable Intake
+// Draft — never a Site Generation. Protected by Turnstile + origin allowlist +
+// hashed-IP rate limiting, NOT by WEBHOOK_SECRET.
+app.post("/api/public/client-intakes", submitClientIntake);
+
+// Operator admin APIs + dashboard pages (Cloudflare Access-gated).
+registerAdminApiRoutes(app);
+registerAdminPageRoutes(app);
+
 // The experiment benchmark driver route (/api/v2/exp/benchmark-driver) was
 // retired with the post-rollout hardening (2026-09-12): the rollout condition
 // "keep the driver until production smoke succeeds" was met — production
@@ -67,6 +80,14 @@ export async function scheduled(event: ScheduledController, env: Env): Promise<v
     }
   } catch (error) {
     console.error(`(error) email_retry_sweep_failed { message: '${(error as Error).message.replace(/'/g, "")}' }`);
+  }
+  try {
+    const processed = await processDueAdminNotifications(env);
+    if (processed > 0) {
+      console.log(`admin notification sweep: ${processed} due notifications processed (cron ${event.cron})`);
+    }
+  } catch (error) {
+    console.error(`(error) admin_notification_sweep_failed { message: '${(error as Error).message.replace(/'/g, "")}' }`);
   }
   try {
     const summary = await reconcileWorkflowTerminations(env);
