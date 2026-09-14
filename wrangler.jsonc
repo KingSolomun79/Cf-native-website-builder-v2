@@ -112,7 +112,7 @@
     // 2026-09-12): the operator mailbox that receives new client briefs and
     // site-ready / human-review / generation-failed notices. Configuration,
     // not a secret — swap per environment here.
-    "WAZIBIZ_ADMIN_EMAIL": "hello@wazibiz.ke",
+    "WAZIBIZ_ADMIN_EMAIL": "wazibizwebsites@gmail.com",
     // Cloudflare Access (operator GO 2026-09-13, direct production
     // integration): BOTH are REQUIRED. Every /admin/* and /api/admin/* route
     // cryptographically verifies the Access JWT (RS256 signature against the
