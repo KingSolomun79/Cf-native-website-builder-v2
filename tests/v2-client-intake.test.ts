@@ -1,7 +1,8 @@
 // Public client intake (operator GO 2026-09-12): the public form creates a
 // MUTABLE Intake Draft and can NEVER start a Site Generation. Protected by
-// Turnstile + strict origin allowlist + hashed-IP rate limiting — never
-// WEBHOOK_SECRET.
+// Turnstile (DEDICATED CLIENT_INTAKE_TURNSTILE_SECRET_KEY — the Wazibiz
+// website widget; no fallback to the generated-sites form secret) + strict
+// origin allowlist + hashed-IP rate limiting — never WEBHOOK_SECRET.
 
 import { beforeAll, afterEach, describe, expect, it, vi } from "vitest";
 import { env as providedEnv } from "cloudflare:test";
@@ -14,7 +15,11 @@ function runtimeEnv(): Env {
   return {
     ...(providedEnv as unknown as Env),
     WEBHOOK_SECRET: "test-webhook-secret",
-    TURNSTILE_SECRET_KEY: "test-turnstile-secret",
+    // The two distinct Turnstile widgets (secret SPLIT, operator GO
+    // 2026-09-13): intake must verify with its OWN secret and must never
+    // fall back to the generated-sites Form Service secret.
+    TURNSTILE_SECRET_KEY: "generated-sites-form-secret",
+    CLIENT_INTAKE_TURNSTILE_SECRET_KEY: "wazibiz-intake-secret",
     WAZIBIZ_SENDER_EMAIL: "notifications@wazibiz.ke",
     WAZIBIZ_ADMIN_EMAIL: "admin@wazibiz.ke",
   };
@@ -189,6 +194,39 @@ describe("public client intake", () => {
     const missing = await post(app(env), env, (({ turnstileToken: _token, ...rest }) => rest)(JSON.parse(JSON.stringify(draftPayload())) as Record<string, unknown>));
     expect(failed.status).toBe(403);
     expect(missing.status).toBe(403);
+    expect(await draftCount(env)).toBe(before);
+  });
+
+  it("verifies with the DEDICATED client-intake secret — never the Form Service secret", async () => {
+    const env = runtimeEnv();
+    const secretsSent: string[] = [];
+    const realFetch = globalThis.fetch;
+    vi.stubGlobal("fetch", async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input).includes("challenges.cloudflare.com/turnstile/v0/siteverify")) {
+        const body = JSON.parse(String(init?.body)) as { secret?: string };
+        secretsSent.push(body.secret ?? "");
+        return new Response(JSON.stringify({ success: true }), { status: 200 });
+      }
+      return realFetch(input, init);
+    });
+    const response = await post(app(env), env, draftPayload(), { "CF-Connecting-IP": crypto.randomUUID() });
+    expect(response.status).toBe(201);
+    // The siteverify call carried the intake widget's secret…
+    expect(secretsSent).toEqual(["wazibiz-intake-secret"]);
+    // …and NEVER the generated-sites Form Service secret.
+    expect(secretsSent).not.toContain("generated-sites-form-secret");
+  });
+
+  it("fails closed without CLIENT_INTAKE_TURNSTILE_SECRET_KEY and never falls back to TURNSTILE_SECRET_KEY", async () => {
+    // The generated-sites Form Service secret is deliberately STILL present
+    // here: the intake endpoint must reject anyway (distinct widgets, no
+    // fallback) and must not write anything.
+    const env = runtimeEnv();
+    delete (env as unknown as Record<string, unknown>).CLIENT_INTAKE_TURNSTILE_SECRET_KEY;
+    const before = await draftCount(env);
+    const response = await post(app(env), env, draftPayload(), { "CF-Connecting-IP": crypto.randomUUID() });
+    expect(response.status).toBe(403);
+    expect(((await response.json()) as { error: { code: string } }).error.code).toBe("TURNSTILE_FAILED");
     expect(await draftCount(env)).toBe(before);
   });
 

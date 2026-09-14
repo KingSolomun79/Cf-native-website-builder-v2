@@ -17,7 +17,10 @@ import {
 //
 // Protections (all fail closed):
 //   - strict schema validation (draft shape, no unknown fields)
-//   - Cloudflare Turnstile (siteverify; missing secret rejects)
+//   - Cloudflare Turnstile (siteverify via the DEDICATED
+//     CLIENT_INTAKE_TURNSTILE_SECRET_KEY — the Wazibiz website widget; a
+//     missing secret rejects. Never falls back to TURNSTILE_SECRET_KEY,
+//     which belongs exclusively to the generated-sites Form Service)
 //   - fixed-window rate limit keyed by a HASHED remote address
 //     (SHA-256 with the platform secret as salt — no raw IP persisted)
 //   - strict Origin allowlist (wazibiz.ke only)
@@ -170,7 +173,11 @@ async function hashRemoteAddress(env: Env, remoteAddress: string): Promise<strin
 }
 
 async function verifyTurnstile(env: Env, token: string): Promise<boolean> {
-  const secret = env.TURNSTILE_SECRET_KEY;
+  // Dedicated Wazibiz-website-widget secret. Deliberately NOT
+  // TURNSTILE_SECRET_KEY (generated-sites Form Service) and no fallback:
+  // the two widgets are distinct, so the wrong-widget secret must never be
+  // able to pass this check. Missing secret => fail closed.
+  const secret = env.CLIENT_INTAKE_TURNSTILE_SECRET_KEY;
   if (!secret) return false;
   try {
     const response = await fetch("https://challenges.cloudflare.com/turnstile/v0/siteverify", {

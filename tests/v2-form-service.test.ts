@@ -138,6 +138,37 @@ describe("WAZIBIZ Form Service", () => {
     expect(count!.n).toBe(1);
   });
 
+  it("verifies visitor Turnstile with the GENERATED-SITES secret — unaffected by the client-intake split", async () => {
+    const siteId = await newSiteWithConfiguration({ turnstile: true });
+    const secretsSent: string[] = [];
+    const realFetch = globalThis.fetch;
+    // This goes through the REAL env seam (verifyTurnstileViaApi), not the
+    // injected verifier: it must keep using TURNSTILE_SECRET_KEY and must be
+    // indifferent to whether the client-intake secret exists at all.
+    (env as unknown as Record<string, unknown>).TURNSTILE_SECRET_KEY = "test-generated-sites-turnstile-secret";
+    delete (env as unknown as Record<string, unknown>).CLIENT_INTAKE_TURNSTILE_SECRET_KEY;
+    try {
+      vi.stubGlobal("fetch", async (input: RequestInfo | URL, init?: RequestInit) => {
+        if (String(input).includes("challenges.cloudflare.com/turnstile/v0/siteverify")) {
+          const body = JSON.parse(String(init?.body)) as { secret?: string };
+          secretsSent.push(body.secret ?? "");
+          return new Response(JSON.stringify({ success: true }), { status: 200 });
+        }
+        return realFetch(input, init);
+      });
+      const accepted = await postForm(application, browserPayload(siteId, { turnstileToken: "valid-token" }), { ip: "203.0.113.21" });
+      expect(accepted.status).toBe(202);
+      // The siteverify call carried the generated-sites widget's secret…
+      expect(secretsSent).toEqual(["test-generated-sites-turnstile-secret"]);
+      // …and NEVER the Wazibiz client-intake secret.
+      expect(secretsSent).not.toContain("wazibiz-intake-secret");
+    } finally {
+      delete (env as unknown as Record<string, unknown>).TURNSTILE_SECRET_KEY;
+      delete (env as unknown as Record<string, unknown>).CLIENT_INTAKE_TURNSTILE_SECRET_KEY;
+      vi.unstubAllGlobals();
+    }
+  });
+
   it("rejects browser payloads that try to control delivery or smuggle fields", async () => {
     const siteId = await newSiteWithConfiguration();
     const recipient = await postForm(application, browserPayload(siteId, { recipient: "attacker@evil.example" }));

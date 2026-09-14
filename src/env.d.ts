@@ -73,7 +73,23 @@ export interface Env {
   // `{messageId}` and throwing Errors with an `E_*` code property)
   // independently of the ambient workers-types version.
   EMAIL?: CloudflareEmailSender;
+  // Two DISTINCT Cloudflare Turnstile widgets — never interchangeable:
+  //
+  // - TURNSTILE_SECRET_KEY: the GENERATED-SITES widget. Used exclusively by
+  //   the central WAZIBIZ Form Service (src/domain/form-service.ts) for
+  //   visitor contact forms on generated client sites.
+  //
+  // - CLIENT_INTAKE_TURNSTILE_SECRET_KEY: the WAZIBIZ WEBSITE widget
+  //   (wazibiz.ke, including /website-brief/). Used exclusively by
+  //   POST /api/public/client-intakes (src/routes/public-client-intake.ts).
+  //   REQUIRED for that endpoint: a missing secret fails closed (403) and
+  //   there is deliberately NO fallback to TURNSTILE_SECRET_KEY.
+  //
+  // Both are Worker secrets (`wrangler secret put`); never config vars,
+  // never committed, never exposed to browser code. The website receives
+  // only the public Wazibiz widget site key.
   TURNSTILE_SECRET_KEY?: string;
+  CLIENT_INTAKE_TURNSTILE_SECRET_KEY?: string;
   // Platform Sender Identity for outbound Form Service email (issue #32).
   // Worker VAR, not a secret: the default outbound From, swappable per
   // environment (local/staging/production) without source changes. Resolved

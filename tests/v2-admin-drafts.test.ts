@@ -24,7 +24,10 @@ function runtimeEnv(createWorkflow: ReturnType<typeof vi.fn> = vi.fn()): Env {
     ...(providedEnv as unknown as Env),
     ...access.envVars,
     WEBHOOK_SECRET: "test-webhook-secret",
+    // Dedicated client-intake Turnstile secret (split from the generated-sites
+    // Form Service secret, operator GO 2026-09-13).
     TURNSTILE_SECRET_KEY: "test-turnstile-secret",
+    CLIENT_INTAKE_TURNSTILE_SECRET_KEY: "test-turnstile-secret",
     SITE_BUCKET: (providedEnv as unknown as Env).SITE_BUCKET,
     WEBSITE_BUILD_WORKFLOW: { create: createWorkflow } as unknown as Workflow,
   };

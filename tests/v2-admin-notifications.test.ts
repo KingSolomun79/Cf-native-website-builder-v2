@@ -35,7 +35,10 @@ function runtimeEnv(options: { adminSend?: () => Promise<void>; withAdminTranspo
   return {
     ...(providedEnv as unknown as Env),
     WEBHOOK_SECRET: "test-webhook-secret",
+    // Dedicated client-intake Turnstile secret (split from the generated-sites
+    // Form Service secret, operator GO 2026-09-13).
     TURNSTILE_SECRET_KEY: "test-turnstile-secret",
+    CLIENT_INTAKE_TURNSTILE_SECRET_KEY: "test-turnstile-secret",
     WAZIBIZ_SENDER_EMAIL: "notifications@wazibiz.ke",
     ...(options.withAdminRecipient === false ? {} : { WAZIBIZ_ADMIN_EMAIL: "admin@wazibiz.ke" }),
     ADMIN_DASHBOARD_BASE_URL: "https://admin-builder.wazibiz.ke",

@@ -117,7 +117,7 @@ describe("business hours: overnight intervals are valid (no open<close rule)", (
   it("the public intake stores the exact supplied overnight pair", async () => {
     const app = new Hono<{ Bindings: Env }>();
     app.post("/api/public/client-intakes", submitClientIntake);
-    const runtimeEnv = { ...env, WEBHOOK_SECRET: "test-webhook-secret", TURNSTILE_SECRET_KEY: "test-turnstile-secret" };
+    const runtimeEnv = { ...env, WEBHOOK_SECRET: "test-webhook-secret", TURNSTILE_SECRET_KEY: "test-turnstile-secret", CLIENT_INTAKE_TURNSTILE_SECRET_KEY: "test-turnstile-secret" };
     const response = await app.request("https://test.example.com/api/public/client-intakes", {
       method: "POST",
       headers: {
