@@ -4,6 +4,15 @@
 // V2 state — no duplicate lifecycle state is invented. Approval/Publication
 // intentionally have NO buttons here: they remain the canonical
 // capability-token routes (Access login is NOT publication authority).
+//
+// UI overhaul (operator feedback 2026-09-14): dark theme matching the public
+// intake form, full-width fields, aligned action rows, and explicit feedback
+// for every action (Validate & Generate previously failed SILENTLY — the API
+// returns a flat {siteId,…} but the old JS read result.converted.siteId and
+// threw before redirecting). NOTE: style/script content is injected with
+// dangerouslySetInnerHTML — Hono JSX HTML-escapes plain string children, and
+// escaped quotes inside <style> silently kill CSS rules (the original cause
+// of the collapsed input widths).
 
 import { Hono, type Context } from "hono";
 import type { Env } from "../env.d";
@@ -18,37 +27,66 @@ async function guard(c: Context<{ Bindings: Env }>): Promise<Response | null> {
 }
 
 const STYLES = `
-  :root { --ink: #1c1a17; --paper: #faf8f4; --line: #e3ded4; --accent: #1f5f5b; --warn: #a3542c; }
+  :root {
+    --bg: #181b20; --panel: #1f242c; --field: #232833; --line: #3a4150;
+    --ink: #d0d6de; --ink-strong: #f2f5f9; --muted: #9aa4b2;
+    --accent: #a770ef; --accent-2: #fdb99b; --link: #cdb3ff;
+    --ok-bg: #14251c; --ok-line: #2e7d4f; --ok-ink: #8ee6b0;
+    --err-bg: #33191b; --err-line: #a33a3a; --err-ink: #ffd7d7;
+  }
   * { box-sizing: border-box; }
-  body { margin: 0; font-family: system-ui, sans-serif; background: var(--paper); color: var(--ink); }
-  header { border-bottom: 1px solid var(--line); padding: 1rem 2rem; display: flex; gap: 1.5rem; align-items: baseline; }
-  header a { color: var(--accent); text-decoration: none; }
-  main { padding: 1.5rem 2rem; max-width: 1100px; margin: 0 auto; }
+  body { margin: 0; font-family: "Exo", system-ui, sans-serif; background: var(--bg); color: var(--ink); font-size: 15px; }
+  header { border-bottom: 1px solid var(--line); padding: 0.9rem 2rem; display: flex; gap: 1.5rem; align-items: baseline; background: #15181d; }
+  header .brand { color: var(--ink-strong); font-weight: 700; font-size: 1.05rem; }
+  header a { color: var(--link); text-decoration: none; }
+  header a:hover { text-decoration: underline; }
+  main { padding: 1.5rem 2rem 3rem; max-width: 1100px; margin: 0 auto; }
+  h2 { color: var(--ink-strong); }
+  a { color: var(--link); }
   table { width: 100%; border-collapse: collapse; }
-  th, td { text-align: left; padding: 0.6rem 0.75rem; border-bottom: 1px solid var(--line); font-size: 0.9rem; }
-  th { font-weight: 600; }
-  .badge { display: inline-block; border: 1px solid var(--line); border-radius: 999px; padding: 0.1rem 0.7rem; font-size: 0.75rem; background: #fff; }
-  .badge.ready { border-color: var(--accent); color: var(--accent); }
-  .badge.review { border-color: var(--warn); color: var(--warn); }
-  .badge.failed { border-color: #b3261e; color: #b3261e; }
-  .card { background: #fff; border: 1px solid var(--line); border-radius: 8px; padding: 1.25rem 1.5rem; margin-bottom: 1.25rem; }
-  .card h2 { margin-top: 0; font-size: 1.05rem; }
-  label { display: block; font-size: 0.8rem; margin: 0.75rem 0 0.25rem; color: #555; }
-  input[type="text"], input[type="email"], input[type="time"], textarea, select { width: 100%; padding: 0.5rem; border: 1px solid var(--line); border-radius: 6px; font: inherit; background: #fff; }
-  textarea { min-height: 5rem; }
-  button { font: inherit; border: 1px solid var(--accent); background: var(--accent); color: #fff; border-radius: 6px; padding: 0.5rem 1.1rem; cursor: pointer; margin-top: 0.75rem; }
-  button.secondary { background: #fff; color: var(--accent); }
-  button.danger { background: #fff; color: #b3261e; border-color: #b3261e; }
-  .row { display: grid; grid-template-columns: 2fr 3fr auto; gap: 0.75rem; align-items: start; margin-bottom: 0.5rem; }
-  .hours-row { display: grid; grid-template-columns: 7rem 6rem 6rem 7rem; gap: 0.75rem; align-items: center; margin-bottom: 0.4rem; }
-  .muted { color: #777; font-size: 0.85rem; }
+  th, td { text-align: left; padding: 0.65rem 0.75rem; border-bottom: 1px solid var(--line); font-size: 0.92rem; }
+  th { font-weight: 600; color: var(--ink-strong); }
+  .badge { display: inline-block; border: 1px solid var(--line); border-radius: 999px; padding: 0.12rem 0.75rem; font-size: 0.75rem; background: var(--field); color: var(--ink); }
+  .badge.ready { border-color: var(--ok-line); color: var(--ok-ink); }
+  .badge.review { border-color: #c98a3d; color: #f0c387; }
+  .badge.failed { border-color: var(--err-line); color: var(--err-ink); }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 1.4rem 1.6rem; margin-bottom: 1.4rem; }
+  .card h2 { margin-top: 0; font-size: 1.15rem; }
+  .card h3 { color: var(--ink); }
+  label { display: block; font-size: 0.85rem; font-weight: 600; margin: 0.9rem 0 0.3rem; color: var(--ink); }
+  input, textarea, select { width: 100%; padding: 0.65rem 0.75rem; border: 1px solid var(--line); border-radius: 7px; font: inherit; font-size: 0.95rem; background: var(--field); color: var(--ink-strong); color-scheme: dark; }
+  input::placeholder, textarea::placeholder { color: #77808f; }
+  input:focus, textarea:focus, select:focus { outline: 2px solid var(--accent); outline-offset: 1px; border-color: var(--accent); }
+  input:disabled { opacity: 0.45; cursor: not-allowed; }
+  textarea { min-height: 7rem; resize: vertical; }
+  input[type="file"] { padding: 0.5rem; }
+  input[type="checkbox"].note-select { width: auto; accent-color: var(--accent); }
+  .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 0 1.2rem; }
+  .actions { display: flex; gap: 0.8rem; justify-content: flex-end; align-items: center; margin-top: 1.2rem; }
+  .actions .spacer { margin-right: auto; }
+  button { font: inherit; font-weight: 600; border: 1px solid transparent; background: linear-gradient(90deg, var(--accent), var(--accent-2)); color: #fff; border-radius: 8px; padding: 0.65rem 1.4rem; cursor: pointer; min-height: 42px; }
+  button:hover { filter: brightness(1.08); }
+  button:disabled { opacity: 0.5; cursor: not-allowed; filter: none; }
+  button.secondary { background: transparent; color: var(--link); border-color: #6f52b8; }
+  button.danger { background: transparent; color: #ff9b9b; border-color: var(--err-line); }
+  .row { display: grid; grid-template-columns: 2fr 3fr auto; gap: 0.75rem; align-items: center; margin-bottom: 0.6rem; }
+  .hours-row { display: grid; grid-template-columns: 8rem 8rem 1fr 1fr; gap: 0.75rem; align-items: center; margin-bottom: 0.5rem; }
+  .hours-row strong { color: var(--ink-strong); font-weight: 600; }
+  .muted { color: var(--muted); font-size: 0.85rem; }
   .hidden { display: none; }
-  .flash { border: 1px solid var(--accent); background: #eef6f5; border-radius: 6px; padding: 0.6rem 0.9rem; margin-bottom: 1rem; }
+  .flash { border: 1px solid var(--ok-line); background: var(--ok-bg); color: var(--ok-ink); border-radius: 8px; padding: 0.75rem 1rem; margin-bottom: 1.1rem; font-size: 0.92rem; }
+  .flash.error { border-color: var(--err-line); background: var(--err-bg); color: var(--err-ink); }
   .chat { display: grid; gap: 0.5rem; }
-  .chat .note { border: 1px solid var(--line); border-radius: 6px; padding: 0.5rem 0.75rem; background: #fff; }
-  .chat .note.included { background: #f4f8f4; }
-  .chat .note .meta { color: #777; font-size: 0.75rem; }
-  pre { background: #f4f1ea; padding: 0.75rem; border-radius: 6px; overflow-x: auto; font-size: 0.8rem; }
+  .chat .note { border: 1px solid var(--line); border-radius: 7px; padding: 0.6rem 0.8rem; background: var(--field); }
+  .chat .note.included { background: #1c2a22; }
+  .chat .note .meta { color: var(--muted); font-size: 0.75rem; margin-top: 0.25rem; }
+  pre { background: var(--field); border: 1px solid var(--line); padding: 0.75rem; border-radius: 7px; overflow-x: auto; font-size: 0.8rem; }
+  @media (max-width: 720px) {
+    main { padding: 1rem 1rem 3rem; }
+    .grid-2 { grid-template-columns: 1fr; }
+    .row { grid-template-columns: 1fr; }
+    .hours-row { grid-template-columns: 1fr 1fr; }
+  }
 `;
 
 function Layout(props: { active: string; children?: unknown }) {
@@ -59,11 +97,14 @@ function Layout(props: { active: string; children?: unknown }) {
         <meta name="viewport" content="width=device-width, initial-scale=1" />
         <meta name="robots" content="noindex, nofollow" />
         <title>Wazibiz Builder — Admin</title>
-        <style>{STYLES}</style>
+        <link rel="preconnect" href="https://fonts.googleapis.com" />
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="anonymous" />
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Exo:wght@400;600;700&display=swap" />
+        <style dangerouslySetInnerHTML={{ __html: STYLES }} />
       </head>
       <body>
         <header>
-          <strong>Wazibiz Builder</strong>
+          <span class="brand">Wazibiz Builder</span>
           <a href="/admin/intakes">Intakes</a>
         </header>
         <main>{props.children as never}</main>
@@ -159,6 +200,17 @@ async function IntakesPage(c: Context<{ Bindings: Env }>): Promise<Response> {
 
 const EDITOR_JS = (apiPath: string) => `
 const API = '${apiPath}';
+function flash(message, isError) {
+  var el = document.getElementById('flash');
+  el.textContent = message;
+  el.style.display = 'block';
+  el.className = isError ? 'flash error' : 'flash';
+}
+function extractError(result, fallback) {
+  if (!result || !result.error) return fallback;
+  if (typeof result.error === 'string') return result.error;
+  return result.error.message || result.error.code || fallback;
+}
 function serviceRow(name, description) {
   const div = document.createElement('div');
   div.className = 'row service-row';
@@ -199,6 +251,13 @@ function collectPayload() {
     }
   });
   const socialsRaw = document.getElementById('socials').value.trim();
+  var socials = null;
+  if (socialsRaw) {
+    try { socials = JSON.parse(socialsRaw); } catch (e) {
+      flash('Socials is not valid JSON — fix or clear it before saving.', true);
+      return null;
+    }
+  }
   var payload = {
     submitter: { name: document.getElementById('submitter-name').value, email: document.getElementById('submitter-email').value },
     business: {
@@ -227,33 +286,39 @@ function collectPayload() {
       inspirationNotes: document.getElementById('pref-inspiration').value
     }
   };
-  if (socialsRaw) { try { payload.business.socials = JSON.parse(socialsRaw); } catch (e) {} }
+  if (socials) { payload.business.socials = socials; }
   var logo = document.getElementById('logo-url').value.trim(); if (logo) payload.business.logoUrl = logo;
   var diff = document.getElementById('differentiator').value.trim(); if (diff) payload.business.competitiveDifferentiator = diff;
   var refUrl = document.getElementById('reference-url').value.trim(); payload.referenceUrl = refUrl || null;
   return payload;
 }
-function flash(message, isError) {
-  var el = document.getElementById('flash');
-  el.textContent = message;
-  el.style.display = 'block';
-  el.style.borderColor = isError ? '#b3261e' : '';
-  el.style.background = isError ? '#fbeae9' : '';
-}
 async function saveDraft(markInReview) {
+  const body = collectPayload();
+  if (!body) return;
+  body.markInReview = markInReview;
+  body.adminNotes = document.getElementById('admin-notes').value;
+  const btn = document.getElementById('save-btn');
+  btn.disabled = true;
+  flash('Saving draft…', false);
   try {
-    const body = collectPayload();
-    body.markInReview = markInReview;
-    body.adminNotes = document.getElementById('admin-notes').value;
     const response = await fetch(API, { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
-    const result = await response.json();
-    if (!response.ok) { flash('Save failed: ' + (result.error && (result.error.message || result.error) || response.status), true); return; }
-    flash('Draft saved.');
-    setTimeout(function () { location.reload(); }, 400);
-  } catch (e) { flash('Save failed: ' + e.message, true); }
+    const result = await response.json().catch(function () { return null; });
+    if (!response.ok) { flash('Save failed: ' + extractError(result, 'HTTP ' + response.status), true); return; }
+    flash('Draft saved. Reloading…', false);
+    setTimeout(function () { location.reload(); }, 500);
+  } catch (e) {
+    flash('Save failed: ' + e.message, true);
+  } finally {
+    btn.disabled = false;
+  }
 }
 async function generate() {
+  const btn = document.getElementById('generate-btn');
   const buildMode = document.getElementById('build-mode').value;
+  if (!buildMode) {
+    flash('Choose a Build Mode first — ORIGINAL_DESIGN or REFERENCE_BOUND. Nothing was started.', true);
+    return;
+  }
   const body = { buildMode: buildMode };
   if (buildMode === 'ORIGINAL_DESIGN') {
     body.creativeDirection = {
@@ -268,20 +333,40 @@ async function generate() {
       inspirationNotes: document.getElementById('cd-inspiration').value
     };
     for (const key in body.creativeDirection) { if (!body.creativeDirection[key]) delete body.creativeDirection[key]; }
-    if (!body.creativeDirection.direction) { flash("Creative direction needs at least the 'direction' field.", true); return; }
+    if (!body.creativeDirection.direction) { flash("Creative direction needs at least the 'direction' field. Nothing was started.", true); return; }
   } else {
     if (document.getElementById('reference-url').value.trim()) body.referenceUrl = document.getElementById('reference-url').value.trim();
   }
-  const response = await fetch(API + '/validate-and-generate', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
-  const result = await response.json();
-  if (!response.ok && response.status !== 200) { flash('Generate failed: ' + (result.error && (result.error.message || result.error) || response.status), true); return; }
-  if (result.alreadyConverted) { flash('Draft was already converted — opening the existing generation.'); }
-  window.location.href = '/admin/sites/' + result.converted.siteId;
+  btn.disabled = true;
+  btn.textContent = 'Validating & starting generation…';
+  flash('Validating the draft and starting generation — this page will redirect to the site review when ready…', false);
+  try {
+    const response = await fetch(API + '/validate-and-generate', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+    const result = await response.json().catch(function () { return null; });
+    if (!response.ok) {
+      flash('Generate failed — nothing was lost, the draft is unchanged. Reason: ' + extractError(result, 'HTTP ' + response.status), true);
+      return;
+    }
+    // The API returns the conversion FLAT: { siteId, siteGenerationId, …, alreadyConverted }.
+    const siteId = result && (result.siteId || (result.converted && result.converted.siteId));
+    if (!siteId) {
+      flash('The generation request succeeded but the response had no site id — check the Intakes list for this draft before retrying.', true);
+      return;
+    }
+    flash((result.alreadyConverted ? 'Draft was already converted — opening the existing generation…' : 'Generation started — opening the site review page…'), false);
+    window.location.href = '/admin/sites/' + siteId;
+  } catch (e) {
+    flash('Generate failed: ' + e.message + ' — check the Intakes list before retrying (the action is idempotent).', true);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Validate & Generate';
+  }
 }
 function modeChanged() {
   const mode = document.getElementById('build-mode').value;
   document.getElementById('od-panel').classList.toggle('hidden', mode !== 'ORIGINAL_DESIGN');
   document.getElementById('rb-panel').classList.toggle('hidden', mode !== 'REFERENCE_BOUND');
+  document.getElementById('generate-btn').disabled = !mode;
 }
 async function uploadScreenshot() {
   const input = document.getElementById('screenshot-input');
@@ -291,16 +376,21 @@ async function uploadScreenshot() {
   let binary = '';
   const bytes = new Uint8Array(buffer);
   for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
-  const response = await fetch(API + '/reference-screenshot', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ filename: file.name, contentBase64: btoa(binary) }) });
-  const result = await response.json();
-  if (!response.ok) { flash('Upload failed: ' + (result.error && (result.error.message || result.error) || response.status), true); return; }
-  flash('Screenshot stored: ' + result.referenceScreenshotR2Key);
+  flash('Uploading screenshot…', false);
+  try {
+    const response = await fetch(API + '/reference-screenshot', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ filename: file.name, contentBase64: btoa(binary) }) });
+    const result = await response.json().catch(function () { return null; });
+    if (!response.ok) { flash('Upload failed: ' + extractError(result, 'HTTP ' + response.status), true); return; }
+    flash('Screenshot stored: ' + result.referenceScreenshotR2Key, false);
+  } catch (e) {
+    flash('Upload failed: ' + e.message, true);
+  }
 }
 `;
 
 function textField(id: string, label: string, value: string, type = "text") {
   return (
-    <div>
+    <div class="field">
       <label for={id}>{label}</label>
       <input type={type} id={id} value={value} />
     </div>
@@ -325,7 +415,7 @@ async function IntakeEditorPage(c: Context<{ Bindings: Env }>, draft: IntakeDraf
   ));
   return c.html(
     <Layout active="intakes">
-      <div id="flash" class="flash" style={{ display: "none" }} />
+      <div id="flash" class="flash" style={{ display: "none" }} aria-live="polite" />
       {converted ? (
         <div class="card">
           <h2>
@@ -335,9 +425,14 @@ async function IntakeEditorPage(c: Context<{ Bindings: Env }>, draft: IntakeDraf
             This draft is immutable after Validate &amp; Generate. Later factual changes are Fact Updates inside a Revision
             Request on the site page.
           </p>
-          <a class="badge ready" href={`/admin/sites/${draft.convertedSiteId}`}>
-            Open site review
-          </a>
+          <div class="actions">
+            <span class="muted" style={{ "margin-right": "auto" }}>
+              Status: {draft.status}
+            </span>
+            <a class="badge ready" href={`/admin/sites/${draft.convertedSiteId}`}>
+              Open site review
+            </a>
+          </div>
         </div>
       ) : (
         <>
@@ -359,30 +454,35 @@ async function IntakeEditorPage(c: Context<{ Bindings: Env }>, draft: IntakeDraf
                   </div>
                 ))}
               </div>
-              <button type="button" class="secondary" onclick="addService()">
-                Add Service
-              </button>
+              <div class="actions">
+                <button type="button" class="secondary" onclick="addService()">
+                  Add Service
+                </button>
+              </div>
             </div>
           </div>
           <div class="card">
             <h2>Business brief</h2>
-            {textField("business-name", "Business name", business.businessName)}
-            {textField("contact-email", "Public contact email", business.contactEmail)}
-            {textField("business-type", "Business type", business.businessType ?? "")}
+            <div class="grid-2">
+              {textField("business-name", "Business name", business.businessName)}
+              {textField("contact-email", "Public contact email", business.contactEmail, "email")}
+              {textField("business-type", "Business type", business.businessType ?? "")}
+              {textField("ideal-client", "Ideal client profile", business.idealClientProfile ?? "")}
+              {textField("address", "Address line", business.addressLine1 ?? "")}
+              {textField("city", "City", business.city ?? "")}
+              {textField("country", "Country", business.country ?? "")}
+              {textField("phone", "Phone", business.phoneNumber ?? "", "tel")}
+              {textField("whatsapp", "WhatsApp", business.whatsappNumber ?? "", "tel")}
+              {textField("logo-url", "Logo URL (optional)", business.logoUrl ?? "", "url")}
+            </div>
             <label for="business-description">Business description</label>
             <textarea id="business-description">{business.businessDescription ?? ""}</textarea>
-            {textField("ideal-client", "Ideal client profile", business.idealClientProfile ?? "")}
-            {textField("address", "Address line", business.addressLine1 ?? "")}
-            {textField("city", "City", business.city ?? "")}
-            {textField("country", "Country", business.country ?? "")}
-            {textField("phone", "Phone", business.phoneNumber ?? "")}
-            {textField("whatsapp", "WhatsApp", business.whatsappNumber ?? "")}
-            {textField("logo-url", "Logo URL (optional)", business.logoUrl ?? "")}
-            {textField("socials", "Socials (JSON, optional)", business.socials ? JSON.stringify(business.socials) : "")}
             <label for="differentiator">Competitive differentiator (optional)</label>
             <textarea id="differentiator">{business.competitiveDifferentiator ?? ""}</textarea>
             <label for="extra-info">Extra information</label>
             <textarea id="extra-info">{business.extraInformation ?? ""}</textarea>
+            <label for="socials">Socials (JSON, optional)</label>
+            <textarea id="socials" style={{ "min-height": "4.5rem" }}>{business.socials ? JSON.stringify(business.socials) : ""}</textarea>
             <label>Business hours</label>
             <div id="hours">{hoursRows as never}</div>
           </div>
@@ -394,21 +494,26 @@ async function IntakeEditorPage(c: Context<{ Bindings: Env }>, draft: IntakeDraf
             </p>
             <label for="pref-direction">Direction</label>
             <textarea id="pref-direction">{prefs.direction ?? ""}</textarea>
-            {textField("pref-audience", "Audience", prefs.audience ?? "")}
-            {textField("pref-goal", "Conversion goal", prefs.conversionGoal ?? "")}
-            {textField("pref-palette", "Preferred palette", prefs.preferredPalette ?? "")}
-            {textField("pref-style", "Visual style", prefs.visualStyle ?? "")}
-            {textField("pref-tone", "Tone", prefs.tone ?? "")}
-            {textField("pref-avoid", "Avoidances", prefs.avoidances ?? "")}
-            {textField("pref-inspiration", "Inspiration notes", prefs.inspirationNotes ?? "")}
+            <div class="grid-2">
+              {textField("pref-audience", "Audience", prefs.audience ?? "")}
+              {textField("pref-goal", "Conversion goal", prefs.conversionGoal ?? "")}
+              {textField("pref-palette", "Preferred palette", prefs.preferredPalette ?? "")}
+              {textField("pref-style", "Visual style", prefs.visualStyle ?? "")}
+              {textField("pref-tone", "Tone", prefs.tone ?? "")}
+              {textField("pref-avoid", "Avoidances", prefs.avoidances ?? "")}
+            </div>
+            <label for="pref-inspiration">Inspiration notes</label>
+            <textarea id="pref-inspiration" style={{ "min-height": "4.5rem" }}>{prefs.inspirationNotes ?? ""}</textarea>
           </div>
           <div class="card">
             <h2>Admin notes (private)</h2>
             <textarea id="admin-notes">{draft.adminNotes ?? ""}</textarea>
             <p class="muted">Submitter: {draft.submitterName} &lt;{draft.submitterEmail}&gt; — private intake contact, never a public Business Fact.</p>
-            <button type="button" class="secondary" onclick="saveDraft(true)">
-              Save (mark In Review)
-            </button>
+            <div class="actions">
+              <button type="button" id="save-btn" class="secondary" onclick="saveDraft(true)">
+                Save (mark In Review)
+              </button>
+            </div>
           </div>
           <div class="card">
             <h2>Validate &amp; Generate</h2>
@@ -422,28 +527,35 @@ async function IntakeEditorPage(c: Context<{ Bindings: Env }>, draft: IntakeDraf
             <div id="od-panel" class="hidden">
               <label for="cd-direction">Creative direction (required — at minimum the direction)</label>
               <textarea id="cd-direction">{prefs.direction ?? ""}</textarea>
-              {textField("cd-audience", "Audience", prefs.audience ?? "")}
-              {textField("cd-goal", "Conversion goal", prefs.conversionGoal ?? "")}
-              {textField("cd-environment", "Service environment", prefs.serviceEnvironment ?? "")}
-              {textField("cd-palette", "Preferred palette", prefs.preferredPalette ?? "")}
-              {textField("cd-style", "Visual style", prefs.visualStyle ?? "")}
-              {textField("cd-tone", "Tone", prefs.tone ?? "")}
-              {textField("cd-avoid", "Avoidances", prefs.avoidances ?? "")}
-              {textField("cd-inspiration", "Inspiration notes", prefs.inspirationNotes ?? "")}
+              <div class="grid-2">
+                {textField("cd-audience", "Audience", prefs.audience ?? "")}
+                {textField("cd-goal", "Conversion goal", prefs.conversionGoal ?? "")}
+                {textField("cd-environment", "Service environment", prefs.serviceEnvironment ?? "")}
+                {textField("cd-palette", "Preferred palette", prefs.preferredPalette ?? "")}
+                {textField("cd-style", "Visual style", prefs.visualStyle ?? "")}
+                {textField("cd-tone", "Tone", prefs.tone ?? "")}
+                {textField("cd-avoid", "Avoidances", prefs.avoidances ?? "")}
+                {textField("cd-inspiration", "Inspiration notes", prefs.inspirationNotes ?? "")}
+              </div>
             </div>
             <div id="rb-panel" class="hidden">
-              {textField("reference-url", "Reference URL", draft.payload.referenceUrl ?? "")}
+              {textField("reference-url", "Reference URL", draft.payload.referenceUrl ?? "", "url")}
               <label for="screenshot-input">Reference screenshot (PNG/JPEG, max 9 MB)</label>
               <input type="file" id="screenshot-input" accept="image/png,image/jpeg" />
-              <button type="button" class="secondary" onclick="uploadScreenshot()">
-                Upload screenshot
-              </button>
+              <div class="actions">
+                <button type="button" class="secondary" onclick="uploadScreenshot()">
+                  Upload screenshot
+                </button>
+              </div>
               {draft.payload.referenceScreenshotR2Key ? <p class="muted">Stored: {draft.payload.referenceScreenshotR2Key}</p> : null}
               <p class="muted">Client design preferences stay visible above as CLIENT NOTES — they never enter a REFERENCE_BOUND submission.</p>
             </div>
-            <button type="button" onclick="generate()">
-              Validate &amp; Generate
-            </button>
+            <div class="actions">
+              <span class="muted spacer">The Generate button unlocks once a Build Mode is chosen.</span>
+              <button type="button" id="generate-btn" onclick="generate()" disabled>
+                Validate &amp; Generate
+              </button>
+            </div>
           </div>
         </>
       )}
@@ -456,12 +568,21 @@ async function IntakeEditorPage(c: Context<{ Bindings: Env }>, draft: IntakeDraf
 
 const SITE_JS = (apiPath: string) => `
 const API = '${apiPath}';
+function flash(message, isError) {
+  var el = document.getElementById('flash');
+  el.textContent = message;
+  el.style.display = 'block';
+  el.className = isError ? 'flash error' : 'flash';
+}
 async function addNote() {
   const note = document.getElementById('new-note').value.trim();
-  if (!note) return;
-  const response = await fetch(API + '/notes', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ note: note }) });
-  if (!response.ok) { const r = await response.json(); alert('Note failed: ' + (r.error && r.error.message || response.status)); return; }
-  location.reload();
+  if (!note) { flash('Write the note first.', true); return; }
+  try {
+    const response = await fetch(API + '/notes', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ note: note }) });
+    const result = await response.json().catch(function () { return null; });
+    if (!response.ok) { flash('Note failed: ' + ((result && result.error && (result.error.message || result.error.code)) || response.status), true); return; }
+    location.reload();
+  } catch (e) { flash('Note failed: ' + e.message, true); }
 }
 async function generateRevision() {
   const noteIds = Array.from(document.querySelectorAll('input.note-select:checked')).map(function (el) { return el.value; });
@@ -470,12 +591,22 @@ async function generateRevision() {
   var email = document.getElementById('fp-email').value.trim(); if (email) factPatch.contactEmail = email;
   var whatsapp = document.getElementById('fp-whatsapp').value.trim(); if (whatsapp) factPatch.whatsappNumber = whatsapp;
   var diff = document.getElementById('fp-diff').value.trim(); if (diff) factPatch.competitiveDifferentiator = diff;
-  var raw = document.getElementById('fp-json').value.trim(); if (raw) { try { Object.assign(factPatch, JSON.parse(raw)); } catch (e) { alert('Fact JSON is invalid: ' + e.message); return; } }
-  const response = await fetch(API + '/generate-revision', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ noteIds: noteIds, factPatch: factPatch }) });
-  const result = await response.json();
-  if (!response.ok) { alert('Generate Revision failed: ' + (result.error && result.error.message || response.status)); return; }
-  alert('Revision Request created — one new Build started (' + result.buildId.slice(0, 8) + ').');
-  location.reload();
+  var raw = document.getElementById('fp-json').value.trim(); if (raw) { try { Object.assign(factPatch, JSON.parse(raw)); } catch (e) { flash('Fact JSON is invalid: ' + e.message, true); return; } }
+  if (!noteIds.length && !Object.keys(factPatch).length) { flash('Select at least one pending note or enter a fact change — nothing to revise.', true); return; }
+  const btn = document.getElementById('revision-btn');
+  btn.disabled = true;
+  flash('Creating the Revision Request and starting ONE revision build…', false);
+  try {
+    const response = await fetch(API + '/generate-revision', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ noteIds: noteIds, factPatch: factPatch }) });
+    const result = await response.json().catch(function () { return null; });
+    if (!response.ok) { flash('Generate Revision failed: ' + ((result && result.error && (result.error.message || result.error.code)) || response.status), true); return; }
+    flash('Revision Request created — one new Build started (' + (result.buildId || '').slice(0, 8) + '). Reloading…', false);
+    setTimeout(function () { location.reload(); }, 800);
+  } catch (e) {
+    flash('Generate Revision failed: ' + e.message, true);
+  } finally {
+    btn.disabled = false;
+  }
 }
 `;
 
@@ -491,6 +622,7 @@ async function SiteReviewPage(c: Context<{ Bindings: Env }>, review: AdminSiteRe
   ));
   return c.html(
     <Layout active="sites">
+      <div id="flash" class="flash" style={{ display: "none" }} aria-live="polite" />
       <div class="card">
         <h2>{review.businessName}</h2>
         <p>
@@ -539,22 +671,28 @@ async function SiteReviewPage(c: Context<{ Bindings: Env }>, review: AdminSiteRe
         <div class="chat">{noteItems as never}</div>
         <label for="new-note">New note</label>
         <textarea id="new-note" placeholder='e.g. "Reduce the mobile hero title."' />
-        <button type="button" class="secondary" onclick="addNote()">
-          Add note
-        </button>
+        <div class="actions">
+          <button type="button" class="secondary" onclick="addNote()">
+            Add note
+          </button>
+        </div>
       </div>
       <div class="card">
         <h2>Generate Revision</h2>
         <p class="muted">Selected pending notes become the request note. Factual changes come from the structured fields (Fact Updates) — never from the notes themselves.</p>
-        {textField("fp-phone", "Phone change", "")}
-        {textField("fp-email", "Contact email change", "")}
-        {textField("fp-whatsapp", "WhatsApp change", "")}
-        {textField("fp-diff", "Competitive differentiator change", "")}
+        <div class="grid-2">
+          {textField("fp-phone", "Phone change", "", "tel")}
+          {textField("fp-email", "Contact email change", "", "email")}
+          {textField("fp-whatsapp", "WhatsApp change", "", "tel")}
+          {textField("fp-diff", "Competitive differentiator change", "")}
+        </div>
         <label for="fp-json">Additional FactPatch JSON (whole-field; advanced)</label>
         <textarea id="fp-json" placeholder='{"services": [ { "name": "…" }, { "name": "…" }, { "name": "…" } ]}' />
-        <button type="button" onclick="generateRevision()">
-          Generate Revision
-        </button>
+        <div class="actions">
+          <button type="button" id="revision-btn" onclick="generateRevision()">
+            Generate Revision
+          </button>
+        </div>
       </div>
       <script dangerouslySetInnerHTML={{ __html: SITE_JS(`/api/admin/sites/${review.siteId}`) }} />
     </Layout>
