@@ -173,7 +173,7 @@ describe("admin notifications", () => {
     const bodyRow = await env.DB.prepare("SELECT body_text FROM admin_notifications WHERE dedupe_key = ?").bind(ready!.dedupe_key).first<{ body_text: string }>();
     expect(bodyRow?.body_text).toContain("Visual score: 93");
     expect(bodyRow?.body_text).toContain("https://b-test-v1.example.wazibizwebsites.workers.dev/");
-    expect(bodyRow?.body_text).toContain("https://admin-builder.wazibiz.ke/admin/sites/");
+    expect(bodyRow?.body_text).toContain("https://admin-builder.wazibiz.ke/sites/");
     expect(bodyRow?.body_text).toContain("NOT an Approval");
   });
 

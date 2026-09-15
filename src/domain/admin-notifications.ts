@@ -186,7 +186,7 @@ export function composeNewIntakeEmail(env: Env, input: NewIntakeEmailInput): { s
       `Submitter: ${input.submitterName} <${input.submitterEmail}>`,
       `Submitted: ${nowIso()}`,
       ``,
-      `Review it here: ${adminDashboardLink(env, `/admin/intakes/${input.draftId}`)}`,
+      `Review it here: ${adminDashboardLink(env, `/intakes/${input.draftId}`)}`,
     ].join("\n"),
     dedupeKey: `intake-new:${input.draftId}`,
   };
@@ -212,7 +212,7 @@ export function composeSiteReadyEmail(env: Env, input: SiteReadyEmailInput): { s
       `Visual score: ${input.visualScore}`,
       `Preview: ${input.previewUrl ?? "(preview URL unavailable)"}`,
       ``,
-      `Review it here: ${adminDashboardLink(env, `/admin/sites/${input.siteId}`)}`,
+      `Review it here: ${adminDashboardLink(env, `/sites/${input.siteId}`)}`,
       ``,
       `A preview-ready email is NOT an Approval — Approval and Publication remain separate operator actions.`,
     ].join("\n"),
@@ -231,7 +231,7 @@ export function composeHumanReviewEmail(env: Env, input: SiteReadyEmailInput): {
       `Visual score: ${input.visualScore}`,
       `Preview: ${input.previewUrl ?? "(preview URL unavailable)"}`,
       ``,
-      `Review it here: ${adminDashboardLink(env, `/admin/sites/${input.siteId}`)}`,
+      `Review it here: ${adminDashboardLink(env, `/sites/${input.siteId}`)}`,
     ].join("\n"),
     dedupeKey: `build-terminal:${input.buildId}:HUMAN_REVIEW_REQUIRED`,
   };
@@ -250,7 +250,7 @@ export function composeGenerationFailedEmail(
       `Build: ${input.buildId}`,
       `Reason: ${input.reason.slice(0, 300)}`,
       ``,
-      `Open it here: ${adminDashboardLink(env, `/admin/sites/${input.siteId}`)}`,
+      `Open it here: ${adminDashboardLink(env, `/sites/${input.siteId}`)}`,
     ].join("\n"),
     dedupeKey: `build-terminal:${input.buildId}:${input.terminal}`,
   };

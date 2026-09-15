@@ -162,7 +162,7 @@ async function IntakesPage(c: Context<{ Bindings: Env }>): Promise<Response> {
     rows.push(
       <tr>
         <td>
-          <a href={`/admin/intakes/${draft.id}`}>{draft.businessName}</a>
+          <a href={`/intakes/${draft.id}`}>{draft.businessName}</a>
         </td>
         <td>
           {draft.submitterName}
@@ -356,7 +356,7 @@ async function generate() {
       return;
     }
     flash((result.alreadyConverted ? 'Draft was already converted — opening the existing generation…' : 'Generation started — opening the site review page…'), false);
-    window.location.href = '/admin/sites/' + siteId;
+    window.location.href = '/sites/' + siteId;
   } catch (e) {
     flash('Generate failed: ' + e.message + ' — check the Intakes list before retrying (the action is idempotent).', true);
   } finally {
@@ -431,7 +431,7 @@ async function IntakeEditorPage(c: Context<{ Bindings: Env }>, draft: IntakeDraf
             <span class="muted" style={{ "margin-right": "auto" }}>
               Status: {draft.status}
             </span>
-            <a class="badge ready" href={`/admin/sites/${draft.convertedSiteId}`}>
+            <a class="badge ready" href={`/sites/${draft.convertedSiteId}`}>
               Open site review
             </a>
           </div>
@@ -720,14 +720,18 @@ async function SiteReviewPage(c: Context<{ Bindings: Env }>, review: AdminSiteRe
 }
 
 export function registerAdminPageRoutes(app: Hono<{ Bindings: Env }>): void {
-  app.get("/admin", (c) => c.redirect("/admin/intakes"));
-  app.get("/admin/", (c) => c.redirect("/admin/intakes"));
-  app.get("/admin/intakes", async (c) => {
+  // The admin hostname IS the dashboard (operator request 2026-09-15): the
+  // /admin prefix was redundant on admin-builder.wazibiz.ke. Pages live at
+  // the root; every /admin/* legacy path redirects so old bookmarks and
+  // already-sent email links keep working. Every route stays behind the same
+  // Cloudflare Access guard — / on the public workers.dev host fails closed.
+  app.get("/", (c) => c.redirect("/intakes"));
+  app.get("/intakes", async (c) => {
     const denied = await guard(c);
     if (denied) return denied;
     return await IntakesPage(c);
   });
-  app.get("/admin/intakes/:draftId", async (c) => {
+  app.get("/intakes/:draftId", async (c) => {
     const denied = await guard(c);
     if (denied) return denied;
     const draft = await getIntakeDraft(c.env, c.req.param("draftId") as string);
@@ -736,7 +740,7 @@ export function registerAdminPageRoutes(app: Hono<{ Bindings: Env }>): void {
     </Layout> as never, 404);
     return await IntakeEditorPage(c, draft);
   });
-  app.get("/admin/sites/:siteId", async (c) => {
+  app.get("/sites/:siteId", async (c) => {
     const denied = await guard(c);
     if (denied) return denied;
     const review = await getAdminSiteReview(c.env, c.req.param("siteId") as string);
@@ -745,4 +749,11 @@ export function registerAdminPageRoutes(app: Hono<{ Bindings: Env }>): void {
     </Layout> as never, 404);
     return await SiteReviewPage(c, review);
   });
+
+  // Legacy /admin/* paths → short equivalents (bookmarks + emailed links).
+  app.get("/admin", (c) => c.redirect("/intakes", 302));
+  app.get("/admin/", (c) => c.redirect("/intakes", 302));
+  app.get("/admin/intakes", (c) => c.redirect("/intakes", 302));
+  app.get("/admin/intakes/:draftId", (c) => c.redirect(`/intakes/${c.req.param("draftId")}`, 302));
+  app.get("/admin/sites/:siteId", (c) => c.redirect(`/sites/${c.req.param("siteId")}`, 302));
 }
