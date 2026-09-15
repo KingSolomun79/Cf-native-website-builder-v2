@@ -6,23 +6,37 @@
 //     Worker is deleted and the deployment row marked 'deleted'.
 //   - The CURRENT Published Version and the retained (in-window) Rollback
 //     Version are protected from cleanup unconditionally.
+//   - An approved Build Version with no successful publication yet keeps an
+//     open publication right: its candidate stays inspectable and its
+//     artifacts stay publishable until a publication actually succeeds.
 //   - Older published deployments become removable once they no longer hold
 //     the rollback role AND the retention window has expired.
 //   - Disposable R2 artifacts (source/assets/evidence/qa/ai payloads) of
 //     dead versions are pruned, while compact Build Records — outcome, QA
 //     scores/gates, root causes, image cost ledger and prompt/model/schema
 //     provenance — live in D1 and survive artifact removal.
-//   - Benchmark evidence uses a longer retention policy and is skipped.
+//   - Benchmark evidence uses a longer retention policy (PRD 22.3) and is
+//     exempt from routine evidence/AI/QA pruning; the retention duration for
+//     it is an explicit operator decision, not invented here.
+//
+// Every destructive delete re-reads canonical protection state immediately
+// before deleting (publication/rollback may have moved since the sweep
+// started; current publication safety wins over cleanup efficiency), and a
+// transport failure on one item is recorded and retried by a later sweep
+// without touching any publication or Build lifecycle state.
 
 import type { Env } from "../env.d";
 import { nowIso } from "../lib/crypto";
 import { deleteObject } from "../lib/assets";
 import { rollbackWindowDays } from "./publication";
 
-export const BENCHMARK_EVIDENCE_RETENTION_DAYS = 365;
-
 export interface RetentionDeleter {
   (workerName: string): Promise<void>;
+}
+
+export interface CleanupFailure {
+  workerName: string;
+  error: string;
 }
 
 export interface CleanupReport {
@@ -30,7 +44,16 @@ export interface CleanupReport {
   markedSuperseded: string[];
   protectedWorkers: string[];
   prunedArtifactKeys: string[];
+  /** Items whose cleanup failed operationally; left intact for a later sweep. */
+  failedWorkers: CleanupFailure[];
 }
+
+// Bounded per-run sweep limits: the cron path processes at most this many
+// destructive operations per invocation and resumes on the next trigger.
+export const SWEEP_MAX_DELETIONS = 25;
+export const SWEEP_MAX_VERSION_PRUNES = 10;
+// Candidate rows examined per sweep (>= deletions so skips don't starve work).
+const SWEEP_CANDIDATE_LIMIT = 200;
 
 interface DeploymentRow {
   id: string;
@@ -53,6 +76,59 @@ interface PublishedStateRow {
 async function loadDeployments(env: Env): Promise<DeploymentRow[]> {
   const rows = await env.DB.prepare("SELECT * FROM build_deployments ORDER BY created_at").all<DeploymentRow>();
   return rows.results ?? [];
+}
+
+// Only rows that could ever be disposable, oldest first. Active published
+// rows and rollback-role rows are never selected: they hold protected roles
+// by definition until a canonical state flip supersedes them.
+async function loadDisposableCandidates(env: Env, limit: number): Promise<DeploymentRow[]> {
+  const rows = await env.DB.prepare(
+    `SELECT * FROM build_deployments
+     WHERE status != 'deleted'
+       AND (role = 'preview' OR (role = 'published' AND status = 'superseded'))
+     ORDER BY updated_at, id
+     LIMIT ?`
+  )
+    .bind(limit)
+    .all<DeploymentRow>();
+  return rows.results ?? [];
+}
+
+// Fresh canonical protection state for ONE version, read at deletion time —
+// not the sweep-start snapshot. Protects against publication/rollback landing
+// between candidate selection and the destructive call.
+async function isVersionProtectedNow(env: Env, buildVersionId: string, now: string): Promise<boolean> {
+  const row = await env.DB.prepare(
+    `SELECT
+       (SELECT COUNT(*) FROM site_published_state
+         WHERE current_build_version_id = ?
+            OR (rollback_build_version_id = ? AND rollback_expires_at IS NOT NULL AND rollback_expires_at >= ?)
+       ) AS protected_state,
+       (SELECT COUNT(*) FROM build_approvals a
+         WHERE a.build_version_id = ?
+           AND NOT EXISTS (
+             SELECT 1 FROM publications p
+              WHERE p.build_version_id = a.build_version_id AND p.status = 'published'
+           )
+       ) AS open_publication_right`
+  )
+    .bind(buildVersionId, buildVersionId, now, buildVersionId)
+    .first<{ protected_state: number; open_publication_right: number }>();
+  return (row?.protected_state ?? 0) > 0 || (row?.open_publication_right ?? 0) > 0;
+}
+
+// Versions whose Approval has never been followed by a successful
+// publication: the exact-version publication right is still open, so the
+// candidate (preview + artifacts) must remain inspectable/publishable.
+async function openPublicationRightVersionIds(env: Env): Promise<Set<string>> {
+  const rows = await env.DB.prepare(
+    `SELECT a.build_version_id AS id FROM build_approvals a
+     WHERE NOT EXISTS (
+       SELECT 1 FROM publications p
+        WHERE p.build_version_id = a.build_version_id AND p.status = 'published'
+     )`
+  ).all<{ id: string }>();
+  return new Set((rows.results ?? []).map((row) => row.id));
 }
 
 async function loadPublishedStates(env: Env): Promise<Map<string, PublishedStateRow>> {
@@ -115,6 +191,8 @@ export interface CleanupOptions {
   benchmarkSiteIds?: string[];
   /** Restrict processing to these Builds (e.g. one Site's retry sweep); protection stays global. */
   buildIds?: string[];
+  /** Destructive deletions allowed in this run; the rest resume next sweep. */
+  maxDeletions?: number;
 }
 
 export async function cleanupDisposableDeployments(
@@ -126,13 +204,7 @@ export async function cleanupDisposableDeployments(
     options.deleter ??
     (async (workerName) => {
       const { deleteWorker } = await import("../lib/publish");
-      try {
-        await deleteWorker(env, workerName);
-      } catch (error) {
-        // A Worker that already vanished externally must not block the
-        // idempotent bookkeeping (row -> 'deleted').
-        if (!(error instanceof Error && error.message.includes("404"))) throw error;
-      }
+      await deleteWorker(env, workerName);
     });
 
   const report: CleanupReport = {
@@ -140,16 +212,23 @@ export async function cleanupDisposableDeployments(
     markedSuperseded: [],
     protectedWorkers: [],
     prunedArtifactKeys: [],
+    failedWorkers: [],
   };
 
-  const deployments = await loadDeployments(env);
+  const maxDeletions = options.maxDeletions ?? Number.POSITIVE_INFINITY;
+  const candidateLimit =
+    Number.isFinite(maxDeletions) ? Math.min(SWEEP_CANDIDATE_LIMIT, maxDeletions * 4 + 8) : SWEEP_CANDIDATE_LIMIT;
+  const deployments = await loadDisposableCandidates(env, candidateLimit);
+  const scope = options.buildIds ? new Set(options.buildIds) : null;
   const states = await loadPublishedStates(env);
   const buildStates = await buildStateMap(env);
   const versionNumbers = await versionNumberMap(env);
   const latestPreview = await latestVersionWithPreviewPerBuild(env);
 
-  // Protected version ids: every Site's current Published Version and its
-  // in-window Rollback Version. Cleanup can never touch these.
+  // Protected version ids at sweep start (fast path): every Site's current
+  // Published Version, its in-window Rollback Version, and every approved
+  // version whose publication right is still open. The per-item re-read
+  // below remains the authoritative gate before each destructive delete.
   const protectedVersionIds = new Set<string>();
   for (const state of states.values()) {
     protectedVersionIds.add(state.current_build_version_id);
@@ -161,10 +240,13 @@ export async function cleanupDisposableDeployments(
       protectedVersionIds.add(state.rollback_build_version_id);
     }
   }
+  for (const versionId of await openPublicationRightVersionIds(env)) {
+    protectedVersionIds.add(versionId);
+  }
 
-  const scope = options.buildIds ? new Set(options.buildIds) : null;
+  let deletions = 0;
   for (const deployment of deployments) {
-    if (deployment.status === "deleted") continue; // idempotent
+    if (deletions >= maxDeletions) break; // resumable: next sweep continues oldest-first
     if (scope && !scope.has(deployment.build_id)) continue;
 
     if (protectedVersionIds.has(deployment.build_version_id)) {
@@ -199,11 +281,37 @@ export async function cleanupDisposableDeployments(
 
     if (!disposable) continue;
 
-    await deleter(deployment.worker_name);
+    // Destructive gate: re-read canonical protection state NOW. If the
+    // version gained a protected role since the sweep started (publication,
+    // rollback, or a fresh Approval with an open publication right), current
+    // publication safety wins and the deletion is skipped.
+    try {
+      if (await isVersionProtectedNow(env, deployment.build_version_id, now)) {
+        report.protectedWorkers.push(deployment.worker_name);
+        continue;
+      }
+      await deleter(deployment.worker_name);
+    } catch (error) {
+      const message = (error instanceof Error ? error.message : String(error)).replace(/'/g, "").slice(0, 300);
+      // Only the exact provider "already absent" signal counts as satisfied —
+      // never a mere substring, so a transport error mentioning "404" cannot
+      // orphan a still-serving Worker behind a 'deleted' row.
+      const alreadyAbsent = message.includes("Worker deletion failed: 404");
+      if (!alreadyAbsent) {
+        // Operational failure: record it, leave the row intact for a later
+        // sweep, and never touch any publication or Build lifecycle state.
+        report.failedWorkers.push({ workerName: deployment.worker_name, error: message });
+        console.error(`(error) retention_cleanup_failed { worker: '${deployment.worker_name}', message: '${message}' }`);
+        continue;
+      }
+      // "Already absent" (404): cleanup is idempotently satisfied; fall
+      // through to the bookkeeping so the row converges to 'deleted'.
+    }
     await env.DB.prepare("UPDATE build_deployments SET status = 'deleted', updated_at = ? WHERE id = ?")
       .bind(now, deployment.id)
       .run();
     report.deletedWorkers.push(deployment.worker_name);
+    deletions += 1;
   }
 
   return report;
@@ -290,6 +398,153 @@ export async function pruneDisposableVersionArtifacts(
     await remove(key);
   }
   return index.artifactKeys;
+}
+
+// ── Bounded artifact-prune sweep (cron path) ────────────────────────────────
+
+export interface PruneSweepOptions {
+  now?: Date;
+  /** Build Versions pruned per run; the rest resume on the next sweep. */
+  maxVersions?: number;
+  /** Object deletor seam (tests inject an in-memory recorder). */
+  deleteObject?: (key: string) => Promise<void>;
+  /** Overrides the canonical benchmark_runs-derived site list when given. */
+  benchmarkSiteIds?: string[];
+  /** Restrict processing to these Builds; protection stays global. */
+  buildIds?: string[];
+}
+
+export interface PruneSweepReport {
+  prunedVersions: string[];
+  prunedArtifactKeys: string[];
+  benchmarkProtectedKeys: string[];
+  protectedVersions: string[];
+  failedVersions: CleanupFailure[];
+}
+
+// Benchmark-linked Sites, derived canonically from the immutable
+// benchmark_runs trail — benchmark diagnosis keeps evidence/AI/QA payloads on
+// the longer retention policy (PRD 22.3).
+export async function benchmarkSiteIdsFromRuns(env: Env): Promise<string[]> {
+  const rows = await env.DB.prepare(
+    `SELECT DISTINCT g.site_id AS site_id
+     FROM benchmark_runs br
+     JOIN site_generations g ON g.id = br.site_generation_id`
+  ).all<{ site_id: string }>();
+  return (rows.results ?? []).map((row) => row.site_id);
+}
+
+// Versions whose bulky artifacts MAY be disposable: terminal FAILED Builds,
+// or versions whose newer sibling owns the active preview candidate role.
+// Protection roles are re-checked per version before any deletion.
+async function loadPruneCandidates(env: Env, limit: number, scope: Set<string> | null): Promise<Array<{ buildVersionId: string; buildId: string; siteGenerationId: string }>> {
+  const scopeFilter = scope ? ` AND b.id IN (${[...scope].map(() => "?").join(",")})` : "";
+  const rows = await env.DB.prepare(
+    `SELECT bv.id AS buildVersionId, bv.build_id AS buildId, b.site_generation_id AS siteGenerationId
+     FROM build_versions bv
+     JOIN builds b ON b.id = bv.build_id
+     WHERE (
+       b.state = 'FAILED'
+       OR (
+         EXISTS (
+           SELECT 1 FROM build_versions newer
+            WHERE newer.build_id = bv.build_id AND newer.version_number > bv.version_number
+         )
+         AND EXISTS (
+           SELECT 1 FROM build_deployments d
+            JOIN build_versions owner ON owner.id = d.build_version_id
+            WHERE d.build_id = bv.build_id AND d.role = 'preview' AND d.status = 'active'
+              AND owner.version_number > bv.version_number
+         )
+       )
+     )${scopeFilter}
+     ORDER BY bv.created_at, bv.id
+     LIMIT ?`
+  )
+    .bind(...(scope ? [...scope] : []), limit)
+    .all<{ buildVersionId: string; buildId: string; siteGenerationId: string }>();
+  return rows.results ?? [];
+}
+
+// Fresh per-version eligibility at deletion time: the version must still hold
+// no protected role (current published / in-window rollback / open
+// publication right) and still be disposable (terminal FAILED Build, or a
+// newer sibling still owning the active preview role).
+async function isVersionPruneEligibleNow(
+  env: Env,
+  input: { buildVersionId: string; buildId: string },
+  now: string
+): Promise<boolean> {
+  if (await isVersionProtectedNow(env, input.buildVersionId, now)) return false;
+  const state = await env.DB.prepare("SELECT state FROM builds WHERE id = ?")
+    .bind(input.buildId)
+    .first<{ state: string }>();
+  if (!state) return false;
+  if (state.state === "FAILED") return true;
+  const newerOwnsPreview = await env.DB.prepare(
+    `SELECT 1 FROM build_deployments d
+     JOIN build_versions bv ON bv.id = d.build_version_id
+     JOIN build_versions me ON me.id = ?
+     WHERE d.build_id = ? AND d.role = 'preview' AND d.status = 'active'
+       AND bv.version_number > me.version_number
+     LIMIT 1`
+  )
+    .bind(input.buildVersionId, input.buildId)
+    .first();
+  return newerOwnsPreview !== null;
+}
+
+export async function pruneDisposableBuildArtifacts(
+  env: Env,
+  options: PruneSweepOptions = {}
+): Promise<PruneSweepReport> {
+  const now = (options.now ?? new Date()).toISOString();
+  const report: PruneSweepReport = {
+    prunedVersions: [],
+    prunedArtifactKeys: [],
+    benchmarkProtectedKeys: [],
+    protectedVersions: [],
+    failedVersions: [],
+  };
+
+  const maxVersions = options.maxVersions ?? Number.POSITIVE_INFINITY;
+  const candidateLimit =
+    Number.isFinite(maxVersions) ? Math.min(SWEEP_CANDIDATE_LIMIT, maxVersions * 4 + 8) : SWEEP_CANDIDATE_LIMIT;
+  const scope = options.buildIds ? new Set(options.buildIds) : null;
+  const candidates = await loadPruneCandidates(env, candidateLimit, scope);
+  if (candidates.length === 0) return report;
+
+  const benchmarkSiteIds = options.benchmarkSiteIds ?? (await benchmarkSiteIdsFromRuns(env));
+  const benchmark = new Set(benchmarkSiteIds);
+
+  for (const candidate of candidates) {
+    try {
+      if (!(await isVersionPruneEligibleNow(env, candidate, now))) {
+        report.protectedVersions.push(candidate.buildVersionId);
+        continue;
+      }
+      const index = await indexDisposableArtifacts(
+        env,
+        candidate,
+        { benchmarkSiteIds: [...benchmark] }
+      );
+      if (index.artifactKeys.length === 0) continue; // already cleaned; a scan is not destructive work
+      if (report.prunedVersions.length >= maxVersions) break; // resumable: next sweep continues oldest-first
+      const remove = options.deleteObject ?? ((key: string) => deleteObject(env, key));
+      for (const key of index.artifactKeys) {
+        await remove(key);
+      }
+      report.prunedVersions.push(candidate.buildVersionId);
+      report.prunedArtifactKeys.push(...index.artifactKeys);
+      report.benchmarkProtectedKeys.push(...index.benchmarkProtectedKeys);
+    } catch (error) {
+      const message = (error instanceof Error ? error.message : String(error)).replace(/'/g, "").slice(0, 300);
+      report.failedVersions.push({ workerName: candidate.buildVersionId, error: message });
+      console.error(`(error) retention_prune_failed { build_version: '${candidate.buildVersionId}', message: '${message}' }`);
+    }
+  }
+
+  return report;
 }
 
 // ── Compact Build Record (survives artifact cleanup) ────────────────────────

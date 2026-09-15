@@ -1,22 +1,23 @@
 import { canonicalStructuredFacts } from "./helpers/canonical-facts";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { env as providedEnv } from "cloudflare:test";
 import type { Env } from "../src/env.d";
 import { startSiteGeneration, createInitialBuild, createNextBuildVersion, appendBuildWorkflowEvent } from "../src/domain/lifecycle";
 import { storeBuildStageArtifact } from "../src/domain/stage-artifacts";
 import { buildVersionSourceKey } from "../src/domain/artifact-keys";
 import { assignReleaseReady } from "../src/domain/release";
-import { approveBuildVersion, publishApprovedBuildVersion, type PublicationDeployer } from "../src/domain/publication";
+import { approveBuildVersion, publishApprovedBuildVersion, getPublicationState, rollbackPublication, type PublicationDeployer } from "../src/domain/publication";
 import { deployPreview, type AssembledCandidate } from "../src/domain/assembly";
 import { QA_A_HARD_GATE_IDS, QA_B_MANDATORY_GATE_IDS, type QaAReport, type QaBReport } from "../src/domain/qa-stages";
 import {
   cleanupDisposableDeployments,
   markSupersededPreviews,
   pruneDisposableVersionArtifacts,
+  pruneDisposableBuildArtifacts,
   getCompactBuildRecord,
   indexDisposableArtifacts,
 } from "../src/domain/retention";
-import { putObject } from "../src/lib/assets";
+import { putObject, getObject } from "../src/lib/assets";
 import { generateId } from "../src/lib/crypto";
 
 // Primary-seam tests for the Deployment/artifact retention lifecycle
@@ -290,5 +291,365 @@ describe("artifact pruning and compact Build Records", () => {
       { buildId: context.buildId, buildVersionId: context.buildVersionId, siteGenerationId: context.siteGenerationId }
     );
     expect(plain.artifactKeys.some((key) => key.includes("/qa_evidence_bundle"))).toBe(true);
+  });
+});
+
+// ── #16 enforcement: protection gates, race safety, failure isolation ──────
+
+function publishedWorkerName(buildId: string, versionNumber: number): string {
+  return `pub-${buildId.replace(/[^a-z0-9]/gi, "").slice(0, 10)}-v${versionNumber}`;
+}
+
+async function publishTwoVersions(): Promise<{ v1: Awaited<ReturnType<typeof newSite>>; v2VersionId: string }> {
+  const v1 = await newSite();
+  await releaseReadyAndApprove(v1, 1, "h1");
+  await publishApprovedBuildVersion(env, { ...v1, buildVersionNumber: 1, deployer: publishDeployer });
+  const next = await createNextBuildVersion(env, { buildId: v1.buildId, cause: "automated_repair" });
+  await releaseReadyAndApprove({ ...v1, buildVersionId: next.buildVersionId }, next.buildVersionNumber, "h2");
+  await publishApprovedBuildVersion(env, { ...v1, buildVersionId: next.buildVersionId, buildVersionNumber: next.buildVersionNumber, deployer: publishDeployer });
+  return { v1, v2VersionId: next.buildVersionId };
+}
+
+async function storeGeneratedPage(context: { buildId: string; buildVersionId: string; siteGenerationId: string }): Promise<void> {
+  await storeBuildStageArtifact(env, {
+    buildId: context.buildId, buildVersionId: context.buildVersionId, siteGenerationId: context.siteGenerationId,
+    kind: "generated_page", subkey: "home", schemaVersion: "generated-source/page-home/1", value: { html: "x" },
+  });
+}
+
+async function failBuild(buildId: string): Promise<void> {
+  await appendBuildWorkflowEvent(env, { buildId, toState: "FAILED", stage: "terminal_outcome", detail: "retention test" });
+}
+
+describe("protection gates for live release candidates", () => {
+  it("never touches the current Published Version's deployment", async () => {
+    const context = await newSite();
+    await releaseReadyAndApprove(context, 1, "h1");
+    await publishApprovedBuildVersion(env, { ...context, buildVersionNumber: 1, deployer: publishDeployer });
+
+    const { deleter, deleted } = recordingDeleter();
+    const report = await cleanupDisposableDeployments(env, { deleter, buildIds: [context.buildId] });
+    expect(deleted).toEqual([]);
+    expect(report.deletedWorkers).toEqual([]);
+    const row = await env.DB.prepare(
+      "SELECT status FROM build_deployments WHERE build_version_id = ? AND role = 'published'"
+    )
+      .bind(context.buildVersionId)
+      .first<{ status: string }>();
+    expect(row!.status).toBe("active");
+  });
+
+  it("keeps a HUMAN_REVIEW_REQUIRED candidate's preview inspectable", async () => {
+    const context = await newSite();
+    await deployPreview(env, { buildId: context.buildId, buildVersionId: context.buildVersionId, buildVersionNumber: 1, candidate: candidate("h1"), deployer: previewDeployer });
+    await appendBuildWorkflowEvent(env, { buildId: context.buildId, toState: "HUMAN_REVIEW_REQUIRED", stage: "terminal_outcome", detail: "blueprint-root defect" });
+
+    const { deleter, deleted } = recordingDeleter();
+    const report = await cleanupDisposableDeployments(env, { deleter, buildIds: [context.buildId] });
+    expect(deleted).toEqual([]);
+    expect(report.deletedWorkers).toEqual([]);
+    const row = await env.DB.prepare(
+      "SELECT status FROM build_deployments WHERE build_version_id = ? AND role = 'preview'"
+    )
+      .bind(context.buildVersionId)
+      .first<{ status: string }>();
+    expect(row!.status).toBe("active");
+  });
+
+  it("keeps a RELEASE_READY candidate awaiting Approval", async () => {
+    const context = await newSite();
+    await deployPreview(env, { buildId: context.buildId, buildVersionId: context.buildVersionId, buildVersionNumber: 1, candidate: candidate("h1"), deployer: previewDeployer });
+    // Release Ready WITHOUT Approval: storeBuildStageArtifact + assignReleaseReady only.
+    await storeBuildStageArtifact(env, {
+      buildId: context.buildId, buildVersionId: context.buildVersionId, siteGenerationId: context.siteGenerationId,
+      kind: "assembled_manifest", schemaVersion: "build-manifest/1",
+      value: { artifactManifestHash: "h1", files: [{ path: "index.html", sha256: "a", bytes: 1 }] },
+    });
+    await putObject(env, buildVersionSourceKey(context.buildId, 1, "index.html"), "<!DOCTYPE html><html><body>x</body></html>");
+    await assignReleaseReady(env, {
+      buildId: context.buildId, buildVersionId: context.buildVersionId, siteGenerationId: context.siteGenerationId,
+      qaA: PASS_A, qaB: PASS_B, qaBuildVersionId: context.buildVersionId,
+    });
+    const approvals = await env.DB.prepare("SELECT COUNT(*) AS n FROM build_approvals WHERE build_version_id = ?")
+      .bind(context.buildVersionId)
+      .first<{ n: number }>();
+    expect(approvals!.n).toBe(0); // the state under test: awaiting Approval
+
+    const { deleter, deleted } = recordingDeleter();
+    const report = await cleanupDisposableDeployments(env, { deleter, buildIds: [context.buildId] });
+    expect(report.deletedWorkers).toEqual([]);
+    const row = await env.DB.prepare(
+      "SELECT status FROM build_deployments WHERE build_version_id = ? AND role = 'preview'"
+    )
+      .bind(context.buildVersionId)
+      .first<{ status: string }>();
+    expect(row!.status).toBe("active");
+  });
+
+  it("keeps an approved version awaiting/retrying publication protected — preview AND artifacts", async () => {
+    const context = await newSite();
+    await releaseReadyAndApprove(context, 1, "h1"); // approved, never published: open publication right
+    await storeGeneratedPage(context);
+    await deployPreview(env, { buildId: context.buildId, buildVersionId: context.buildVersionId, buildVersionNumber: 1, candidate: candidate("h1"), deployer: previewDeployer });
+    const next = await createNextBuildVersion(env, { buildId: context.buildId, cause: "automated_repair" });
+    await deployPreview(env, { buildId: context.buildId, buildVersionId: next.buildVersionId, buildVersionNumber: next.buildVersionNumber, candidate: candidate("h2"), deployer: previewDeployer });
+
+    // The newer preview superseded v1's preview row, but v1's publication
+    // right is still open: the approved candidate must stay inspectable.
+    const { deleter, deleted } = recordingDeleter();
+    const report = await cleanupDisposableDeployments(env, { deleter, buildIds: [context.buildId] });
+    expect(deleted).toEqual([]);
+    expect(report.protectedWorkers.length).toBe(1);
+
+    // Its artifacts stay publishable too.
+    const prune = await pruneDisposableBuildArtifacts(env, { buildIds: [context.buildId], deleteObject: async () => {} });
+    expect(prune.prunedVersions).toEqual([]);
+    expect(prune.protectedVersions).toEqual([context.buildVersionId]);
+  });
+
+  it("rollback restores the exact prior deployment and cleanup cannot delete the restored current publication", async () => {
+    const { v1 } = await publishTwoVersions();
+    await rollbackPublication(env, { siteId: v1.siteId });
+
+    const { deleter, deleted } = recordingDeleter();
+    const report = await cleanupDisposableDeployments(env, { deleter, now: new Date(Date.now() + 60_000), buildIds: [v1.buildId] });
+    expect(deleted).toEqual([]);
+    expect(report.deletedWorkers).toEqual([]);
+
+    const restored = await env.DB.prepare(
+      "SELECT status, worker_name FROM build_deployments WHERE build_version_id = ? AND role = 'published'"
+    )
+      .bind(v1.buildVersionId)
+      .first<{ status: string; worker_name: string }>();
+    expect(restored!.status).toBe("active");
+    expect(restored!.worker_name).toBe(publishedWorkerName(v1.buildId, 1));
+    const state = await getPublicationState(env, v1.siteId);
+    expect(state.current?.buildVersionId).toBe(v1.buildVersionId);
+  });
+});
+
+describe("retention sweep robustness", () => {
+  it("skips deletion when protection state changed between selection and delete (race safety)", async () => {
+    const a = await newSite();
+    await releaseReadyAndApprove(a, 1, "h1");
+    await publishApprovedBuildVersion(env, { ...a, buildVersionNumber: 1, deployer: publishDeployer });
+    const aNext = await createNextBuildVersion(env, { buildId: a.buildId, cause: "automated_repair" });
+    await releaseReadyAndApprove({ ...a, buildVersionId: aNext.buildVersionId }, aNext.buildVersionNumber, "h2");
+    await publishApprovedBuildVersion(env, { ...a, buildVersionId: aNext.buildVersionId, buildVersionNumber: aNext.buildVersionNumber, deployer: publishDeployer });
+
+    const b = await newSite();
+    await releaseReadyAndApprove(b, 1, "h1");
+    await publishApprovedBuildVersion(env, { ...b, buildVersionNumber: 1, deployer: publishDeployer });
+    const bNext = await createNextBuildVersion(env, { buildId: b.buildId, cause: "automated_repair" });
+    await releaseReadyAndApprove({ ...b, buildVersionId: bNext.buildVersionId }, bNext.buildVersionNumber, "h2");
+    await publishApprovedBuildVersion(env, { ...b, buildVersionId: bNext.buildVersionId, buildVersionNumber: bNext.buildVersionNumber, deployer: publishDeployer });
+
+    const workerA1 = publishedWorkerName(a.buildId, 1);
+    const workerB1 = publishedWorkerName(b.buildId, 1);
+    const deleter = async (name: string) => {
+      if (name === workerA1) {
+        // While the sweep runs, site B's expired former rollback version is
+        // re-published under its still-open approval: it becomes the CURRENT
+        // Published Version again, after the sweep snapshot was taken.
+        await publishApprovedBuildVersion(env, { ...b, buildVersionNumber: 1, deployer: publishDeployer });
+      }
+    };
+
+    const report = await cleanupDisposableDeployments(env, { deleter, now: new Date(Date.now() + 30 * 24 * 60 * 60_000) });
+    expect(report.deletedWorkers).toContain(workerA1);
+    expect(report.deletedWorkers).not.toContain(workerB1);
+    expect(report.protectedWorkers).toContain(workerB1);
+
+    const bRow = await env.DB.prepare("SELECT status FROM build_deployments WHERE worker_name = ?")
+      .bind(workerB1)
+      .first<{ status: string }>();
+    expect(bRow!.status).toBe("active");
+    const state = await getPublicationState(env, b.siteId);
+    expect(state.current?.buildVersionId).toBe(b.buildVersionId);
+  });
+
+  it("isolates cleanup failures: row kept for retry, lifecycle untouched, later sweep succeeds", async () => {
+    const a = await newSite();
+    await insertDeployment({ buildId: a.buildId, buildVersionId: a.buildVersionId, role: "preview", workerName: "iso-fail" });
+    await failBuild(a.buildId);
+    const b = await newSite();
+    await insertDeployment({ buildId: b.buildId, buildVersionId: b.buildVersionId, role: "preview", workerName: "iso-ok" });
+    await failBuild(b.buildId);
+
+    const deleted: string[] = [];
+    const deleter = async (name: string) => {
+      if (name === "iso-fail") throw new Error("connection reset by peer");
+      deleted.push(name);
+    };
+    const report = await cleanupDisposableDeployments(env, { deleter, buildIds: [a.buildId, b.buildId] });
+    expect(report.failedWorkers).toEqual([{ workerName: "iso-fail", error: "connection reset by peer" }]);
+    expect(report.deletedWorkers).toEqual(["iso-ok"]);
+
+    // The failed row is intact for a later sweep...
+    const failedRow = await env.DB.prepare("SELECT status FROM build_deployments WHERE worker_name = 'iso-fail'")
+      .first<{ status: string }>();
+    expect(failedRow!.status).toBe("active");
+    // ...and no publication/build lifecycle state was mutated by cleanup.
+    const lifecycle = await env.DB.prepare(
+      "SELECT (SELECT COUNT(*) FROM publications WHERE build_version_id IN (?, ?)) AS pubs, (SELECT COUNT(*) FROM site_published_state WHERE site_id IN (?, ?)) AS states, (SELECT state FROM builds WHERE id = ?) AS build_state"
+    )
+      .bind(a.buildVersionId, b.buildVersionId, a.siteId, b.siteId, a.buildId)
+      .first<{ pubs: number; states: number; build_state: string }>();
+    expect(lifecycle!.pubs).toBe(0);
+    expect(lifecycle!.states).toBe(0);
+    expect(lifecycle!.build_state).toBe("FAILED");
+
+    // The later sweep retries and succeeds.
+    const retry = await cleanupDisposableDeployments(env, { deleter: recordingDeleter().deleter, buildIds: [a.buildId] });
+    expect(retry.deletedWorkers).toEqual(["iso-fail"]);
+    expect(retry.failedWorkers).toEqual([]);
+  });
+
+  it("treats an already-vanished Worker (404) as successful idempotent cleanup", async () => {
+    const context = await newSite();
+    await insertDeployment({ buildId: context.buildId, buildVersionId: context.buildVersionId, role: "preview", workerName: "already-gone" });
+    await failBuild(context.buildId);
+
+    const report = await cleanupDisposableDeployments(env, {
+      deleter: async () => {
+        throw new Error("Worker deletion failed: 404");
+      },
+      buildIds: [context.buildId],
+    });
+    expect(report.deletedWorkers).toEqual(["already-gone"]);
+    expect(report.failedWorkers).toEqual([]);
+    const row = await env.DB.prepare("SELECT status FROM build_deployments WHERE worker_name = 'already-gone'")
+      .first<{ status: string }>();
+    expect(row!.status).toBe("deleted");
+  });
+
+  it("caps destructive work per run and resumes on the next sweep", async () => {
+    const builds = [await newSite(), await newSite(), await newSite()];
+    for (const [index, context] of builds.entries()) {
+      await insertDeployment({ buildId: context.buildId, buildVersionId: context.buildVersionId, role: "preview", workerName: `cap-${index}` });
+      await failBuild(context.buildId);
+    }
+    const scope = builds.map((context) => context.buildId);
+    const { deleter, deleted } = recordingDeleter();
+
+    const first = await cleanupDisposableDeployments(env, { deleter, maxDeletions: 2, buildIds: scope });
+    expect(first.deletedWorkers.length).toBe(2);
+    const remaining = await env.DB.prepare(
+      "SELECT COUNT(*) AS n FROM build_deployments WHERE build_id IN (?, ?, ?) AND status != 'deleted'"
+    )
+      .bind(...scope)
+      .first<{ n: number }>();
+    expect(remaining!.n).toBe(1);
+
+    const second = await cleanupDisposableDeployments(env, { deleter, buildIds: scope });
+    expect(second.deletedWorkers.length).toBe(1);
+    expect(deleted.length).toBe(3);
+  });
+});
+
+describe("bounded artifact-prune sweep driver", () => {
+  it("prunes failed-build version artifacts and leaves active candidates untouched", async () => {
+    const failed = await newSite();
+    await storeGeneratedPage(failed);
+    await failBuild(failed.buildId);
+    const active = await newSite();
+    await storeGeneratedPage(active);
+    await deployPreview(env, { buildId: active.buildId, buildVersionId: active.buildVersionId, buildVersionNumber: 1, candidate: candidate("h1"), deployer: previewDeployer });
+
+    const pruned: string[] = [];
+    const report = await pruneDisposableBuildArtifacts(env, {
+      buildIds: [failed.buildId, active.buildId],
+      deleteObject: async (key) => { pruned.push(key); },
+    });
+    expect(report.prunedVersions).toEqual([failed.buildVersionId]);
+    expect(report.prunedArtifactKeys.some((key) => key.includes("/generated_page"))).toBe(true);
+    expect(pruned).toEqual(report.prunedArtifactKeys);
+    expect(report.failedVersions).toEqual([]);
+  });
+
+  it("prunes a superseded version's artifacts once a newer sibling owns the preview role", async () => {
+    const context = await newSite();
+    await storeGeneratedPage(context);
+    await deployPreview(env, { buildId: context.buildId, buildVersionId: context.buildVersionId, buildVersionNumber: 1, candidate: candidate("h1"), deployer: previewDeployer });
+    const next = await createNextBuildVersion(env, { buildId: context.buildId, cause: "automated_repair" });
+    await deployPreview(env, { buildId: context.buildId, buildVersionId: next.buildVersionId, buildVersionNumber: next.buildVersionNumber, candidate: candidate("h2"), deployer: previewDeployer });
+
+    const report = await pruneDisposableBuildArtifacts(env, { buildIds: [context.buildId], deleteObject: async () => {} });
+    expect(report.prunedVersions).toEqual([context.buildVersionId]);
+  });
+
+  it("derives benchmark protection from benchmark_runs without caller injection", async () => {
+    const context = await newSite();
+    await storeBuildStageArtifact(env, {
+      buildId: context.buildId, buildVersionId: context.buildVersionId, siteGenerationId: context.siteGenerationId,
+      kind: "qa_evidence_bundle", schemaVersion: "qa-evidence/1", value: { captures: [] },
+    });
+    await storeGeneratedPage(context);
+    await failBuild(context.buildId);
+
+    const caseId = generateId();
+    await env.DB.prepare(
+      `INSERT INTO benchmark_cases (id, slot, archetype, evidence_checksum, screenshot_checksum, replacement_brief_json, prompt_model_schema_json, frozen_at)
+       VALUES (?, 5, 'retention-test', 'e', 's', '{}', '{}', '2026-09-01T00:00:00Z')`
+    )
+      .bind(caseId)
+      .run();
+    await env.DB.prepare(
+      `INSERT INTO benchmark_runs (id, benchmark_case_id, site_generation_id, build_id, build_version_id, status, release_ready, image_spend_usd, manual_source_edits, started_at)
+       VALUES (?, ?, ?, ?, ?, 'pass', 1, 0, 0, '2026-09-01T00:00:00Z')`
+    )
+      .bind(generateId(), caseId, context.siteGenerationId, context.buildId, context.buildVersionId)
+      .run();
+
+    const report = await pruneDisposableBuildArtifacts(env, { buildIds: [context.buildId], deleteObject: async () => {} });
+    // Diagnosis evidence stays on the longer benchmark policy; generated
+    // source is disposable as usual.
+    expect(report.benchmarkProtectedKeys.some((key) => key.includes("/qa_evidence_bundle"))).toBe(true);
+    expect(report.prunedArtifactKeys.some((key) => key.includes("/qa_evidence_bundle"))).toBe(false);
+    expect(report.prunedArtifactKeys.some((key) => key.includes("/generated_page"))).toBe(true);
+  });
+});
+
+describe("cron wiring", () => {
+  it("scheduled() runs the retention sweep: 404-tolerant worker cleanup and real R2 prune", async () => {
+    const context = await newSite();
+    await storeGeneratedPage(context);
+    const stored = await env.DB.prepare("SELECT artifact_r2_key FROM build_stage_artifacts WHERE build_version_id = ?")
+      .bind(context.buildVersionId)
+      .first<{ artifact_r2_key: string }>();
+    expect(await getObject(env, stored!.artifact_r2_key)).not.toBeNull();
+    await deployPreview(env, { buildId: context.buildId, buildVersionId: context.buildVersionId, buildVersionNumber: 1, candidate: candidate("h1"), deployer: previewDeployer });
+    await failBuild(context.buildId);
+
+    // Drain disposable work from EARLIER tests (scoped away from this Build)
+    // so this newest Build Version sits within the bounded per-run cron caps;
+    // resumability across runs is proven by the cap test above. Chunked: D1
+    // caps bound SQL variables, and the shared suite DB has many Builds.
+    const otherBuilds = ((await env.DB.prepare("SELECT id FROM builds WHERE id != ?")
+      .bind(context.buildId)
+      .all<{ id: string }>()).results ?? []).map((row) => row.id);
+    for (let index = 0; index < otherBuilds.length; index += 80) {
+      const chunk = otherBuilds.slice(index, index + 80);
+      await cleanupDisposableDeployments(env, { deleter: async () => {}, buildIds: chunk });
+      await pruneDisposableBuildArtifacts(env, { buildIds: chunk, deleteObject: async () => {} });
+    }
+
+    // The Cloudflare API is an external provider: stub it as "already
+    // vanished" (404) — exactly what the default deleter must tolerate.
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("script not found", { status: 404 })));
+    try {
+      const { scheduled } = await import("../src/index");
+      await scheduled({ cron: "*/10 * * * *" } as unknown as Parameters<typeof scheduled>[0], env);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+
+    // Bulky artifact really pruned through the cron path's R2 binding...
+    expect(await getObject(env, stored!.artifact_r2_key)).toBeNull();
+    // ...and the preview deployment was disposed idempotently despite the 404.
+    const row = await env.DB.prepare("SELECT status FROM build_deployments WHERE build_version_id = ? AND role = 'preview'")
+      .bind(context.buildVersionId)
+      .first<{ status: string }>();
+    expect(row!.status).toBe("deleted");
   });
 });
