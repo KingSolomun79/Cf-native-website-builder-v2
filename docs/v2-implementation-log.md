@@ -1225,3 +1225,52 @@ FAILED terminal were replaced in the same change with the decision's
 behavior (repair-eligible single-file failures) plus a preserved FAILED
 scenario for the multi-page (ineligible) case — V2 behavior asserted in the
 same issue per the testing guardrails.
+
+## 2026-09-15 — #15 Implement Approval, Publication and Rollback (audit + evidence hardening)
+
+Baseline audit outcome: the release lifecycle was already implemented
+CANONICALLY in prior V2 work and is REUSED in full — no parallel lifecycle, no
+production-code change in this ticket:
+
+- Reused: `POST /api/v2/build-versions/:buildVersionId/approval` (+route),
+  `POST /api/v2/build-versions/:buildVersionId/publication` (+route),
+  `POST /api/v2/sites/:siteId/rollback` (+route) — each gated by the
+  action-bound, version/manifest-bound, expiring, fail-closed operator
+  capability tokens (`src/lib/operator-capability.ts`, OPERATOR_CAPABILITY_
+  SECRET); `src/domain/publication.ts` (exact-Release-Ready approval pinned
+  to the artifact manifest hash; publication deploying exact approved bytes
+  from immutable R2 with NO regeneration, approval-hash + TOCTOU
+  `expectedArtifactManifestHash` guards, operational retry under the same
+  approval via the attempt ledger, idempotent current-version re-publish,
+  single retained Rollback Version with `ROLLBACK_WINDOW_DAYS` enforcement;
+  rollback with no new Build/Build Version/Approval, conditional state flip,
+  history + Site Configuration preserved); `src/domain/retention.ts`
+  (protection-first cleanup around current + retained rollback); CF Access
+  stays operator AUTHENTICATION only — release AUTHORITY remains the
+  capability-token model, untouched.
+- Gaps found by the audit (all evidence, not semantics): (G1) the domain
+  APPROVAL_HASH_MISMATCH guard had no real regression test — the old drift
+  test had degraded into no-op assertions after the immutable-artifact
+  constraint blocked its simulation; (G2) no proof that publishing a third
+  version moves the ONE retained rollback candidate to the immediately
+  previous version (V2, never V1, never a chain); (G3) the retry test did not
+  prove a retry cannot drift to a newer approved candidate; plus a missing
+  explicit no-new-Build rollback assertion.
+
+Implemented in `tests/v2-publication.test.ts` (+123/−20, test-only): real
+APPROVAL_HASH_MISMATCH test (seeded drifted approval row → refusal, zero
+deployment/records); V1→V2→V3 rotation test (rollback slot follows V2,
+single slot, V1 history-only, exactly one active published deployment,
+rollback restores V2 exactly); retry test extended (V2 approved mid-flight →
+retry publishes V1, V2 has zero publications, still exactly one approval);
+no-new-Build count assertion. All #15 acceptance criteria and the full
+required test list are now demonstrably covered across v2-publication,
+v2-operator-capability (24+ tests: wrong-secret/tampered/expired/delimiter/
+fail-closed/wrong-action/wrong-version/wrong-manifest denials, TOCTOU both
+directions, idempotent re-publish) and v2-retention.
+
+Verification: `npm test` 48 files / 542 tests passed; `npm run typecheck`
+clean; CSO = SECURITY OK WITH WATCH ITEMS
+(`docs/security/2026-09-15-v2-issue-15-release-boundary-cso.md`; zero
+Critical/High/Medium, two Low pre-existing watch items, authority model
+unweakened).
