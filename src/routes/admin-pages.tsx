@@ -80,6 +80,8 @@ const STYLES = `
   .chat .note { border: 1px solid var(--line); border-radius: 7px; padding: 0.6rem 0.8rem; background: var(--field); }
   .chat .note.included { background: #1c2a22; }
   .chat .note .meta { color: var(--muted); font-size: 0.75rem; margin-top: 0.25rem; }
+  .note-include { display: flex; gap: 0.4rem; align-items: center; font-size: 0.75rem; color: var(--muted); cursor: pointer; margin-bottom: 0.35rem; }
+  ul.revision-help { margin: 0.75rem 0; padding-left: 1.2rem; display: grid; gap: 0.3rem; }
   pre { background: var(--field); border: 1px solid var(--line); padding: 0.75rem; border-radius: 7px; overflow-x: auto; font-size: 0.8rem; }
   @media (max-width: 720px) {
     main { padding: 1rem 1rem 3rem; }
@@ -613,7 +615,12 @@ async function generateRevision() {
 async function SiteReviewPage(c: Context<{ Bindings: Env }>, review: AdminSiteReview): Promise<Response> {
   const noteItems = review.notes.map((note) => (
     <div class={`note ${note.status === "INCLUDED" ? "included" : ""}`}>
-      {note.status === "PENDING" ? <input type="checkbox" class="note-select" value={note.id} /> : null} {note.note}
+      {note.status === "PENDING" ? (
+        <label class="note-include">
+          <input type="checkbox" class="note-select" value={note.id} /> include in next revision (Step 2)
+        </label>
+      ) : null}
+      <div>{note.note}</div>
       <div class="meta">
         {note.createdAt.slice(0, 16).replace("T", " ")} · {note.status}
         {note.includedInRevisionRequestId ? ` · ${note.includedInRevisionRequestId.slice(0, 8)}` : ""}
@@ -665,13 +672,15 @@ async function SiteReviewPage(c: Context<{ Bindings: Env }>, review: AdminSiteRe
       <div class="card">
         <h2>Revision notes</h2>
         <p class="muted">
-          Operator instructions — NOT an AI chat agent. Notes never start a build individually; select pending notes and
-          press Generate Revision to combine them into ONE bounded Revision Request on the existing pipeline.
+          <strong>Step 1 — collect instructions.</strong> Write what should change (presentation or content intent) and
+          press Add note. The note is stored as PENDING and changes nothing on its own — notes never start a build
+          individually. Nothing is sent to the builder until you press Generate Revision below.
         </p>
         <div class="chat">{noteItems as never}</div>
         <label for="new-note">New note</label>
         <textarea id="new-note" placeholder='e.g. "Reduce the mobile hero title."' />
         <div class="actions">
+          <span class="muted spacer">Adding a note is safe — it only saves it for later.</span>
           <button type="button" class="secondary" onclick="addNote()">
             Add note
           </button>
@@ -679,12 +688,23 @@ async function SiteReviewPage(c: Context<{ Bindings: Env }>, review: AdminSiteRe
       </div>
       <div class="card">
         <h2>Generate Revision</h2>
-        <p class="muted">Selected pending notes become the request note. Factual changes come from the structured fields (Fact Updates) — never from the notes themselves.</p>
+        <p class="muted">
+          <strong>Step 2 — turn collected instructions into ONE revision.</strong> Tick the checkbox on each PENDING note
+          above that should be included, optionally enter new fact values below, then press the button. This combines
+          everything into a single bounded Revision Request and starts exactly ONE revision build.
+        </p>
+        <ul class="muted revision-help">
+          <li>Ticked notes become the builder's single revision instruction (change intent — they never override facts).</li>
+          <li>Fact fields are whole-field replacements: the value you type becomes the site's new value. Leave a field blank to leave that fact unchanged.</li>
+          <li>Other fact changes (services, hours, …) go through the FactPatch JSON — advanced, whole-field.</li>
+          <li>With nothing ticked and no fact filled in, the button is blocked on purpose.</li>
+        </ul>
+        <p class="muted">{`${review.notes.filter((n) => n.status === "PENDING").length} pending note(s) waiting.`}</p>
         <div class="grid-2">
-          {textField("fp-phone", "Phone change", "", "tel")}
-          {textField("fp-email", "Contact email change", "", "email")}
-          {textField("fp-whatsapp", "WhatsApp change", "", "tel")}
-          {textField("fp-diff", "Competitive differentiator change", "")}
+          {textField("fp-phone", "Phone — new value (blank = unchanged)", "", "tel")}
+          {textField("fp-email", "Contact email — new value (blank = unchanged)", "", "email")}
+          {textField("fp-whatsapp", "WhatsApp — new value (blank = unchanged)", "", "tel")}
+          {textField("fp-diff", "Competitive differentiator — new value (blank = unchanged)", "")}
         </div>
         <label for="fp-json">Additional FactPatch JSON (whole-field; advanced)</label>
         <textarea id="fp-json" placeholder='{"services": [ { "name": "…" }, { "name": "…" }, { "name": "…" } ]}' />
