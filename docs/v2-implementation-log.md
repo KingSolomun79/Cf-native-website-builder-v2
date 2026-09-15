@@ -1162,3 +1162,66 @@ hard-constraint quality. This closes the seam deterministically:
 Suite 44 files / 331 tests green; tsc + wrangler dry-run clean; CSO =
 SECURITY OK WITH WATCH ITEMS
 (`docs/security/2026-09-05-v2-issue50-repair-guard-cso.md`).
+
+## 2026-09-15 — #14 Implement bounded Automated Repair (pre-QA builder-file repair + one-per-Build budget)
+
+Decision recorded on the issue before coding (issue #14 comment, operator
+direction 2026-09-15): a Build has a maximum of ONE automated repair in total,
+invocable (a) BEFORE QA for an eligible deterministic Builder/realization gate
+failure with a mechanically identifiable repair target, or (b) AFTER QA for
+eligible Release Blockers. A pre-QA repair consumes the Build's entire repair
+allowance. Target selection is deterministic and finding-driven; the repair
+changes only the selected Builder artifact and creates a new immutable Build
+Version; Business Facts, Onboarding Submission, Build Mode, Reference/Creative
+Direction, Blueprint, Accepted Images and unaffected Builder artifacts are
+untouched; after repair the complete applicable deterministic gates re-run and
+any further repair-eligible failure is terminal. No repair loop, no second
+budget, no blueprint/image regeneration.
+
+Implementation:
+
+1. Deterministic repair targets: `SimpleWebsiteBuilderError` carries
+   `repairTarget` + `gateFindings`. Per-file gate failures target the failed
+   file (incl. the site-js state-hook adoption seam from cbd7686);
+   INVENTED_STRUCTURE targets site.css; single-page CRITICAL coverage targets
+   that page; the chrome gate targets the single implicated page. Multi-page
+   coverage, SiteBundleSchema and OUTPUT_EXHAUSTED have no single-file target
+   → terminal FAILED exactly as before.
+2. `runSimplePreQaRepairStage` (website-builder.ts): the ONE targeted
+   regeneration — the original call prompt family + a REPAIR DIRECTIVE with
+   the gate findings injected (a new input, never a retry, per
+   stage-failure semantics) — then the COMPLETE applicable gate sequence
+   re-runs (chrome → state-hook adoption → DOM-first selector gate →
+   SiteBundleSchema → CRITICAL coverage) before the repaired bundle persists
+   on the repair version.
+3. Pipeline: eligible failures spend the budget via
+   `runPreQaFileRepairAndContinue` (version creation cause
+   `simple_pre_qa_repair`; plan-first inheritance: frozen plan artifact +
+   accepted images + blueprint + the five frozen builder files; repair step;
+   then the repaired version carries the build through assemble → QA).
+   Ineligible or already-spent failures keep the cbd7686 FAILED terminal.
+   Resumed entries complete the frozen repair plan instead of a fresh Builder
+   attempt.
+4. Durable one-per-Build budget: `countBuildVersions` (only the two repair
+   paths ever create versions inside a Build) gates the post-QA repair in
+   `runRepairAndFinalQa` — after a pre-QA repair, failing QA escalates to
+   HUMAN_REVIEW_REQUIRED on any entry, never a second repair version.
+5. `pre_qa_repair_plan` artifact kind (stage-artifacts + migration 0038,
+   0036-pattern table rebuild preserving immutability triggers, sentinel
+   index for the applied-migration heuristic).
+
+Verification: focused suites green (v2-simple-pipeline, v2-builder-critical-
+image-coverage, v2-builder-file-validation, v2-builder-file-realization,
+v2-simple-final-iteration — 102 tests incl. the four new #14 scenarios:
+site-js repair → RELEASE_READY on v2; page-about coverage repair → RELEASE_
+READY on v2; repaired candidate failing again → FAILED, budget consumed,
+GENERATION_FAILED mail; resumed-entry budget guard → HUMAN_REVIEW_REQUIRED,
+versions stay [1,2], zero post-QA repair runs). `npm test` 48 files / 540
+tests passed; `npm run typecheck` clean. CSO = SECURITY OK WITH WATCH ITEMS
+(`docs/security/2026-09-15-v2-issue-14-pre-qa-repair-cso.md`; no blocking
+findings, two Low watch items of pre-existing classes). Superseded-behavior
+note: the two cbd7686-era tests asserting the unconditional builder-gate
+FAILED terminal were replaced in the same change with the decision's
+behavior (repair-eligible single-file failures) plus a preserved FAILED
+scenario for the multi-page (ineligible) case — V2 behavior asserted in the
+same issue per the testing guardrails.

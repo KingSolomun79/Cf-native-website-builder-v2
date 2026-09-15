@@ -57,7 +57,16 @@ import {
 } from "./contracts";
 import { AiStageSchemaInvalidError } from "../domain/ai-boundary";
 import { runSimpleDesignBlueprintStage, SimpleDesignBlueprintError } from "./design-blueprint";
-import { runSimpleWebsiteBuilderStage, SimpleWebsiteBuilderError } from "./website-builder";
+import {
+  runSimpleWebsiteBuilderStage,
+  SimpleWebsiteBuilderError,
+  runSimplePreQaRepairStage,
+  copyBuilderFileArtifacts,
+  PRE_QA_REPAIR_PLAN_ARTIFACT_KIND,
+  PRE_QA_REPAIR_PLAN_SCHEMA_VERSION,
+  type PreQaRepairPlan,
+} from "./website-builder";
+import type { BuilderFileKind } from "./builder-file-realization";
 import type { SimpleBuilderVisualInput } from "./contracts";
 import { runSimpleVisualQaStage } from "./visual-qa";
 import { runSimpleSiteRepairStage } from "./site-repair";
@@ -141,6 +150,17 @@ async function reuseAcceptedImages(env: Env, fromBuildVersionId: string, toBuild
 async function loadBundle(env: Env, buildVersionId: string): Promise<SiteBundle | null> {
   const stored = await getBuildStageArtifact<SiteBundle>(env, buildVersionId, "site_bundle");
   return stored?.value ?? null;
+}
+
+// ONE repair per Build, total (#14): within a Build, only the bounded repair
+// ever creates an additional immutable Build Version (createNextBuildVersion
+// has no other caller), so the version count is the durable repair-budget
+// truth — engine-retry-safe and readable from any resumed entry.
+async function countBuildVersions(env: Env, buildId: string): Promise<number> {
+  const row = await env.DB.prepare("SELECT COUNT(*) AS n FROM build_versions WHERE build_id = ?")
+    .bind(buildId)
+    .first<{ n: number }>();
+  return row?.n ?? 0;
 }
 
 export async function runSimpleBuildPipeline(
@@ -597,7 +617,50 @@ export async function runSimpleBuildPipeline(
 
     const buildOutcome = await stepDo(
       `simple: website build (v${version.buildVersionNumber})`,
-      async (): Promise<{ kind: "ok"; strategy: SimplePipelineOutcome["builderStrategy"] } | { kind: "failed"; reason: string }> => {
+      async (): Promise<
+        | { kind: "ok"; strategy: SimplePipelineOutcome["builderStrategy"]; preQaRepaired?: boolean }
+        | { kind: "failed"; reason: string; repairTarget: BuilderFileKind | null; gateFindings: string[]; preQaRepaired?: boolean }
+      > => {
+        // PRE-QA REPAIR RESUME (#14): a prior engine entry already decided the
+        // ONE pre-QA repair for this version (the frozen plan artifact) and
+        // the repaired bundle is not frozen yet — complete the bounded repair
+        // here. A fresh core run could never be correct: the five frozen
+        // files would be reused but the target would be re-generated WITHOUT
+        // the injected findings — a blind second attempt the budget forbids.
+        const repairPlan = await getBuildStageArtifact<PreQaRepairPlan>(env, version.buildVersionId, PRE_QA_REPAIR_PLAN_ARTIFACT_KIND);
+        if (repairPlan) {
+          try {
+            const repaired = await runSimplePreQaRepairStage(env, {
+              siteGenerationId: input.siteGenerationId,
+              buildId,
+              buildVersionId: version.buildVersionId,
+              buildVersionNumber: version.buildVersionNumber,
+              blueprint,
+              facts,
+              acceptedImages: acceptedImageDescriptors,
+              formServiceEndpoint,
+              siteFormId,
+              ...(humanRevisionInstruction ? { humanRevisionInstruction } : {}),
+              plan: repairPlan.value,
+              ...(deps.generate ? { generate: deps.generate } : {}),
+            });
+            await appendBuildWorkflowEvent(env, {
+              buildId,
+              buildVersionId: version.buildVersionId,
+              fromState: "FIX",
+              toState: "CONFIRMATION",
+              stage: "simple_pre_qa_repair",
+              detail: `ONE pre-QA repair applied → new immutable Build Version v${version.buildVersionNumber} (repaired ${repaired.repairedFile})`,
+            });
+            return { kind: "ok" as const, strategy: "SIX_CALL_FILE_REALIZATION", preQaRepaired: true };
+          } catch (error) {
+            const reason =
+              error instanceof SimpleWebsiteBuilderError
+                ? `WEBSITE_BUILDER_${error.code}: ${error.message}`
+                : `PRE_QA_REPAIR_FAILED: ${(error as Error).message.slice(0, 400)}`;
+            return { kind: "failed" as const, reason, repairTarget: null, gateFindings: [], preQaRepaired: true };
+          }
+        }
         try {
           const built = await runSimpleWebsiteBuilderStage(env, {
             siteGenerationId: input.siteGenerationId,
@@ -628,22 +691,43 @@ export async function runSimpleBuildPipeline(
           // non-transient step failures and terminate the whole instance
           // (invented-structure CSS, then shared-chrome drift).
           if (error instanceof SimpleWebsiteBuilderError) {
-            return { kind: "failed" as const, reason: `WEBSITE_BUILDER_${error.code}: ${error.message}` };
+            return {
+              kind: "failed" as const,
+              reason: `WEBSITE_BUILDER_${error.code}: ${error.message}`,
+              repairTarget: error.repairTarget,
+              gateFindings: error.gateFindings,
+            };
           }
           throw error;
         }
       }
     );
     if (buildOutcome.kind === "failed") {
-      await appendBuildWorkflowEvent(env, {
-        buildId,
-        buildVersionId: version.buildVersionId,
-        fromState: "BLUEPRINT",
-        toState: "FAILED",
-        stage: "simple_website_build",
-        detail: buildOutcome.reason.slice(0, 400),
-      });
-      return terminal("FAILED", [buildOutcome.reason], { designBlueprintR2Key: blueprintArtifactR2Key });
+      // Issue #14 (operator decision 2026-09-15): an eligible deterministic
+      // builder-gate failure spends the Build's ONE repair on the ONE
+      // implicated file — BEFORE QA. Without a mechanically identifiable
+      // single-file target, or once the budget is spent, the terminal stays
+      // FAILED exactly as before (no candidate to review, #62 §8/§9).
+      const repairSpent = (await countBuildVersions(env, buildId)) > 1;
+      const repairTarget = buildOutcome.repairTarget;
+      if (repairTarget === null || repairSpent) {
+        const disposition = repairTarget
+          ? "the Build's ONE repair is already spent — no further automated repair is allowed"
+          : "no mechanically identifiable single-file repair target — outside the bounded pre-QA repair";
+        await appendBuildWorkflowEvent(env, {
+          buildId,
+          buildVersionId: version.buildVersionId,
+          fromState: "BLUEPRINT",
+          toState: "FAILED",
+          stage: "simple_website_build",
+          detail: `${buildOutcome.reason.slice(0, 300)} — ${disposition}`.slice(0, 400),
+        });
+        return terminal("FAILED", [buildOutcome.reason], {
+          designBlueprintR2Key: blueprintArtifactR2Key,
+          ...(buildOutcome.preQaRepaired ? { repairApplied: true } : {}),
+        });
+      }
+      return await runPreQaFileRepairAndContinue({ reason: buildOutcome.reason, repairTarget, gateFindings: buildOutcome.gateFindings });
     }
     builderStrategy = buildOutcome.strategy;
     await appendBuildWorkflowEvent(env, {
@@ -686,13 +770,15 @@ export async function runSimpleBuildPipeline(
         fromState: "QA",
         toState: "RELEASE_READY",
         stage: "simple_release_ready",
-        detail: "First-pass success — no repair needed (spec section 48)",
+        detail: buildOutcome.preQaRepaired
+          ? "QA passed after the ONE pre-QA repair (spec section 48 + issue #14 decision)"
+          : "First-pass success — no repair needed (spec section 48)",
       });
       return terminal("RELEASE_READY", [], {
         releaseReadyBuildVersionId: version.buildVersionId,
         artifactManifestHash: v1Assembled.manifestHash,
         previewUrl: v1Assembled.previewUrl,
-        repairApplied: false,
+        repairApplied: buildOutcome.preQaRepaired === true,
         builderStrategy,
         designBlueprintR2Key: blueprintArtifactR2Key,
       });
@@ -700,8 +786,237 @@ export async function runSimpleBuildPipeline(
 
     return await runRepairAndFinalQa(first);
 
+    // ── ONE pre-QA repair → the repaired version carries the build forward ──
+    // Issue #14 (operator decision 2026-09-15): an eligible deterministic
+    // builder-gate failure spends the Build's ONE repair on regenerating the
+    // ONE implicated Builder file (findings injected — a new input, never a
+    // retry), then the pipeline continues on the repaired immutable Build
+    // Version (assemble → QA). The post-QA repair is no longer available for
+    // this Build; any further repair-eligible failure is terminal FAILED.
+    async function runPreQaFileRepairAndContinue(
+      failed: { reason: string; repairTarget: BuilderFileKind; gateFindings: string[] }
+    ): Promise<SimplePipelineOutcome> {
+      // Durable repair-position truth: the latest version carries the repair.
+      const latest = await env.DB.prepare(
+        "SELECT id, version_number FROM build_versions WHERE build_id = ? ORDER BY version_number DESC LIMIT 1"
+      )
+        .bind(buildId)
+        .first<{ id: string; version_number: number }>();
+      if (!latest) throw new Error(`Build ${buildId} has no Build Version`);
+
+      let repairCtx: SimpleVersionContext;
+      if (latest.version_number === version.buildVersionNumber) {
+        const created = await stepDo("simple: pre-QA repair version", async () => {
+          const next = await createNextBuildVersion(env, {
+            buildId,
+            cause: "simple_pre_qa_repair",
+            detail: "SIMPLE pipeline ONE repair — pre-QA builder-file repair (issue #14 decision 2026-09-15)",
+          });
+          return { buildVersionId: next.buildVersionId, buildVersionNumber: next.buildVersionNumber };
+        });
+        await stepDo("simple: pre-QA repair inheritance", async () => {
+          // The plan freezes FIRST: a resumed entry must complete the bounded
+          // repair, never start a fresh Builder attempt (see the build step).
+          const plan: PreQaRepairPlan = {
+            targetKind: failed.repairTarget,
+            gateFindings: failed.gateFindings,
+            failedReason: failed.reason,
+          };
+          await storeBuildStageArtifactIdempotent(env, {
+            buildId,
+            buildVersionId: created.buildVersionId,
+            siteGenerationId: input.siteGenerationId,
+            kind: PRE_QA_REPAIR_PLAN_ARTIFACT_KIND,
+            schemaVersion: PRE_QA_REPAIR_PLAN_SCHEMA_VERSION,
+            value: plan,
+          });
+          await reuseAcceptedImages(env, version.buildVersionId, created.buildVersionId);
+          await storeBuildStageArtifactIdempotent(env, {
+            buildId,
+            buildVersionId: created.buildVersionId,
+            siteGenerationId: input.siteGenerationId,
+            kind: "design_blueprint",
+            schemaVersion: blueprintSchemaVersion,
+            value: blueprint,
+          });
+          await copyBuilderFileArtifacts(env, {
+            buildId,
+            siteGenerationId: input.siteGenerationId,
+            fromBuildVersionId: version.buildVersionId,
+            toBuildVersionId: created.buildVersionId,
+            exceptKind: failed.repairTarget,
+          });
+          return null;
+        });
+        repairCtx = {
+          siteGenerationId: input.siteGenerationId,
+          siteId,
+          buildId,
+          buildVersionId: created.buildVersionId,
+          buildVersionNumber: created.buildVersionNumber,
+        };
+      } else {
+        // A prior engine entry already created the repair version — resume it.
+        repairCtx = {
+          siteGenerationId: input.siteGenerationId,
+          siteId,
+          buildId,
+          buildVersionId: latest.id,
+          buildVersionNumber: latest.version_number,
+        };
+      }
+
+      await appendBuildWorkflowEvent(env, {
+        buildId,
+        buildVersionId: repairCtx.buildVersionId,
+        fromState: "BLUEPRINT",
+        toState: "FIX",
+        stage: "simple_pre_qa_repair",
+        detail: `Eligible deterministic builder-gate failure — the ONE pre-QA repair targets ${failed.repairTarget}: ${failed.reason.slice(0, 250)}`.slice(0, 400),
+      });
+
+      try {
+        await stepDo(`simple: pre-QA file repair (v${repairCtx.buildVersionNumber})`, async () => {
+          const repaired = await runSimplePreQaRepairStage(env, {
+            siteGenerationId: input.siteGenerationId,
+            buildId,
+            buildVersionId: repairCtx.buildVersionId,
+            buildVersionNumber: repairCtx.buildVersionNumber,
+            blueprint,
+            facts,
+            acceptedImages: acceptedImageDescriptors,
+            formServiceEndpoint,
+            siteFormId,
+            ...(humanRevisionInstruction ? { humanRevisionInstruction } : {}),
+            plan: { targetKind: failed.repairTarget, gateFindings: failed.gateFindings, failedReason: failed.reason },
+            ...(deps.generate ? { generate: deps.generate } : {}),
+          });
+          await appendBuildWorkflowEvent(env, {
+            buildId,
+            buildVersionId: repairCtx.buildVersionId,
+            fromState: "FIX",
+            toState: "CONFIRMATION",
+            stage: "simple_pre_qa_repair",
+            detail: `ONE pre-QA repair applied → new immutable Build Version v${repairCtx.buildVersionNumber} (repaired ${repaired.repairedFile})`,
+          });
+          return null;
+        });
+      } catch (error) {
+        console.log("DEBUG PREQA2 STACK:", (error as Error).stack);
+        // The repaired candidate still fails a deterministic gate: the ONE
+        // repair is spent — terminal FAILED, no additional automated repair.
+        const reason =
+          error instanceof SimpleWebsiteBuilderError
+            ? `WEBSITE_BUILDER_${error.code}: ${error.message}`
+            : `PRE_QA_REPAIR_FAILED: ${(error as Error).message.slice(0, 400)}`;
+        await appendBuildWorkflowEvent(env, {
+          buildId,
+          buildVersionId: repairCtx.buildVersionId,
+          fromState: "CONFIRMATION",
+          toState: "FAILED",
+          stage: "simple_pre_qa_repair",
+          detail: reason.slice(0, 400),
+        });
+        return terminal("FAILED", [reason], {
+          repairApplied: true,
+          builderStrategy,
+          designBlueprintR2Key: blueprintArtifactR2Key,
+        });
+      }
+
+      const repairedBundle = await loadBundle(env, repairCtx.buildVersionId);
+      if (!repairedBundle) {
+        // Unreachable in practice (the repair step persists it), but a resumed
+        // entry whose repair call failed schema validation lands here: the
+        // repair budget is consumed — escalate, never re-repair.
+        await appendBuildWorkflowEvent(env, {
+          buildId,
+          buildVersionId: repairCtx.buildVersionId,
+          fromState: "CONFIRMATION",
+          toState: "HUMAN_REVIEW_REQUIRED",
+          stage: "simple_pre_qa_repair",
+          detail: "repaired bundle missing after the ONE pre-QA repair — automation stops",
+        });
+        return terminal("HUMAN_REVIEW_REQUIRED", ["SIMPLE pre-QA repair produced no valid bundle; HUMAN_REVIEW_REQUIRED"], {
+          repairApplied: true,
+          builderStrategy,
+          designBlueprintR2Key: blueprintArtifactR2Key,
+        });
+      }
+
+      const repairedAssembled = await assembleAndPreview(repairCtx, repairedBundle);
+      if ("preflightBlockers" in repairedAssembled) {
+        const evaluated = await evaluateVersion(repairCtx, null);
+        const reasons = [
+          ...(evaluated.releaseReady
+            ? []
+            : [
+                "repaired candidate failed deterministic Technical Preflight after the ONE pre-QA repair — automation stops",
+                ...repairedAssembled.preflightBlockers.map((blocker) => `${blocker.id}: ${blocker.detail}`),
+              ]),
+          ...evaluated.reasons,
+        ];
+        await appendBuildWorkflowEvent(env, {
+          buildId,
+          buildVersionId: repairCtx.buildVersionId,
+          fromState: "CONFIRMATION",
+          toState: evaluated.releaseReady ? "RELEASE_READY" : "HUMAN_REVIEW_REQUIRED",
+          stage: "simple_final_qa",
+          detail: (evaluated.releaseReady
+            ? "Final deterministic QA passed after the ONE pre-QA repair"
+            : reasons.join("; ")
+          ).slice(0, 400),
+        });
+        return terminal(evaluated.releaseReady ? "RELEASE_READY" : "HUMAN_REVIEW_REQUIRED", evaluated.releaseReady ? [] : reasons, {
+          releaseReadyBuildVersionId: evaluated.releaseReady ? repairCtx.buildVersionId : null,
+          repairApplied: true,
+          builderStrategy,
+          designBlueprintR2Key: blueprintArtifactR2Key,
+        });
+      }
+
+      const final = await evaluateVersion(repairCtx, repairedAssembled.previewUrl);
+      await appendBuildWorkflowEvent(env, {
+        buildId,
+        buildVersionId: repairCtx.buildVersionId,
+        fromState: "CONFIRMATION",
+        toState: final.releaseReady ? "RELEASE_READY" : "HUMAN_REVIEW_REQUIRED",
+        stage: "simple_final_qa",
+        detail: final.releaseReady
+          ? `Final QA passed after the ONE pre-QA repair (visual ${final.pkg.visual?.scores.overall ?? "n/a"})`
+          : `Final QA still failing after the ONE pre-QA repair: ${final.reasons.slice(0, 4).join("; ").slice(0, 280)}`,
+      });
+      return terminal(final.releaseReady ? "RELEASE_READY" : "HUMAN_REVIEW_REQUIRED", final.reasons, {
+        releaseReadyBuildVersionId: final.releaseReady ? repairCtx.buildVersionId : null,
+        artifactManifestHash: repairedAssembled.manifestHash,
+        previewUrl: repairedAssembled.previewUrl,
+        repairApplied: true,
+        builderStrategy,
+        designBlueprintR2Key: blueprintArtifactR2Key,
+      });
+    }
+
     // ── ONE repair → re-render → final QA (no second repair, spec §49-53) ──
     async function runRepairAndFinalQa(first: QaOutcome): Promise<SimplePipelineOutcome> {
+      // ONE repair per Build, total (#14): a pre-QA repair — or a post-QA
+      // repair from a prior engine entry — has already spent the budget.
+      // Escalate the remaining blockers; never create a second repair version.
+      if ((await countBuildVersions(env, buildId)) > 1) {
+        await appendBuildWorkflowEvent(env, {
+          buildId,
+          buildVersionId: version.buildVersionId,
+          fromState: "QA",
+          toState: "HUMAN_REVIEW_REQUIRED",
+          stage: "simple_repair",
+          detail: "the Build's ONE repair is already spent — no further automated repair; remaining blockers need human review",
+        });
+        return terminal("HUMAN_REVIEW_REQUIRED", [...first.reasons, "repair budget already consumed — no further automated repair is allowed"], {
+          repairApplied: true,
+          builderStrategy,
+          designBlueprintR2Key: blueprintArtifactR2Key,
+          previewUrl: first.previewUrl,
+        });
+      }
       // Durable repair-position truth: the latest version carries the repair.
       const latest = await env.DB.prepare(
         "SELECT id, version_number FROM build_versions WHERE build_id = ? ORDER BY version_number DESC LIMIT 1"

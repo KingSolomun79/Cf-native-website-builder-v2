@@ -91,7 +91,16 @@ export class SimpleWebsiteBuilderError extends Error {
   constructor(
     readonly code: "SOURCE_INCOMPLETE" | "OUTPUT_EXHAUSTED" | "CRITICAL_IMAGE_COVERAGE" | "INVENTED_STRUCTURE",
     message: string,
-    readonly findings: CriticalCoverageFinding[] = []
+    readonly findings: CriticalCoverageFinding[] = [],
+    // Issue #14 (operator decision 2026-09-15): the deterministic repair target
+    // — the ONE Builder file a bounded pre-QA repair would regenerate — set
+    // only when the gate mechanically implicates exactly one file. Null means
+    // not repair-eligible: the build terminates FAILED exactly as before.
+    readonly repairTarget: BuilderFileKind | null = null,
+    // The gate's own finding strings, carried verbatim for the repair
+    // directive (a repair with the finding injected is a new input, never a
+    // retry — stage-failure semantics).
+    readonly gateFindings: string[] = []
   ) {
     super(message);
     this.name = "SimpleWebsiteBuilderError";
@@ -161,6 +170,23 @@ export const BUILDER_FILE_CALL_ORDER: BuilderFileKind[] = [
 
 const PAGE_IDS = ["home", "about", "services", "contact"] as const;
 type PageId = (typeof PAGE_IDS)[number];
+
+// ── Deterministic pre-QA repair-target helpers (#14) ─────────────────────────
+
+function pageKindOf(page: string): BuilderFileKind | null {
+  return (PAGE_IDS as readonly string[]).includes(page) ? (`page-${page}` as BuilderFileKind) : null;
+}
+
+/** Chrome-gate failures name their page ("about page header does not match…").
+ *  A repair target exists only when exactly ONE page is implicated. */
+function singleImplicatedPageKind(chromeFailures: string[]): BuilderFileKind | null {
+  const pages = new Set(
+    chromeFailures
+      .map((failure) => /^(about|services|contact) page /.exec(failure)?.[1])
+      .filter((page): page is string => Boolean(page))
+  );
+  return pages.size === 1 ? pageKindOf([...pages][0]) : null;
+}
 
 function budgetOfKind(kind: BuilderFileKind): number {
   if (kind === "site-css") return BUILDER_CSS_MAX_COMPLETION_TOKENS;
@@ -649,15 +675,32 @@ async function realizeFile(
     };
   }
   const started = Date.now();
-  const run = await runAiFileStage(env, {
-    stage: "simple-website-builder",
-    schemaVersion: schemaVersionOfKind(kind),
-    userPrompt: args.userPrompt,
-    ...args.stageArtifactBase,
-    inputArtifactIds: args.inputArtifactIds,
-    validate: args.validator(kind),
-    generate: args.seamFor(kind),
-  });
+  let run: Awaited<ReturnType<typeof runAiFileStage>>;
+  try {
+    run = await runAiFileStage(env, {
+      stage: "simple-website-builder",
+      schemaVersion: schemaVersionOfKind(kind),
+      userPrompt: args.userPrompt,
+      ...args.stageArtifactBase,
+      inputArtifactIds: args.inputArtifactIds,
+      validate: args.validator(kind),
+      generate: args.seamFor(kind),
+    });
+  } catch (error) {
+    // The per-file gate failure carries its file: the deterministic pre-QA
+    // repair target (#14). The gate findings ride verbatim for the repair
+    // directive.
+    if (error instanceof AiStageFileInvalidError) {
+      throw new SimpleWebsiteBuilderError(
+        "SOURCE_INCOMPLETE",
+        `Website Builder ${kind} file realization is not complete source: ${error.message}`,
+        [],
+        kind,
+        error.failures
+      );
+    }
+    throw error;
+  }
   // Freeze BEFORE the next call starts: a later failure resumes here.
   await storeBuildStageArtifactIdempotent(env, {
     buildId: input.buildId,
@@ -862,12 +905,16 @@ export async function runSimpleBuilderFileRealizationCore(
 
   // §18 FAIL CLOSED: the frozen chrome is a Builder invariant — after
   // canonicalization any residual mismatch is invalid source, never a
-  // redesign candidate.
+  // redesign candidate. Repair-eligible (#14) only when the failures
+  // implicate exactly ONE inner page — that page is the deterministic target.
   const chromeFailures = validateSharedChrome(pages);
   if (chromeFailures.length > 0) {
     throw new SimpleWebsiteBuilderError(
       "SOURCE_INCOMPLETE",
-      `Website Builder violated the frozen shared chrome contract (${chromeFailures.join("; ").slice(0, 400)})`
+      `Website Builder violated the frozen shared chrome contract (${chromeFailures.join("; ").slice(0, 400)})`,
+      [],
+      singleImplicatedPageKind(chromeFailures),
+      chromeFailures
     );
   }
 
@@ -906,12 +953,16 @@ export async function runSimpleBuilderFileRealizationCore(
 
   // DOM-FIRST GATE: the stylesheet must reference only structure that exists
   // in the four documents or the script (fail closed after ALL six files, so
-  // JS state-class hooks are known).
+  // JS state-class hooks are known). Repair-eligible (#14): the stylesheet is
+  // the deterministic target — it invented the structure.
   const selectorFailures = cssSelectorFailures(css, pages, js);
   if (selectorFailures.length > 0) {
     throw new SimpleWebsiteBuilderError(
       "INVENTED_STRUCTURE",
-      `Website Builder stylesheet invented structure absent from the realized DOM (${selectorFailures.join("; ").slice(0, 400)})`
+      `Website Builder stylesheet invented structure absent from the realized DOM (${selectorFailures.join("; ").slice(0, 400)})`,
+      [],
+      "site-css",
+      selectorFailures
     );
   }
 
@@ -981,13 +1032,18 @@ export async function runSimpleWebsiteBuilderStage(
   }
   // FAIL CLOSED: a bundle that violates CRITICAL coverage is not a valid
   // Builder result — it is never persisted and never reaches downstream QA
-  // as one.
+  // as one. Repair-eligible (#14) only when every missing placement names the
+  // SAME page — that page's file is the deterministic target.
   const coverageFindings = validateBuilderCriticalCoverage(core.bundle, input.acceptedImages);
   if (coverageFindings.length > 0) {
+    const implicatedPages = new Set(coverageFindings.map((finding) => finding.page));
+    const target = implicatedPages.size === 1 ? pageKindOf([...implicatedPages][0]) : null;
     throw new SimpleWebsiteBuilderError(
       "CRITICAL_IMAGE_COVERAGE",
       `Website Builder violated its CRITICAL image coverage contract after the canonical SIX_CALL_FILE_REALIZATION build — no further attempt (${coverageSummary(coverageFindings)})`,
-      coverageFindings
+      coverageFindings,
+      target,
+      coverageFindings.map((finding) => `${finding.id} (${finding.page}): ${finding.detail}`)
     );
   }
   const stored = await storeBuildStageArtifactIdempotent(env, {
@@ -1000,4 +1056,301 @@ export async function runSimpleWebsiteBuilderStage(
     provenance: core.provenance["site-js"],
   });
   return { bundle: core.bundle, artifactR2Key: stored.artifactR2Key, provenance: core.provenance["site-js"], strategy: "SIX_CALL_FILE_REALIZATION" };
+}
+
+// ── PRE-QA BOUNDED FILE REPAIR (issue #14; operator decision 2026-09-15) ────
+//
+// A Build has a maximum of ONE automated repair in total, invocable either
+// BEFORE QA for an eligible deterministic Builder/realization gate failure
+// with a mechanically identifiable repair target, or AFTER QA for eligible
+// Release Blockers (the runSimpleSiteRepairStage path). A pre-QA repair
+// consumes the Build's entire repair allowance: it changes ONLY the selected
+// Builder artifact (ONE targeted call, findings injected — a new input, never
+// a retry), creates a new immutable Build Version, re-runs the complete
+// applicable deterministic gates, and any further repair-eligible failure is
+// terminal. Business Facts, Onboarding Submission, Build Mode, Reference/
+// Creative Direction, Blueprint and Accepted Images are untouched (images and
+// Blueprint are inherited verbatim), and there is no repair loop, no second
+// budget, no blueprint/image regeneration.
+
+export interface PreQaRepairPlan {
+  targetKind: BuilderFileKind;
+  gateFindings: string[];
+  failedReason: string;
+}
+
+export const PRE_QA_REPAIR_PLAN_ARTIFACT_KIND = "pre_qa_repair_plan";
+export const PRE_QA_REPAIR_PLAN_SCHEMA_VERSION = "pre-qa-repair-plan/1";
+
+const FILE_NAME_OF_KIND: Record<BuilderFileKind, string> = {
+  "page-home": "home.html",
+  "page-about": "about.html",
+  "page-services": "services.html",
+  "page-contact": "contact.html",
+  "site-css": "site.css",
+  "site-js": "site.js",
+};
+
+function builderFileRepairDirective(targetKind: BuilderFileKind, gateFindings: string[]): string {
+  return `
+
+REPAIR DIRECTIVE (the ONE bounded pre-QA file repair): this stage's previous attempt at "${FILE_NAME_OF_KIND[targetKind]}" was REJECTED by the deterministic gate below. Regenerate "${FILE_NAME_OF_KIND[targetKind]}" so it clears every listed finding. The other five files of this stage are FROZEN — do not redesign them; your file must interlock with them exactly as the original task requires. This directive is a new input naming the exact violations; fix precisely these, change nothing else, and keep every hard rule above.
+GATE FINDINGS (mechanically verified, all must be cleared):
+${gateFindings.map((finding) => `- ${finding}`).join("\n")}`;
+}
+
+/** Copies the frozen per-file Builder artifacts from the failed version to the
+ *  repair version (the repair stage consumes them as frozen context and
+ *  gate inputs), skipping the repair target — the ONE file the repair
+ *  regenerates. Idempotent; a missing source file is simply skipped (a
+ *  resumed core run would realize it fresh, which cannot happen for files
+ *  that already froze). */
+export async function copyBuilderFileArtifacts(
+  env: Env,
+  args: {
+    buildId: string;
+    siteGenerationId: string;
+    fromBuildVersionId: string;
+    toBuildVersionId: string;
+    exceptKind: BuilderFileKind;
+  }
+): Promise<void> {
+  for (const kind of BUILDER_FILE_CALL_ORDER) {
+    if (kind === args.exceptKind) continue;
+    const artifact = await getBuildStageArtifact<string>(env, args.fromBuildVersionId, fileArtifactKind(kind));
+    if (!artifact) continue;
+    await storeBuildStageArtifactIdempotent(env, {
+      buildId: args.buildId,
+      siteGenerationId: args.siteGenerationId,
+      buildVersionId: args.toBuildVersionId,
+      kind: fileArtifactKind(kind),
+      schemaVersion: schemaVersionOfKind(kind),
+      value: artifact.value,
+      ...(artifact.provenance ? { provenance: artifact.provenance } : {}),
+    });
+  }
+}
+
+export interface RunSimplePreQaRepairInput {
+  siteGenerationId: string;
+  buildId: string;
+  buildVersionId: string;
+  buildVersionNumber: number;
+  blueprint: DesignBlueprintV2;
+  facts: BusinessFacts;
+  acceptedImages: AcceptedImageDescriptor[];
+  formServiceEndpoint: string;
+  siteFormId: string;
+  humanRevisionInstruction?: string;
+  plan: PreQaRepairPlan;
+  generate?: RawAiGenerate;
+}
+
+export interface SimplePreQaRepairResult {
+  bundle: SiteBundle;
+  artifactR2Key: string;
+  provenance: AiProvenance | null;
+  repairedFile: BuilderFileKind;
+}
+
+/**
+ * The ONE pre-QA builder-file repair: regenerate ONLY the plan's target file
+ * (ONE targeted call with the gate findings injected), then re-run the
+ * COMPLETE applicable deterministic gate sequence on the repaired six-file
+ * set (chrome → state-hook adoption → DOM-first selector gate →
+ * SiteBundleSchema → CRITICAL coverage) and persist the repaired bundle as
+ * the repair version's immutable site bundle. Any gate that still fails
+ * throws — the Build terminates FAILED with the repair budget consumed; no
+ * further automated repair is allowed.
+ */
+export async function runSimplePreQaRepairStage(env: Env, input: RunSimplePreQaRepairInput): Promise<SimplePreQaRepairResult> {
+  // Workflow-retry safety: the frozen repaired bundle IS the stage result.
+  const existing = await getBuildStageArtifact<SiteBundle>(env, input.buildVersionId, "site_bundle");
+  if (existing) {
+    return { bundle: existing.value, artifactR2Key: existing.artifactR2Key, provenance: existing.provenance, repairedFile: input.plan.targetKind };
+  }
+  const targetKind = input.plan.targetKind;
+  if (!BUILDER_FILE_CALL_ORDER.includes(targetKind)) {
+    throw new Error(`pre-QA repair plan names an unknown Builder file: ${targetKind}`);
+  }
+
+  // Load the frozen six-file set from THIS (the repair) version: the five
+  // inherited artifacts plus the repaired target from a prior attempt, if one
+  // already froze (idempotent resume). Artifact R2 keys ride along as the
+  // repair call's input-artifact provenance.
+  const frozen: Partial<Record<BuilderFileKind, string>> = {};
+  const frozenArtifactKeys: Partial<Record<BuilderFileKind, string>> = {};
+  for (const kind of BUILDER_FILE_CALL_ORDER) {
+    if (kind === targetKind) continue;
+    const artifact = await getBuildStageArtifact<string>(env, input.buildVersionId, fileArtifactKind(kind));
+    if (!artifact?.value) {
+      // Inheritance incomplete — a platform fault, not a gate outcome: the
+      // engine retry re-runs the inheritance step.
+      throw new Error(`pre-QA repair inheritance incomplete: frozen ${kind} is missing on the repair version`);
+    }
+    frozen[kind] = artifact.value;
+    frozenArtifactKeys[kind] = artifact.artifactR2Key;
+  }
+  const targetPage = targetKind.startsWith("page-") ? (targetKind.replace("page-", "") as PageId) : null;
+  // The target page has no frozen pre-call content (it is what the repair
+  // call produces), so its slot stays empty until the call returns.
+  const markerHrefs: Record<string, string> = { about: "/about", services: "/services", contact: "/contact" };
+  const pages: Record<PageId, string> = {
+    home: frozen["page-home"]!,
+    about: targetKind === "page-about" ? "" : frozen["page-about"]!,
+    services: targetKind === "page-services" ? "" : frozen["page-services"]!,
+    contact: targetKind === "page-contact" ? "" : frozen["page-contact"]!,
+  };
+  const css = frozen["site-css"]!;
+  const js = frozen["site-js"]!;
+
+  // The repair call receives EXACTLY the original call context (same prompt
+  // family, same frozen inputs) plus the repair directive.
+  const baseInput: RunSimpleWebsiteBuilderInput = {
+    siteGenerationId: input.siteGenerationId,
+    buildId: input.buildId,
+    buildVersionId: input.buildVersionId,
+    buildVersionNumber: input.buildVersionNumber,
+    blueprint: input.blueprint,
+    facts: input.facts,
+    acceptedImages: input.acceptedImages,
+    formServiceEndpoint: input.formServiceEndpoint,
+    siteFormId: input.siteFormId,
+    ...(input.humanRevisionInstruction ? { humanRevisionInstruction: input.humanRevisionInstruction } : {}),
+  };
+  // Splice the frozen inner pages (the original css/js calls saw POST-splice
+  // documents); the target page is spliced after its repair call returns.
+  const chrome = extractSharedChrome(pages.home);
+  if (chrome) {
+    for (const page of ["about", "services", "contact"] as const) {
+      if (page === targetPage) continue;
+      pages[page] = spliceSharedChrome(pages[page], chrome, markerHrefs[page]);
+    }
+  }
+  const factsRef = input.blueprint.businessFactsRef;
+  const frozenKeys = BUILDER_FILE_CALL_ORDER.filter((kind) => kind !== targetKind).map((kind) => frozenArtifactKeys[kind]!).filter(Boolean);
+  let userPrompt: string;
+  let inputArtifactIds: string[];
+  if (targetKind === "site-css") {
+    userPrompt = cssCallUserPrompt(baseInput, pages);
+    inputArtifactIds = [factsRef, ...frozenKeys];
+  } else if (targetKind === "site-js") {
+    userPrompt = jsCallUserPrompt(baseInput, css, pages);
+    inputArtifactIds = [factsRef, ...frozenKeys];
+  } else {
+    const page = targetPage!;
+    userPrompt = pageCallUserPrompt(
+      baseInput,
+      page,
+      page === "home" ? null : chrome,
+      page === "home" ? null : extractHomeStructuralVocabulary(pages.home)
+    );
+    inputArtifactIds = [factsRef, ...(page === "home" ? [] : frozenKeys)];
+  }
+  userPrompt += builderFileRepairDirective(targetKind, input.plan.gateFindings);
+
+  // The repaired target file must pass ITS OWN per-file gate — for site-js
+  // that includes adopting the frozen stylesheet's state hooks.
+  const motionExists = blueprintMotionExists(input.blueprint);
+  const stateHookGroupsForTarget = targetKind === "site-js" ? cssStateHookGroups(css, pages) : [];
+  const started = Date.now();
+  let run: Awaited<ReturnType<typeof runAiFileStage>>;
+  try {
+    run = await runAiFileStage(env, {
+      stage: "simple-website-builder",
+      schemaVersion: schemaVersionOfKind(targetKind),
+      userPrompt,
+      buildId: input.buildId,
+      siteGenerationId: input.siteGenerationId,
+      buildVersionId: input.buildVersionId,
+      buildVersionNumber: input.buildVersionNumber,
+      inputArtifactIds: inputArtifactIds.filter(Boolean),
+      validate: (source: string) =>
+        validateBuilderFile(targetKind, source, {
+          blueprintMotionExists: motionExists,
+          ...(targetKind === "site-js" ? { stateHookGroups: stateHookGroupsForTarget } : {}),
+        }).failures,
+      generate:
+        input.generate ??
+        fileBuilderGenerate(env, { maxCompletionTokens: budgetOfKind(targetKind), label: `simple-website-builder:pre-qa-repair:${targetKind}` }),
+    });
+  } catch (error) {
+    // The repaired file itself failed its per-file gate: same terminal
+    // semantics as any post-repair gate failure — the ONE repair is spent.
+    if (error instanceof AiStageFileInvalidError) {
+      throw new SimpleWebsiteBuilderError(
+        "SOURCE_INCOMPLETE",
+        `pre-QA repaired ${targetKind} still fails its per-file gate — the Build's ONE repair is spent and no further automated repair is allowed (${error.failures.join("; ").slice(0, 400)})`,
+        [],
+        null,
+        error.failures
+      );
+    }
+    throw error;
+  }
+  const repairedFile = run.value;
+  const storedFile = await storeBuildStageArtifactIdempotent(env, {
+    buildId: input.buildId,
+    siteGenerationId: input.siteGenerationId,
+    buildVersionId: input.buildVersionId,
+    kind: fileArtifactKind(targetKind),
+    schemaVersion: schemaVersionOfKind(targetKind),
+    value: repairedFile,
+    provenance: run.provenance,
+  });
+
+  // Assemble the repaired six-file set and re-run the COMPLETE applicable
+  // deterministic gate sequence (same gates as the core, same order). The
+  // repaired page carries the canonical chrome splice before validation.
+  if (targetKind === "site-css") frozen["site-css"] = repairedFile;
+  else if (targetKind === "site-js") frozen["site-js"] = repairedFile;
+  else if (targetPage === "home") pages.home = repairedFile;
+  else pages[targetPage!] = chrome ? spliceSharedChrome(repairedFile, chrome, markerHrefs[targetPage!]) : repairedFile;
+  const repairedCss = targetKind === "site-css" ? repairedFile : css;
+  const repairedJs = targetKind === "site-js" ? repairedFile : js;
+  const gateFailure = (code: SimpleWebsiteBuilderError["code"], gate: string, findings: string[]): SimpleWebsiteBuilderError =>
+    new SimpleWebsiteBuilderError(
+      code,
+      `pre-QA repaired bundle still fails the ${gate} gate — the Build's ONE repair is spent and no further automated repair is allowed (${findings.join("; ").slice(0, 400)})`,
+      [],
+      null,
+      findings
+    );
+
+  const chromeFailures = validateSharedChrome(pages);
+  if (chromeFailures.length > 0) throw gateFailure("SOURCE_INCOMPLETE", "frozen shared chrome", chromeFailures);
+
+  const adoptionFailures = validateBuilderFile("site-js", repairedJs, {
+    blueprintMotionExists: motionExists,
+    stateHookGroups: cssStateHookGroups(repairedCss, pages),
+  }).failures;
+  if (adoptionFailures.length > 0) throw gateFailure("SOURCE_INCOMPLETE", "state-hook adoption", adoptionFailures);
+
+  const selectorFailures = cssSelectorFailures(repairedCss, pages, repairedJs);
+  if (selectorFailures.length > 0) throw gateFailure("INVENTED_STRUCTURE", "DOM-first selector", selectorFailures);
+
+  const bundle: SiteBundle = { version: "1", pages, sharedCss: repairedCss, sharedJs: repairedJs, notes: BUILDER_STRATEGY_NOTE };
+  if (!Value.Check(SiteBundleSchema, bundle)) {
+    const issues = [...Value.Errors(SiteBundleSchema, bundle)].map((e) => `${e.path}: ${e.message}`).join("; ").slice(0, 400);
+    throw gateFailure("SOURCE_INCOMPLETE", "SiteBundleSchema", [issues]);
+  }
+  const coverageFindings = validateBuilderCriticalCoverage(bundle, input.acceptedImages);
+  if (coverageFindings.length > 0) {
+    throw gateFailure(
+      "CRITICAL_IMAGE_COVERAGE",
+      "CRITICAL image coverage",
+      coverageFindings.map((finding) => `${finding.id} (${finding.page}): ${finding.detail}`)
+    );
+  }
+
+  const stored = await storeBuildStageArtifactIdempotent(env, {
+    buildId: input.buildId,
+    siteGenerationId: input.siteGenerationId,
+    buildVersionId: input.buildVersionId,
+    kind: "site_bundle",
+    schemaVersion: SITE_BUNDLE_SCHEMA_VERSION,
+    value: bundle,
+    provenance: run.provenance,
+  });
+  return { bundle, artifactR2Key: stored.artifactR2Key, provenance: run.provenance, repairedFile: targetKind };
 }

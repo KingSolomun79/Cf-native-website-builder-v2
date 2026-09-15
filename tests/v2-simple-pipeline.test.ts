@@ -185,6 +185,79 @@ describe("SIMPLE pipeline end-to-end (experiment/simplified-design-pipeline)", (
     expect(records?.n).toBe(0);
   });
 
+  it("pre-QA repair consumed the budget: a repaired build whose QA still fails → HUMAN_REVIEW_REQUIRED, never a post-QA repair version", async () => {
+    const siteGenerationId = await startGeneration("references/simple/pre-qa-budget.png");
+    const outcome = await runBuildPipeline(env, {
+      siteGenerationId,
+      deps: createSimpleScripts({ builderInventsCssSelectors: true, preQaRepairSucceeds: true, allVisualQaFails: true }),
+    });
+
+    // The ONE pre-QA repair carried the build through the builder gates; the
+    // failing QA escalates WITHOUT a second (post-QA) repair.
+    expect(outcome.terminal).toBe("HUMAN_REVIEW_REQUIRED");
+    expect(outcome.repairApplied).toBe(true);
+    expect(outcome.reasons[0]).toContain("visual fidelity 70 < 90");
+
+    // Exactly two versions: the pre-QA repair version, and NO post-QA repair
+    // version after it — the ONE repair covered both invocation points.
+    const versions = await env.DB.prepare("SELECT version_number FROM build_versions WHERE build_id = ? ORDER BY version_number")
+      .bind(outcome.buildId)
+      .all<{ version_number: number }>();
+    expect(versions.results.map((v) => v.version_number)).toEqual([1, 2]);
+
+    // The post-QA repair stage never ran for this build.
+    const postQaRepairRuns = await env.DB.prepare("SELECT COUNT(*) AS n FROM ai_stage_runs WHERE build_id = ? AND stage = 'simple-site-repair'")
+      .bind(outcome.buildId)
+      .first<{ n: number }>();
+    expect(postQaRepairRuns?.n).toBe(0);
+
+    // A resumed engine entry (fresh pipeline run, same Build) hits the durable
+    // budget guard: the failing QA escalates with the budget reason and NO
+    // third Build Version is ever created.
+    const resumed = await runBuildPipeline(env, { siteGenerationId, buildId: outcome.buildId, deps: createSimpleScripts({ allVisualQaFails: true }) });
+    expect(resumed.terminal).toBe("HUMAN_REVIEW_REQUIRED");
+    expect(resumed.reasons).toContain("repair budget already consumed — no further automated repair is allowed");
+    const versionsAfterResume = await env.DB.prepare("SELECT version_number FROM build_versions WHERE build_id = ? ORDER BY version_number")
+      .bind(outcome.buildId)
+      .all<{ version_number: number }>();
+    expect(versionsAfterResume.results.map((v) => v.version_number)).toEqual([1, 2]);
+  });
+
+  it("repaired candidate fails the deterministic gate again → FAILED with the budget consumed, no additional repair", async () => {
+    const siteGenerationId = await startGeneration("references/simple/pre-qa-rejected.png");
+    const outcome = await runBuildPipeline(env, {
+      siteGenerationId,
+      // preQaRepairSucceeds defaults false: the repair returns the same
+      // defective site.js, the state-hook adoption gate fails again, and the
+      // Build terminates — no second repair, no loop.
+      deps: createSimpleScripts({ builderInventsCssSelectors: true }),
+    });
+
+    expect(outcome.terminal).toBe("FAILED");
+    expect(outcome.repairApplied).toBe(true);
+    expect(outcome.reasons[0]).toContain("WEBSITE_BUILDER_SOURCE_INCOMPLETE");
+    expect(outcome.reasons[0]).toContain("no further automated repair is allowed");
+
+    // Exactly two versions (v2 = the spent repair); no bundle anywhere, no
+    // release record, and the operator mail is the FAILED composer.
+    const versions = await env.DB.prepare("SELECT COUNT(*) AS n FROM build_versions WHERE build_id = ?")
+      .bind(outcome.buildId)
+      .first<{ n: number }>();
+    expect(versions?.n).toBe(2);
+    const bundles = await env.DB.prepare("SELECT COUNT(*) AS n FROM build_stage_artifacts WHERE build_id = ? AND kind = 'site_bundle'")
+      .bind(outcome.buildId)
+      .first<{ n: number }>();
+    expect(bundles?.n).toBe(0);
+    const records = await env.DB.prepare("SELECT COUNT(*) AS n FROM build_release_records WHERE build_id = ?")
+      .bind(outcome.buildId)
+      .first<{ n: number }>();
+    expect(records?.n).toBe(0);
+    const notification = await env.DB.prepare("SELECT kind FROM admin_notifications WHERE dedupe_key = ?")
+      .bind(`build-terminal:${outcome.buildId}:FAILED`)
+      .first<{ kind: string }>();
+    expect(notification?.kind).toBe("GENERATION_FAILED");
+  });
+
   it("blueprint that fails the deterministic quality gate escalates to HUMAN_REVIEW_REQUIRED without generating images or a site", async () => {
     const siteGenerationId = await startGeneration("references/simple/gate-fail.png");
     const outcome = await runBuildPipeline(env, {

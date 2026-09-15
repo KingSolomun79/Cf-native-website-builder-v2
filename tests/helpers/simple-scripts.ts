@@ -143,12 +143,21 @@ export interface SimpleScriptsOptions {
   /** The builder omits the CRITICAL about-hero on its page call — the
    *  Builder coverage fail-closed path. */
   builderOmitsAboutHero?: boolean;
+  /** The builder omits BOTH the about-hero and the services-hero — a
+   *  CRITICAL coverage failure implicating TWO pages, so no single-file
+   *  pre-QA repair target exists (issue #14). */
+  builderOmitsTwoHeroes?: boolean;
   /** The builder stylesheet anchors selectors on structure absent from the
    *  four pages and site.js — the DOM-first invented-structure gate. */
   builderInventsCssSelectors?: boolean;
   /** An inner page replaces the shared footer — the frozen shared chrome
    *  gate (SOURCE_INCOMPLETE). */
   builderRestylesChrome?: boolean;
+  /** The ONE pre-QA file repair (issue #14) clears its gate. Default
+   *  (false): the repair returns the same defective file — the repaired
+   *  candidate fails the gate again and the Build terminates FAILED with
+   *  the budget consumed. */
+  preQaRepairSucceeds?: boolean;
 }
 
 export function createSimpleScripts(options: SimpleScriptsOptions = {}): SimplePipelineDeps {
@@ -156,8 +165,13 @@ export function createSimpleScripts(options: SimpleScriptsOptions = {}): SimpleP
   let repairCalls = 0;
   const aboutPage = () => {
     let html = aboutHtml();
-    if (options.builderOmitsAboutHero) html = html.replace(/<img src="IMG:about-hero"[^>]*>/, "");
+    if (options.builderOmitsAboutHero || options.builderOmitsTwoHeroes) html = html.replace(/<img src="IMG:about-hero"[^>]*>/, "");
     if (options.builderRestylesChrome) html = html.replace(/<footer class="site-footer">[\s\S]*?<\/footer>/, `<footer><p>© 2026 Different Business</p></footer>`);
+    return html;
+  };
+  const servicesPage = () => {
+    let html = servicesHtml();
+    if (options.builderOmitsTwoHeroes) html = html.replace(/<img src="IMG:services-hero"[^>]*>/, "");
     return html;
   };
 
@@ -192,6 +206,27 @@ export function createSimpleScripts(options: SimpleScriptsOptions = {}): SimpleP
     const respondRaw = (content: string) => ({ content, provider: "simple-script", model: "@cf/zai-org/glm-5.3" });
     // DOM-first order (v8 GO): the four page calls are 1-4, the stylesheet is
     // call 5, site.js stays call 6.
+    // PRE-QA FILE REPAIR (issue #14): the ONE targeted one-file regeneration
+    // with the gate findings injected. The script either clears the exact
+    // gate (preQaRepairSucceeds) or returns the same defective file — the
+    // repaired candidate fails again and the Build terminates FAILED with the
+    // repair budget consumed. This branch must precede the plain call-5/6
+    // branches: a repair prompt embeds the original call prompt.
+    if (user.includes("REPAIR DIRECTIVE (the ONE bounded pre-QA file repair)")) {
+      if (!options.preQaRepairSucceeds) {
+        return user.includes('"site.js"') ? respondRaw(SIMPLE_JS) : respondRaw(aboutPage());
+      }
+      if (user.includes('"site.js"')) {
+        // Adopt the stylesheet's unanchored hooks — the exact gate findings.
+        // The hook token is quoted DOTLESS because that is what the shared
+        // js-vocabulary scanner reads (mirroring 'nav-open' above).
+        return respondRaw(
+          `${SIMPLE_JS}\n(function () { var revealHook = 'js-reveal'; document.querySelectorAll('.' + revealHook).forEach(function (el) { el.classList.add('is-visible'); }); })();`
+        );
+      }
+      if (user.includes('"about.html"')) return respondRaw(aboutHtml());
+      throw new Error(`pre-QA repair script has no fix for this target: ${user.slice(-300)}`);
+    }
     if (user.includes("call 5 of 6")) {
       return respondRaw(
         options.builderInventsCssSelectors
@@ -210,7 +245,7 @@ export function createSimpleScripts(options: SimpleScriptsOptions = {}): SimpleP
       return respondRaw(
         page === "home" ? homeHtml()
         : page === "about" ? aboutPage()
-        : page === "services" ? servicesHtml()
+        : page === "services" ? servicesPage()
         : contactHtml(endpoint, siteFormId)
       );
     }

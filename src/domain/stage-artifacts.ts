@@ -33,7 +33,12 @@ export type StageArtifactKind =
   | "qa_package"
   // Per-file Builder resume artifacts (operator GO 2026-09-11 §20): one
   // immutable validated file per kind (site-css, page-home, ..., site-js).
-  | `builder_file/${string}`;
+  | `builder_file/${string}`
+  // Issue #14 (operator decision 2026-09-15): the durable ONE-pre-QA-repair
+  // plan (target file + injected gate findings) frozen on the repair version
+  // so a resumed engine entry completes the bounded repair, never a fresh
+  // Builder attempt.
+  | "pre_qa_repair_plan";
 
 export class StageArtifactError extends Error {
   readonly code: "ARTIFACT_ALREADY_EXISTS" | "BUILD_VERSION_NOT_FOUND" | "REPAIR_ARTIFACT_MISMATCH";
