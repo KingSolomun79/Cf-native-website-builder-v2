@@ -597,7 +597,7 @@ export async function runSimpleBuildPipeline(
 
     const buildOutcome = await stepDo(
       `simple: website build (v${version.buildVersionNumber})`,
-      async (): Promise<{ kind: "ok"; strategy: SimplePipelineOutcome["builderStrategy"] } | { kind: "review"; reason: string }> => {
+      async (): Promise<{ kind: "ok"; strategy: SimplePipelineOutcome["builderStrategy"] } | { kind: "failed"; reason: string }> => {
         try {
           const built = await runSimpleWebsiteBuilderStage(env, {
             siteGenerationId: input.siteGenerationId,
@@ -617,27 +617,33 @@ export async function runSimpleBuildPipeline(
           // EVERY SimpleWebsiteBuilderError is a deterministic gate outcome —
           // the six file-sized realization calls are the Builder's whole
           // budget, so no engine retry can ever fix one. Fail closed IN-STEP
-          // (the #62 §7 terminal-result pattern): the review terminal carries
-          // the gate's reason. Unmapped codes used to escape as non-transient
-          // step failures and terminate the whole instance (live evidence
-          // 2026-09-11: invented-structure CSS, then shared-chrome drift).
+          // (the #62 §7 terminal-result pattern) as FAILED, never as a review:
+          // every one of these gates throws BEFORE the SiteBundle persists, so
+          // there is no candidate to inspect and HUMAN_REVIEW_REQUIRED would
+          // escalate a build the human has nothing to review (#62 §8/§9: no
+          // candidate means Build FAILED — live evidence 2026-09-15, build
+          // ec2ef1c4: an invented-structure CSS reached the review terminal
+          // with no preview, no manifest and a "ready for human review"
+          // email). 2026-09-11 history: unmapped codes used to escape as
+          // non-transient step failures and terminate the whole instance
+          // (invented-structure CSS, then shared-chrome drift).
           if (error instanceof SimpleWebsiteBuilderError) {
-            return { kind: "review" as const, reason: `WEBSITE_BUILDER_${error.code}: ${error.message}` };
+            return { kind: "failed" as const, reason: `WEBSITE_BUILDER_${error.code}: ${error.message}` };
           }
           throw error;
         }
       }
     );
-    if (buildOutcome.kind === "review") {
+    if (buildOutcome.kind === "failed") {
       await appendBuildWorkflowEvent(env, {
         buildId,
         buildVersionId: version.buildVersionId,
         fromState: "BLUEPRINT",
-        toState: "HUMAN_REVIEW_REQUIRED",
+        toState: "FAILED",
         stage: "simple_website_build",
         detail: buildOutcome.reason.slice(0, 400),
       });
-      return terminal("HUMAN_REVIEW_REQUIRED", [buildOutcome.reason], { designBlueprintR2Key: blueprintArtifactR2Key });
+      return terminal("FAILED", [buildOutcome.reason], { designBlueprintR2Key: blueprintArtifactR2Key });
     }
     builderStrategy = buildOutcome.strategy;
     await appendBuildWorkflowEvent(env, {

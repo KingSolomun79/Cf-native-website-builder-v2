@@ -488,8 +488,15 @@ describe("Assembly Preflight enforces the same shared invariant on assembled can
 });
 
 // ── primary seam: the pipeline fails closed IN-STEP ─────────────────────────
+//
+// 2026-09-15 correction: EVERY SimpleWebsiteBuilderError throws BEFORE the
+// SiteBundle persists — there is no candidate to inspect, so per #62 §8/§9 the
+// terminal is FAILED (HUMAN_REVIEW_REQUIRED is reserved for inspectable
+// candidates requiring human judgement). The FAILED terminal also routes the
+// operator email to the GENERATION_FAILED composer with the precise gate
+// reason, instead of a "ready for human review" email with no preview.
 
-describe("pipeline: a Builder that cannot satisfy CRITICAL coverage terminates HUMAN_REVIEW_REQUIRED in-step", () => {
+describe("pipeline: a Builder that cannot satisfy CRITICAL coverage terminates FAILED in-step", () => {
   it("no assembly, no preview, no repair, no engine retry — the terminal carries the coverage reason", async () => {
     const referenceKey = "references/simple/critical-coverage-pipeline.png";
     await persistSimpleScreenshot(env, referenceKey);
@@ -505,7 +512,7 @@ describe("pipeline: a Builder that cannot satisfy CRITICAL coverage terminates H
       deps: createSimpleScripts({ builderOmitsAboutHero: true }),
     });
 
-    expect(outcome.terminal).toBe("HUMAN_REVIEW_REQUIRED");
+    expect(outcome.terminal).toBe("FAILED");
     expect(outcome.reasons[0]).toContain("WEBSITE_BUILDER_CRITICAL_IMAGE_COVERAGE");
     expect(outcome.reasons[0]).toContain("about-hero");
     expect(outcome.reasons[0]).toContain("no further attempt");
@@ -525,16 +532,23 @@ describe("pipeline: a Builder that cannot satisfy CRITICAL coverage terminates H
     expect(await getBuildStageArtifact(env, version!.id, "qa_package")).toBeNull();
     // the audit trail names the stage and the terminal
     const event = await env.DB.prepare(
-      "SELECT stage, to_state FROM build_workflow_events WHERE build_id = ? AND stage = 'simple_website_build' AND to_state = 'HUMAN_REVIEW_REQUIRED'"
+      "SELECT stage, to_state FROM build_workflow_events WHERE build_id = ? AND stage = 'simple_website_build' AND to_state = 'FAILED'"
     )
       .bind(outcome.buildId)
       .first<{ stage: string; to_state: string }>();
     expect(event).not.toBeNull();
+    // the operator notification is the GENERATION_FAILED composer, not a review invitation
+    const notification = await env.DB.prepare(
+      "SELECT kind FROM admin_notifications WHERE dedupe_key = ?"
+    )
+      .bind(`build-terminal:${outcome.buildId}:FAILED`)
+      .first<{ kind: string }>();
+    expect(notification?.kind).toBe("GENERATION_FAILED");
   });
 });
 
-describe("pipeline: a Builder whose stylesheet invents structure terminates HUMAN_REVIEW_REQUIRED in-step", () => {
-  it("the DOM-first selector gate fails closed to review — no engine retry, no instance-killing escape", async () => {
+describe("pipeline: a Builder whose stylesheet invents structure fails at the site-js seam", () => {
+  it("the unadopted selector is caught by the per-file JS validation — FAILED, no engine retry, per-file forensics", async () => {
     const referenceKey = "references/simple/invented-structure-pipeline.png";
     await persistSimpleScreenshot(env, referenceKey);
     const started = await startSiteGeneration(env, {
@@ -549,9 +563,9 @@ describe("pipeline: a Builder whose stylesheet invents structure terminates HUMA
       deps: createSimpleScripts({ builderInventsCssSelectors: true }),
     });
 
-    expect(outcome.terminal).toBe("HUMAN_REVIEW_REQUIRED");
-    expect(outcome.reasons[0]).toContain("WEBSITE_BUILDER_INVENTED_STRUCTURE");
-    // the gate names the invented selectors themselves
+    expect(outcome.terminal).toBe("FAILED");
+    // the defect surfaces at the site-js file validation, naming the invented selectors
+    expect(outcome.reasons[0]).toContain("WEBSITE_BUILDER_SOURCE_INCOMPLETE");
     expect(outcome.reasons[0]).toContain(".field-error");
     expect(outcome.reasons[0]).toContain(".js-reveal");
     expect(outcome.repairApplied).toBe(false);
@@ -568,9 +582,17 @@ describe("pipeline: a Builder whose stylesheet invents structure terminates HUMA
     expect(await getBuildStageArtifact<SiteBundle>(env, version!.id, "site_bundle")).toBeNull();
     expect(await getBuildStageArtifact(env, version!.id, "assembled_manifest")).toBeNull();
     expect(await getBuildStageArtifact(env, version!.id, "qa_package")).toBeNull();
-    // the audit trail carries the review terminal
+    // per-file forensics: the site-js run records WHY it was refused
+    const jsRun = await env.DB.prepare(
+      "SELECT outcome, error_summary FROM ai_stage_runs WHERE build_version_id = ? AND schema_version = 'builder-file/site-js/1'"
+    )
+      .bind(version!.id)
+      .first<{ outcome: string; error_summary: string }>();
+    expect(jsRun?.outcome).toBe("invalid");
+    expect(jsRun?.error_summary).toContain(".js-reveal");
+    // the audit trail carries the FAILED terminal
     const event = await env.DB.prepare(
-      "SELECT to_state FROM build_workflow_events WHERE build_id = ? AND stage = 'simple_website_build' AND to_state = 'HUMAN_REVIEW_REQUIRED'"
+      "SELECT to_state FROM build_workflow_events WHERE build_id = ? AND stage = 'simple_website_build' AND to_state = 'FAILED'"
     )
       .bind(outcome.buildId)
       .first<{ to_state: string }>();

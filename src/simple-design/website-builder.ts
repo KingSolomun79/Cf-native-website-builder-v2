@@ -75,8 +75,10 @@ import {
 } from "./contracts";
 import {
   blueprintMotionExists,
+  jsQuotedTokenVocabulary,
   validateBuilderFile,
   type BuilderFileKind,
+  type StateHookGroup,
 } from "./builder-file-realization";
 import {
   requiredCriticalImageSlots,
@@ -326,7 +328,7 @@ ${frozenPages}
 
 TASK (call 5 of 6 — this call): Realize the shared stylesheet AGAINST THE REAL DOM ABOVE. The full "site.css" styles exactly the elements, classes, ids and structures the four completed documents actually contain, implementing the blueprint's entire design system: tokens as CSS custom properties, the complete type scale with clamp() sizes, layout for every section present in the markup — including the sections that carry the MANDATORY CRITICAL IMAGE PLACEMENTS — responsive breakpoints, hover states, :focus-visible, and a prefers-reduced-motion block whenever the blueprint defines motion.
 
-HARD ANCHOR RULE (build fails on violation): the stylesheet is mechanically validated against the four documents and site.js — EVERY selector you write must contain at least one class or id that literally appears in those frozen files. NEVER add validation-state, success, error or animation-hook classes that the documents do not carry (live rejections: .field-error, .form-success, .js-reveal — all invented, all fatal). If the form contract markup defines no error/success classes, the form needs no error/success styling; if a reveal is not in the markup, it needs no reveal styling. Do not anticipate structure.
+HARD ANCHOR RULE (build fails on violation): the stylesheet is mechanically validated against the four documents and site.js — EVERY selector you write must contain at least one class or id that literally appears in the frozen markup. Do not anticipate structure: if a reveal is not in the markup, it needs no reveal styling; if the form contract markup defines no error/success classes, the form needs no error/success styling (live rejections: .field-error, .form-success, .js-reveal — all invented, all fatal).
 
 FIDELITY PRIORITIES (in order): (1) the first viewport materially matches the Reference composition carried by the Blueprint; (2) page silhouette and region order; (3) dominant text/image mass; (4) typography scale and measure; (5) photographic mass, crop and treatment; (6) surface/color sequence; (7) signature design traits; (8) mobile preservation of the visual identity.
 
@@ -338,7 +340,7 @@ TYPOGRAPHY CONTROLS THE SILHOUETTE: implement the Blueprint typography literally
 
 RESPONSIVE IS NOT "STACK EVERYTHING": mobile CSS preserves hero visual mass, signature element treatment, image prominence, headline hierarchy and surface rhythm. Do not reduce every desktop composition to display:block;width:100%; — use the Blueprint's mobile behavior intentionally.
 
-STATE CLASSES ARE SHARED VOCABULARY (live A/B evidence 2026-09-11: site.css styled .faq-collapsed while site.js toggled .is-collapsed — a rule that can never activate): interaction state classes you introduce for JavaScript (menu open, accordion state, reveal states) are part of the site's class vocabulary. site.js is written AFTER you and adopts YOUR state class names exactly — keep them minimal, conventional (is-open, is-active, is-collapsed, nav-open) and identical wherever a rule repeats, and never hide content by default under a state class. ${outputModeBlock("site.css", "the first CSS rule.")}`;
+THE ONE EXCEPTION — STATE HOOKS site.js ADOPTS (mechanically enforced): a selector with NO markup anchor survives ONLY when site.js references it. Interaction state classes you introduce for JavaScript (menu open, accordion state, reveal states) must therefore be hooks site.js will toggle: keep them minimal and conventional (is-open, is-active, is-collapsed, nav-open), identical wherever a rule repeats, and never hide content by default under a state class. site.js is written AFTER you and adopts YOUR state class names exactly — and the site-js call is mechanically validated to reference every unanchored hook you mint, so a hook site.js never adopts fails the build (live evidence 2026-09-11: site.css styled .faq-collapsed while site.js toggled .is-collapsed; live rejection 2026-09-15: .js-reveal adopted by no one). A selector anchored on a real markup class may add conditional state variants (.form-status.is-success) — dead conditionals at worst, never invented structure. ${outputModeBlock("site.css", "the first CSS rule.")}`;
 }
 
 // ── FROZEN SHARED CHROME (GO §6/§18) ────────────────────────────────────────
@@ -511,7 +513,7 @@ ${css}
 
 ${frozenPages}
 
-TASK (call 6 of 6 — this call): Realize the shared script. The "site.js" implements only the blueprint's interactions — navigation toggle, scroll/entrance reveals that enhance ALREADY-VISIBLE content, header states — small, defensive (querySelector null checks), dependency-free. Its selectors must match the frozen markup and stylesheet above exactly, INCLUDING the state classes the stylesheet already defines — reuse site.css's state class names verbatim (live evidence: CSS said .faq-collapsed while the script toggled .is-collapsed; that drift kills the build). Never invent a new class: every class site.js references or toggles must already exist in the frozen markup or the frozen stylesheet. ${outputModeBlock("site.js", "the first JavaScript statement.")}`;
+TASK (call 6 of 6 — this call): Realize the shared script. The "site.js" implements only the blueprint's interactions — navigation toggle, scroll/entrance reveals that enhance ALREADY-VISIBLE content, header states — small, defensive (querySelector null checks), dependency-free. Its selectors must match the frozen markup and stylesheet above exactly, INCLUDING the state classes the stylesheet already defines — reuse site.css's state class names verbatim (live evidence: CSS said .faq-collapsed while the script toggled .is-collapsed; that drift kills the build). This adoption is mechanically validated: every stylesheet selector anchored on NO markup class must be referenced by you, and an unadopted hook fails this file. Never invent a new class: every class site.js references or toggles must already exist in the frozen markup or the frozen stylesheet. ${outputModeBlock("site.js", "the first JavaScript statement.")}`;
 }
 
 // The Builder's DEFAULT seam: the ONE Coding Plan provider, streaming
@@ -701,11 +703,16 @@ async function realizeFile(
 // evidence: a `/* … site.css */` header comment otherwise pollutes the first
 // prelude and false-positives), so declarations (hex colors, custom
 // properties) and prose never flag.
-export function cssSelectorFailures(
-  css: string,
-  pages: Record<PageId, string>,
-  js: string
-): string[] {
+//
+// 2026-09-15 correction (build ec2ef1c4): the acceptance of JS-quoted tokens
+// cut both ways — CSS could mint a hook (`.js-reveal { opacity: 1; }`) that
+// site.js never adopted, and the defect only surfaced HERE, after all six
+// calls had succeeded and frozen. `cssStateHookGroups` now exposes every
+// selector anchored on NO markup class so the site-js call is per-file
+// validated to adopt it (validateJs stateHookGroups) — the end-of-stage gate
+// below remains as defense in depth.
+
+function domClassIdVocabulary(pages: Record<PageId, string>): Set<string> {
   const accepted = new Set<string>();
   const addTokens = (text: string) => {
     for (const match of text.matchAll(/class\s*=\s*(?:"([^"]*)"|'([^']*)')/gi)) {
@@ -714,10 +721,14 @@ export function cssSelectorFailures(
     for (const match of text.matchAll(/\bid\s*=\s*(?:"([^"]*)"|'([^']*)')/gi)) if (match[1] ?? match[2]) accepted.add(match[1] ?? match[2]!);
   };
   for (const page of PAGE_IDS) addTokens(pages[page] ?? "");
-  for (const match of js.matchAll(/['"`]([a-zA-Z_-][\w-]*)['"`]/g)) accepted.add(match[1]);
+  return accepted;
+}
 
+// One entry per non-@rule selector: the trimmed prelude and its class/id
+// tokens (prefix preserved for reporting).
+function cssSelectorGroups(css: string): StateHookGroup[] {
   const scanned = css.replace(/\/\*[\s\S]*?\*\//g, " ");
-  const missing: string[] = [];
+  const groups: StateHookGroup[] = [];
   // Walk the stylesheet structurally: track the text preceding each "{".
   let preludeStart = 0;
   let depth = 0;
@@ -732,10 +743,7 @@ export function cssSelectorFailures(
             ...[...cleaned.matchAll(/\.([a-zA-Z_-][\w-]*)/g)].map((match) => `.${match[1]}`),
             ...[...cleaned.matchAll(/#([a-zA-Z_-][\w-]*)/g)].map((match) => `#${match[1]}`),
           ];
-          // Anchor rule: at least one token must exist in the DOM/JS
-          // vocabulary; otherwise the whole selector is invented structure.
-          const anchored = tokens.some((token) => accepted.has(token.slice(1)));
-          if (tokens.length > 0 && !anchored) missing.push(...tokens);
+          if (tokens.length > 0) groups.push({ selector: prelude.trim().replace(/\s+/g, " "), tokens });
         }
       }
       depth++;
@@ -747,9 +755,36 @@ export function cssSelectorFailures(
       preludeStart = index + 1;
     }
   }
+  return groups;
+}
+
+export function cssSelectorFailures(
+  css: string,
+  pages: Record<PageId, string>,
+  js: string
+): string[] {
+  const accepted = domClassIdVocabulary(pages);
+  for (const token of jsQuotedTokenVocabulary(js)) accepted.add(token);
+
+  const missing: string[] = [];
+  for (const group of cssSelectorGroups(css)) {
+    // Anchor rule: at least one token must exist in the DOM/JS
+    // vocabulary; otherwise the whole selector is invented structure.
+    const anchored = group.tokens.some((token) => accepted.has(token.slice(1)));
+    if (!anchored) missing.push(...group.tokens);
+  }
   return [...new Set(missing)].map(
     (selector) => `site.css selector ${selector} is anchored on NO class or id that appears in any page document or site.js (invented structure)`
   );
+}
+
+// STATE-HOOK GROUPS: the stylesheet's selectors anchored on NO markup class —
+// their only possible anchor is site.js. The site-js call is per-file
+// validated to reference one token of each group; an unadopted group is
+// invented structure and fails the stage at the JS seam (see validateJs).
+export function cssStateHookGroups(css: string, pages: Record<PageId, string>): StateHookGroup[] {
+  const dom = domClassIdVocabulary(pages);
+  return cssSelectorGroups(css).filter((group) => !group.tokens.some((token) => dom.has(token.slice(1))));
 }
 
 // The SIX_CALL_FILE_REALIZATION core (GO §4, DOM-first/CSS-last): ONE Website
@@ -772,8 +807,16 @@ export async function runSimpleBuilderFileRealizationCore(
     buildVersionNumber: input.buildVersionNumber,
   };
   const motionExists = blueprintMotionExists(input.blueprint);
+  // STATE-HOOK ADOPTION (2026-09-15 correction): filled once the CSS call
+  // freezes — the JS call runs strictly after it (fresh or resumed), so the
+  // site-js per-file validator always sees the final stylesheet's unanchored
+  // selectors and refuses the file when site.js adopts none of them.
+  let stateHookGroups: StateHookGroup[] = [];
   const validator = (kind: BuilderFileKind) => (source: string) =>
-    validateBuilderFile(kind, source, { blueprintMotionExists: motionExists }).failures;
+    validateBuilderFile(kind, source, {
+      blueprintMotionExists: motionExists,
+      ...(kind === "site-js" ? { stateHookGroups } : {}),
+    }).failures;
   const factsRef = input.blueprint.businessFactsRef;
 
   // Calls 1-4 — the four HTML documents. On resume these come from the
@@ -842,6 +885,9 @@ export async function runSimpleBuilderFileRealizationCore(
   const css = cssOutcome.file;
   provenance["site-css"] = cssOutcome.provenance;
   calls.push(cssOutcome.metrics);
+  // The final four documents are frozen — compute the stylesheet's unanchored
+  // selectors NOW so the site-js call's validator can enforce their adoption.
+  stateHookGroups = cssStateHookGroups(css, pages);
 
   // Call 6 — site.js, binding to the FROZEN markup and stylesheet. ONE
   // semantic generation.
