@@ -44,14 +44,25 @@ const REQUIRED_COMMON = [
 
 const PROFILES = {
   production: {
-    required: [...REQUIRED_COMMON, "OPERATOR_CAPABILITY_SECRET"], // operator capability HMAC (approve/publish/rollback)
+    required: [
+      ...REQUIRED_COMMON,
+      "OPERATOR_CAPABILITY_SECRET", // operator capability HMAC (approve/publish/rollback)
+      // Dedicated Wazibiz-website Turnstile widget (secret split GO 2026-09-13):
+      // POST /api/public/client-intakes requires it and fails closed (403)
+      // without it — never falls back to TURNSTILE_SECRET_KEY.
+      "CLIENT_INTAKE_TURNSTILE_SECRET_KEY",
+    ],
     optional: ["TURNSTILE_SECRET_KEY"], // required only when a Site Configuration sets turnstile_required = 1
   },
   sandbox: {
     // OPERATOR_CAPABILITY_SECRET deliberately absent: every operator release
     // route on the sandbox fails closed (deny-by-default, issue #29).
     required: [...REQUIRED_COMMON],
-    optional: ["TURNSTILE_SECRET_KEY", "OPERATOR_CAPABILITY_SECRET"],
+    optional: [
+      "TURNSTILE_SECRET_KEY",
+      "OPERATOR_CAPABILITY_SECRET",
+      "CLIENT_INTAKE_TURNSTILE_SECRET_KEY", // intake endpoint 403s fail-closed while absent
+    ],
   },
 };
 
