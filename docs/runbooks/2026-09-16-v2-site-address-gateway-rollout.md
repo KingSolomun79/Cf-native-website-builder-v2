@@ -173,6 +173,30 @@ Test-first: reproduced the production failure at the gateway seam (`tests/v2-sit
 
 **Verdict: GATEWAY LIVE — AWAITING FIRST RELEASE_READY SITE E2E.** The smoke Site's Build needs operator human review (mobile composition vs the reference) through the canonical #14-revision path — not a #48 rescue.
 
+## Closure — canonical Revision → RELEASE_READY → Approval → Publication → stable-host E2E (2026-09-16, latest)
+
+GO: complete #48 through the NORMAL revision flow. Human revision instruction (verbatim operator text) issued via `POST /api/v2/builds/25508915…/revision-requests`:
+
+| Step | Result | Evidence |
+|---|---|---|
+| Revision Request `ed5cbdb2…` | ✅ | new Build `567e35b5-b683-4910-a0cc-15506572f7d1`, version `e2a49b1d…`, `factUpdateCount: 0` (Facts preserved) |
+| Pipeline (workflow `fff48e81…`) | ✅ | blueprint (10 slots) → waves 6/6 + 4/4 accepted → builder → QA |
+| Terminal | ✅ **RELEASE_READY** | "Final QA passed after the ONE repair (visual 93)" — version `3ef4f866-6f1e-4544-bebb-b884af8daf01`; scores visual 93 / content 95 / technical 95, fabrication 0, ALL hard gates passed incl. `MOBILE_PRESERVES_VISUAL_IDENTITY` (the exact finding human review flagged) |
+| Approval `25feee70…` | ✅ | capability-bound to exact version + manifest `c30d2c38…` (minted from `.dev.vars`; token never printed); 201 |
+| Publication `9dea1619-fe15-4040-a5c9-6e6b3a9ea789` | ✅ | `siteUrl https://wazibiz-gateway-smoke-test.wazibiz.co.ke`; internal origin `pub-567e35b5b6-v2…`; state row: current_publication_id/current_build_version_id exact |
+| Stable-host E2E | ✅ | / + /about.html + /services.html + /contact.html (and clean /contact) all 200; site.css/site.js/images 200; deep links + refresh hold; zero redirects; nav links all relative; desktop rendering visually confirmed in a real browser; mobile verified by the pipeline QA's real-browser captures + `MOBILE_PRESERVES_VISUAL_IDENTITY` hard gate on this exact artifact |
+| workers.dev exposure | ✅ clean | internal origin appears nowhere; the only workers.dev string is the central Form Service endpoint (canonical #11 contract) |
+| Contact form E2E | ✅ | provisioned origin exact (`["https://wazibiz-gateway-smoke-test.wazibiz.co.ke"]`); unrelated Origin → 403; `recipient`/`from` control → contract-rejected; stable-origin submission → 202 after durable acceptance (`f8f7d147…`); delivery attempt 1 `delivered` (destination `hello@wazibiz.ke`, sender `notifications@wazibiz.ke`, visitor as reply_to only) |
+| Gateway regression | ✅ | unknown 404 / grandfathered 404 (never allocated) / published 200 / orphan fail-closed test-pinned / health ok |
+
+**CSO closure addendum: SECURITY OK WITH WATCH ITEMS** — `docs/security/2026-09-16-v2-gateway-closure-cso.md` (W3 form-origin provisioning verified exact; no new findings).
+
+**Gates:** npm test **629/629**, typecheck **PASS** (post-publication run). No code changes in the closure phase (docs only).
+
+**FINAL: PUBLIC SITE GATEWAY LIVE — #48 CLOSED. #19 resumed.**
+
+Rollback live test: NOT_AVAILABLE (single approved publication; #15 automated rollback tests remain authoritative). Operator notes: `.dev.vars` in this checkout holds WEBHOOK_SECRET + OPERATOR_CAPABILITY_SECRET (the "trusted local checkout"); a temporary local-only diagnostic worker read the assembled manifest hash from R2 (local workerd + remote binding, no deployment, deleted after use — R2 data-plane object reads are permission-blocked for the automation OAuth identity, control-plane works).
+
 ## Staged activation command set (superseded by attempt 4 — retained for history)
 
 ```sh
@@ -219,3 +243,37 @@ curl -sS -X POST https://cf-website-factory-v2.wazibizwebsites.workers.dev/api/v
 Do NOT rotate `OPERATOR_CAPABILITY_SECRET` merely because the automation
 environment cannot read it. If the operator no longer possesses the existing
 secret, STOP and report before proposing any rotation.
+
+## Test Worker cleanup — operator allowlist run (2026-09-16, ~20:32 UTC)
+
+Operator-supplied exact allowlist of 10 historical test Build/Preview Workers
+(`b-*` only; no `pub-*` on the list) was dry-run verified then deleted. The
+known Smoke orphan `pub-dddd8e0d86-v2` / publication `7e0f7b9d-…` was NOT
+touched and remains on the #48 recovery path.
+
+Dry-run protection verdict (all 10): not `current_build_version_id` of any
+site; no current publication references them (`publications` holds only
+`pub-*` workers); no `rollback_build_version_id` matches (both state rows have
+rollback NULL); no open publication rights (approvals without a published
+publication: 0 in both DBs); no routes/custom domains (b-* preview workers are
+workers.dev-only by construction; zone has only the 3 no-script exclusions,
+wildcard not activated).
+
+Canonical D1 locations: production `website_factory_v2` held 2 rows
+(`b-039316a170-v2`, `b-51c6ae53bd-v1`); sandbox `website_factory_v2_simple_exp`
+held 8 rows (`b-121524772b-v1`, `b-7b674f853c-v1`, `b-abb98cc6d0-v2/-v6/-v9/-v10/-v11`,
+`b-06025a7d74-v22`). Deployment rows for the 2 production ones were plain
+`preview/active`; the 8 sandbox ones were `preview` rows (`superseded`, plus
+latest `active` v11/v22).
+
+Executed: `wrangler delete --name <w> --force` for all 10 (all "Successfully
+deleted"), then `UPDATE build_deployments SET status='deleted' …` per row
+(changes=1 each). Post-verification: all 10 absent from Cloudflare
+(`deployments list` errors); allowlist rows deleted: production 2/2, sandbox
+8/8, `not_deleted_rows = 0` in both DBs (no "CF missing + D1 active" state);
+`site_published_state` unchanged (Smoke `7e0f7b9d-…`/`edecd502-…` and RankForge
+`377bf98f-…`/`2fde2e2f-…`, rollback NULL); health unchanged: RankForge origin
+200, platform root 404, gateway root 404 (same as pre-deletion baselines).
+
+No code changes, no deploys, no R2/evidence deletions, no commits. Compact
+Build/QA/provenance history in D1 preserved (UPDATE-only reconciliation).
