@@ -7,21 +7,40 @@ import {
   freezeBenchmarkCases,
   getBenchmarkCaseDefinition,
   getBenchmarkRunRecord,
-  startBenchmarkRun,
+  benchmarkDefinitionHash,
+  recordBenchmarkRun,
   verifyBenchmarkCaseInputs,
 } from "../domain/benchmark/harness";
+import { startSiteGeneration } from "../domain/lifecycle";
+import type { BuildPipelineOutcome, PipelineTerminalStatus } from "../domain/build-pipeline";
 import { BENCHMARK_RUN_EVIDENCE_RETENTION_DAYS } from "../domain/retention";
 
 // Operator benchmark-driver route (issue #18; executes the frozen #17 harness
 // for the canonical validations of issues #18-#22, one case at a time).
 //
-// This is the ONLY execution vehicle for the harness outside tests: the
-// pipeline is the unmodified canonical production seam (startBenchmarkRun with
-// no provider deps — real Z.AI coding-plan models, real KIE image provider,
-// real preview deployment and real browser-backed QA capture), against the
-// real V2 D1/R2. There is deliberately NO mock mode and NO provider override
-// here: a benchmark run that could be driven by anything but the production
-// providers would be worthless as evidence.
+// Execution model — the PRODUCTION durable engine, not the in-request seam:
+// the run phase performs the harness drift gate, freezes the immutable
+// Onboarding Submission + Site Generation from the frozen definition (the
+// exact payload startBenchmarkRun uses) and starts ONE production
+// WebsiteBuildWorkflow instance. Every pipeline stage then executes as its own
+// durable step with the production retry policy (transient provider faults —
+// e.g. a Z.AI 429 — retry with backoff) and real step.sleep image-poll waits,
+// exactly as every client Site Generation runs. (Live evidence 2026-09-16:
+// an earlier in-request direct-seam execution of the same frozen inputs was
+// aborted by a provider rate limit the durable engine would have retried —
+// the seam lacks the engine, so it is not a valid benchmark transport.)
+//
+// Providers are never searable here: there is deliberately NO mock mode and
+// NO provider override — the pipeline runs the production defaults (real Z.AI
+// coding-plan models, real KIE image provider, real preview deployment, real
+// browser-backed QA capture) against real V2 D1/R2.
+//
+// The record phase completes the run: once the instance reaches a terminal
+// state, the observed outcome is reconstructed from the durable workflow
+// result (or Build state) and persisted through the UNCHANGED #17
+// recordBenchmarkRun — one append-only benchmark_runs row pinning the
+// definition hash, PASS calculation, scores, spend, provenance and evidence
+// retention class.
 //
 // Access model (mirrors the Approval/Publication/Rollback routes): an
 // offline-minted, action-bound operator capability ("benchmark", bound to the
@@ -132,46 +151,235 @@ export async function runBenchmarkPreflight(c: Context<{ Bindings: Env }>): Prom
   }
 }
 
+// Shared run-input validation: the code revision pinned on the run record and
+// the operator's manual-source-edit attestation (W17-1: declare 0 only
+// honestly).
+function parseRunInput(body: { codeRevision?: unknown; manualSourceEdits?: unknown }):
+  | { ok: true; codeRevision: string; manualSourceEdits: number }
+  | { ok: false; message: string } {
+  if (typeof body.codeRevision !== "string" || !/^[0-9a-f]{40}$/.test(body.codeRevision)) {
+    return { ok: false, message: "codeRevision is required: the exact 40-hex committed Git SHA executing this run" };
+  }
+  let manualSourceEdits = 0;
+  if (body.manualSourceEdits !== undefined) {
+    if (typeof body.manualSourceEdits !== "number" || !Number.isInteger(body.manualSourceEdits) || body.manualSourceEdits < 0) {
+      return { ok: false, message: "manualSourceEdits must be a non-negative integer when provided" };
+    }
+    manualSourceEdits = body.manualSourceEdits;
+  }
+  return { ok: true, codeRevision: body.codeRevision, manualSourceEdits };
+}
+
+async function readJsonBody(c: Context<{ Bindings: Env }>): Promise<Record<string, unknown> | "INVALID_JSON"> {
+  try {
+    const raw = await c.req.text();
+    if (!raw) return {};
+    return JSON.parse(raw) as Record<string, unknown>;
+  } catch {
+    return "INVALID_JSON";
+  }
+}
+
 // POST /api/v2/operator/benchmarks/:caseId/run
-// ONE canonical benchmark run: drift gate -> immutable Onboarding Submission ->
-// Site Generation -> initial Build -> the unmodified production pipeline
-// (real providers, no deps seam) -> append-only benchmark_runs record. The
-// request resolves only when the pipeline reaches a terminal state (typically
-// tens of minutes). codeRevision is the exact committed Git SHA of the code
-// executing the run and is pinned on the run record.
+// ONE canonical benchmark run, phase 1 (seed): drift gate -> immutable
+// Onboarding Submission + Site Generation from the frozen definition -> ONE
+// production WebsiteBuildWorkflow instance (the same engine, retry policy and
+// durable image-poll sleeps every client Site Generation runs). Resolves
+// immediately; the pipeline runs durably on the edge until a terminal state.
+// Phase 2 is the /record endpoint below.
 export async function runBenchmarkStart(c: Context<{ Bindings: Env }>): Promise<Response> {
   const caseId = c.req.param("caseId") as string;
   const denied = await authorize(c, caseId);
   if (denied) return denied;
 
-  let body: { codeRevision?: unknown; manualSourceEdits?: unknown } = {};
-  try {
-    const raw = await c.req.text();
-    if (raw) body = JSON.parse(raw) as typeof body;
-  } catch {
+  const body = await readJsonBody(c);
+  if (body === "INVALID_JSON") {
     return c.json({ error: { code: "RUN_INPUT_INVALID", message: "Request body must be JSON" } }, 400);
   }
-  if (typeof body.codeRevision !== "string" || !/^[0-9a-f]{40}$/.test(body.codeRevision)) {
-    return c.json(
-      { error: { code: "RUN_INPUT_INVALID", message: "codeRevision is required: the exact 40-hex committed Git SHA executing this run" } },
-      400
-    );
-  }
-  let manualSourceEdits = 0;
-  if (body.manualSourceEdits !== undefined) {
-    if (typeof body.manualSourceEdits !== "number" || !Number.isInteger(body.manualSourceEdits) || body.manualSourceEdits < 0) {
-      return c.json({ error: { code: "RUN_INPUT_INVALID", message: "manualSourceEdits must be a non-negative integer when provided" } }, 400);
-    }
-    manualSourceEdits = body.manualSourceEdits;
+  const input = parseRunInput(body as { codeRevision?: unknown; manualSourceEdits?: unknown });
+  if (!input.ok) {
+    return c.json({ error: { code: "RUN_INPUT_INVALID", message: input.message } }, 400);
   }
 
   try {
-    const record = await startBenchmarkRun(c.env, {
-      caseId,
-      codeRevision: body.codeRevision,
-      manualSourceEdits,
+    // The same drift gate + frozen-submission payload startBenchmarkRun uses.
+    const { definitionHash } = await verifyBenchmarkCaseInputs(c.env, caseId);
+    const definition = getBenchmarkCaseDefinition(caseId);
+    const started = await startSiteGeneration(c.env, {
+      payload: {
+        buildMode: "REFERENCE_BOUND",
+        facts: definition.facts,
+        reference: {
+          screenshotR2Key: definition.reference.screenshotR2Key,
+          ...(definition.adaptationContract ? { adaptationContract: definition.adaptationContract } : {}),
+        },
+      },
     });
-    return c.json(record);
+    const instance = await c.env.WEBSITE_BUILD_WORKFLOW.create({
+      params: { siteGenerationId: started.siteGenerationId },
+    });
+    return c.json(
+      {
+        caseId,
+        definitionHash,
+        siteGenerationId: started.siteGenerationId,
+        siteId: started.siteId,
+        buildMode: started.buildMode,
+        workflowInstanceId: instance.id,
+        codeRevision: input.codeRevision,
+        manualSourceEdits: input.manualSourceEdits,
+      },
+      202
+    );
+  } catch (error) {
+    if (error instanceof BenchmarkHarnessError) return driverErrorResponse(c, error);
+    throw error;
+  }
+}
+
+const TERMINAL_BUILD_STATES: Set<string> = new Set(["RELEASE_READY", "APPROVED", "PUBLISHING", "PUBLISHED", "HUMAN_REVIEW_REQUIRED", "DEGRADED", "FAILED"]);
+
+// The record phase may only translate states the pipeline itself sets.
+const BUILD_STATE_TO_TERMINAL: Record<string, PipelineTerminalStatus> = {
+  RELEASE_READY: "RELEASE_READY",
+  APPROVED: "RELEASE_READY",
+  PUBLISHING: "RELEASE_READY",
+  PUBLISHED: "RELEASE_READY",
+  HUMAN_REVIEW_REQUIRED: "HUMAN_REVIEW_REQUIRED",
+  DEGRADED: "DEGRADED",
+  FAILED: "FAILED",
+};
+
+// POST /api/v2/operator/benchmarks/:caseId/record
+// ONE canonical benchmark run, phase 2 (record): the instance has reached a
+// terminal state; the observed outcome is reconstructed from the durable
+// workflow result (or, for an errored instance, the Build state the pipeline
+// recorded) and persisted through the UNCHANGED #17 recordBenchmarkRun —
+// spend from the D1 ledger, provenance from ai_stage_runs, the PASS
+// calculation, and the evidence retention class.
+export async function recordBenchmarkRunEndpoint(c: Context<{ Bindings: Env }>): Promise<Response> {
+  const caseId = c.req.param("caseId") as string;
+  const denied = await authorize(c, caseId);
+  if (denied) return denied;
+
+  const body = await readJsonBody(c);
+  if (body === "INVALID_JSON") {
+    return c.json({ error: { code: "RUN_INPUT_INVALID", message: "Request body must be JSON" } }, 400);
+  }
+  const input = parseRunInput(body as { codeRevision?: unknown; manualSourceEdits?: unknown });
+  if (!input.ok) {
+    return c.json({ error: { code: "RUN_INPUT_INVALID", message: input.message } }, 400);
+  }
+  const siteGenerationId = typeof body.siteGenerationId === "string" ? body.siteGenerationId : "";
+  const workflowInstanceId = typeof body.workflowInstanceId === "string" ? body.workflowInstanceId : "";
+  const startedAt = typeof body.startedAt === "string" ? body.startedAt : new Date().toISOString();
+  if (!siteGenerationId || !workflowInstanceId) {
+    return c.json({ error: { code: "RUN_INPUT_INVALID", message: "siteGenerationId and workflowInstanceId are required" } }, 400);
+  }
+
+  try {
+    const definition = getBenchmarkCaseDefinition(caseId);
+    const definitionHash = (await verifyBenchmarkCaseInputs(c.env, caseId)).definitionHash;
+
+    // The Build must belong to THIS Site Generation and be terminal.
+    const build = await c.env.DB.prepare(
+      "SELECT b.id, b.state FROM builds b WHERE b.site_generation_id = ?1 AND b.kind = 'initial' ORDER BY b.created_at LIMIT 1"
+    )
+      .bind(siteGenerationId)
+      .first<{ id: string; state: string }>();
+    if (!build) {
+      return c.json({ error: { code: "RUN_INPUT_INVALID", message: `No initial Build exists for Site Generation ${siteGenerationId}` } }, 404);
+    }
+    if (!TERMINAL_BUILD_STATES.has(build.state)) {
+      return c.json(
+        { error: { code: "BUILD_NOT_TERMINAL", message: `Build ${build.id} is still '${build.state}' — record only after the workflow reaches a terminal state` } },
+        409
+      );
+    }
+
+    // Preferred outcome source: the durable workflow result. Fallback: the
+    // Build state the pipeline/reconciliation recorded before the instance
+    // died (the same evidence the #56 sweep uses).
+    let terminal: PipelineTerminalStatus = BUILD_STATE_TO_TERMINAL[build.state];
+    let reasons: string[] = [];
+    let releaseReadyBuildVersionId: string | null = null;
+    let artifactManifestHash: string | null = null;
+    let previewUrl: string | null = null;
+    try {
+      const instance = await c.env.WEBSITE_BUILD_WORKFLOW.get(workflowInstanceId);
+      const status = (await instance.status()) as {
+        status: string;
+        output?: {
+          terminal?: string;
+          reasons?: string[];
+          releaseReadyBuildVersionId?: string | null;
+          artifactManifestHash?: string | null;
+          previewUrl?: string | null;
+        };
+      };
+      if (status.status === "complete" && status.output?.terminal) {
+        terminal = status.output.terminal as PipelineTerminalStatus;
+        reasons = status.output.reasons ?? [];
+        releaseReadyBuildVersionId = status.output.releaseReadyBuildVersionId ?? null;
+        artifactManifestHash = status.output.artifactManifestHash ?? null;
+        previewUrl = status.output.previewUrl ?? null;
+      }
+    } catch {
+      // Instance unreachable (e.g. preview session recycling): the Build
+      // state and terminal workflow event remain the durable truth.
+    }
+    if (!releaseReadyBuildVersionId && terminal === "RELEASE_READY") {
+      const ready = await c.env.DB.prepare(
+        "SELECT id FROM build_versions WHERE build_id = ?1 ORDER BY version_number DESC LIMIT 1"
+      )
+        .bind(build.id)
+        .first<{ id: string }>();
+      releaseReadyBuildVersionId = ready?.id ?? null;
+    }
+    if (reasons.length === 0 && terminal !== "RELEASE_READY") {
+      const lastEvent = await c.env.DB.prepare(
+        "SELECT detail FROM build_workflow_events WHERE build_id = ?1 ORDER BY created_at DESC LIMIT 1"
+      )
+        .bind(build.id)
+        .first<{ detail: string }>();
+      if (lastEvent?.detail) reasons = [lastEvent.detail];
+    }
+
+    const versionCount = await c.env.DB.prepare("SELECT COUNT(*) AS n FROM build_versions WHERE build_id = ?1")
+      .bind(build.id)
+      .first<{ n: number }>();
+    const outcome: BuildPipelineOutcome = {
+      terminal,
+      reasons,
+      siteGenerationId,
+      siteId: "",
+      buildId: build.id,
+      releaseReadyBuildVersionId,
+      artifactManifestHash,
+      previewUrl,
+      qaA: null,
+      qaB: null,
+      repairApplied: (versionCount?.n ?? 1) > 1,
+    };
+
+    const recorded = await recordBenchmarkRun(c.env, {
+      definition,
+      definitionHash,
+      codeRevision: input.codeRevision,
+      manualSourceEdits: input.manualSourceEdits,
+      outcome,
+      startedAt,
+    });
+    return c.json({
+      runId: recorded.runId,
+      caseId,
+      definitionHash: await benchmarkDefinitionHash(definition),
+      buildId: build.id,
+      terminal: outcome.terminal,
+      pass: recorded.pass,
+      passReason: recorded.passReason,
+      imageSpendUsd: recorded.imageSpendUsd,
+    });
   } catch (error) {
     if (error instanceof BenchmarkHarnessError) return driverErrorResponse(c, error);
     throw error;

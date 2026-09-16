@@ -25,6 +25,7 @@ import { createPublication } from "./routes/v2.publication-create";
 import { rollbackSitePublication } from "./routes/v2.rollback";
 import {
   getBenchmarkRun,
+  recordBenchmarkRunEndpoint,
   runBenchmarkFreeze,
   runBenchmarkPreflight,
   runBenchmarkStart,
@@ -52,12 +53,15 @@ app.post("/api/v2/build-versions/:buildVersionId/publication", createPublication
 app.post("/api/v2/sites/:siteId/rollback", rollbackSitePublication);
 
 // Operator benchmark driver (issues #18-#22): executes the FROZEN #17 harness
-// one case at a time against the real production-equivalent pipeline and real
-// providers. Every endpoint requires an offline-minted "benchmark" capability
-// bound to the exact caseId; it is never public and can never publish.
+// one case at a time through the PRODUCTION durable workflow engine and real
+// providers — seed the run, then record its append-only outcome row once the
+// pipeline reaches a terminal state. Every endpoint requires an offline-minted
+// "benchmark" capability bound to the exact caseId; it is never public and can
+// never publish.
 app.post("/api/v2/operator/benchmarks/:caseId/freeze", runBenchmarkFreeze);
 app.post("/api/v2/operator/benchmarks/:caseId/preflight", runBenchmarkPreflight);
 app.post("/api/v2/operator/benchmarks/:caseId/run", runBenchmarkStart);
+app.post("/api/v2/operator/benchmarks/:caseId/record", recordBenchmarkRunEndpoint);
 app.get("/api/v2/operator/benchmarks/runs/:runId", getBenchmarkRun);
 
 app.post("/api/internal/kie-callback", handleKieCallback);
