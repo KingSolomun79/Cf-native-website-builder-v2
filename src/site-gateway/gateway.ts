@@ -225,6 +225,24 @@ export async function handleSiteGatewayRequest(
     return new Response("Service unavailable", { status: 502, headers: { "content-type": "text/plain; charset=utf-8" } });
   }
 
+  // An orphaned current publication (site_published_state points at a
+  // publication whose Worker was deleted out-of-band) answers from the
+  // workers.dev edge with a generated "error code: <NNNN>" text body (404,
+  // e.g. 1042 for a Worker that no longer exists). That edge error — never
+  // Site content — must fail closed: no streaming the edge page, no fallback
+  // to another publication, no self-repair. A Site-authored 404 (healthy
+  // origin, unknown path) passes through untouched.
+  if (response.status === 404) {
+    const body = await response.text();
+    if (/^error code:\s*\d+$/.test(body.trim())) {
+      console.error(`[site-gateway] origin is not serving (orphaned publication) for ${siteHost}`);
+      return new Response("Service unavailable", { status: 502, headers: { "content-type": "text/plain; charset=utf-8" } });
+    }
+    const notFoundHeaders = new Headers(response.headers);
+    notFoundHeaders.delete("set-cookie");
+    return new Response(body, { status: 404, headers: notFoundHeaders });
+  }
+
   const responseHeaders = new Headers(response.headers);
   responseHeaders.delete("set-cookie");
   return new Response(response.body, { status: response.status, headers: responseHeaders });
