@@ -42,6 +42,11 @@ export const RESERVED_SITE_SLUGS: ReadonlySet<string> = new Set([
   "assets", "media", "status", "support", "help", "docs", "shop", "store",
   "pay", "payments", "forms", "form", "webhook", "webhooks", "preview",
   "staging", "stage", "dev", "test",
+  // Existing live Wazibiz hostnames on the production zone. They are excluded
+  // from the wildcard site gateway with more-specific no-script Worker Routes,
+  // so they must equally never be allocated as a Business Site Address
+  // (issue #48 rollout operator decision, 2026-09-16).
+  "factory", "wazigarden", "wbdesign",
 ]);
 
 export type SiteAddressErrorCode =

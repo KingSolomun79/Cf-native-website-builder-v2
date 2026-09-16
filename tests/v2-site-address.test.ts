@@ -76,7 +76,12 @@ describe("slug derivation", () => {
   });
 
   it("knows the central reserved set", () => {
-    for (const reserved of ["www", "admin", "api", "mail", "preview", "test", "builder", "gateway"]) {
+    for (const reserved of [
+      "www", "admin", "api", "mail", "preview", "test", "builder", "gateway",
+      // Live Wazibiz hostnames excluded from the wildcard gateway (issue #48
+      // rollout operator decision) — excluded means never allocatable.
+      "factory", "wazigarden", "wbdesign",
+    ]) {
       expect(isReservedSiteSlug(reserved)).toBe(true);
     }
     expect(isReservedSiteSlug("rift-valley-roasters")).toBe(false);
@@ -103,6 +108,33 @@ describe("address allocation", () => {
     const address = await getOrAllocateSiteAddress(env, await seedSite("API"));
     expect(address.slug).not.toBe("api");
     expect(address.slug.startsWith("business-")).toBe(true);
+  });
+
+  it("never allocates an existing Wazibiz infrastructure hostname", async () => {
+    // These hostnames are live on the production zone and are excluded from
+    // the wildcard site gateway with more-specific no-script Worker Routes
+    // (issue #48 rollout operator decision). A hostname deliberately excluded
+    // from the gateway must never later be allocated as a customer address.
+    const infrastructure: Array<[string, string]> = [
+      ["Factory", "factory"],
+      ["FACTORY", "factory"],
+      ["Wazigarden", "wazigarden"],
+      ["WBDesign", "wbdesign"],
+    ];
+    for (const [businessName, infrastructureLabel] of infrastructure) {
+      expect(slugifyBusinessName(businessName)).toBe(infrastructureLabel);
+      expect(isReservedSiteSlug(infrastructureLabel)).toBe(true);
+
+      const siteId = await seedSite(businessName);
+      const address = await getOrAllocateSiteAddress(env, siteId);
+      expect(address.slug).not.toBe(infrastructureLabel);
+      expect(address.host).not.toBe(`${infrastructureLabel}.${BASE}`);
+      // The deterministic fallback is the identity-derived slug and obeys the
+      // 63-character DNS label ceiling.
+      expect(address.slug).toBe(fallbackSiteSlug(siteId));
+      expect(address.slug.length).toBeLessThanOrEqual(63);
+      expect(address.host.endsWith(`.${BASE}`)).toBe(true);
+    }
   });
 
   it("uses the deterministic business-{shortSiteId} fallback for non-Latin names", async () => {
