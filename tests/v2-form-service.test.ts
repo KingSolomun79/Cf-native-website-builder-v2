@@ -9,6 +9,7 @@ import {
   acceptFormSubmission,
   attemptEmailDelivery,
   createDefaultEmailTransport,
+  ensureSiteAddressFormOrigin,
   getSiteConfiguration,
   processDueEmailDeliveries,
   resolvePlatformSenderIdentity,
@@ -16,6 +17,7 @@ import {
   FormServiceError,
   type EmailSendInput,
 } from "../src/domain/form-service";
+import { getSiteAddress } from "../src/domain/site-address";
 
 // Primary-seam tests for the central WAZIBIZ Form Service (issue #11).
 
@@ -720,5 +722,93 @@ describe("configurable platform Sender Identity (issue #32)", () => {
         senderIdentity: "not-an-email",
       })
     ).rejects.toMatchObject({ code: "SENDER_IDENTITY_INVALID" });
+  });
+});
+
+// ── Stable Site Address form origins (issue #48, decision 132) ──────────────
+
+describe("stable Site Address form origins", () => {
+  function stem(): string {
+    return `fs${Math.random().toString(36).slice(2, 10)}`;
+  }
+
+  async function newAddressedSite(): Promise<{ siteId: string; siteUrl: string }> {
+    const started = await startSiteGeneration(env, {
+      payload: {
+        buildMode: "REFERENCE_BOUND",
+        facts: { businessName: `Stable Origin Traders ${stem()}`, contactEmail: "hi@so.example", ...(canonicalStructuredFacts()) },
+        reference: { screenshotR2Key: `references/uploads/so-${stem()}.png` },
+      },
+    });
+    await createInitialBuild(env, { siteGenerationId: started.siteGenerationId });
+    const address = await getSiteAddress(env, started.siteId);
+    return { siteId: started.siteId, siteUrl: address!.url };
+  }
+
+  it("provisions a default configuration carrying exactly the stable origin", async () => {
+    const { siteId, siteUrl } = await newAddressedSite();
+    expect(await getSiteConfiguration(env, siteId)).toBeNull();
+    await ensureSiteAddressFormOrigin(env, siteId, "operator-admin@test.example");
+    const config = await getSiteConfiguration(env, siteId);
+    expect(config).not.toBeNull();
+    expect(config!.allowedOrigins).toEqual([siteUrl]);
+    expect(config!.formDestination).toBe("operator-admin@test.example");
+    expect(config!.senderIdentity).toBe(""); // platform default resolves at delivery time
+  });
+
+  it("provisions nothing when no valid default destination exists (fail closed)", async () => {
+    const { siteId } = await newAddressedSite();
+    await ensureSiteAddressFormOrigin(env, siteId, undefined);
+    expect(await getSiteConfiguration(env, siteId)).toBeNull();
+  });
+
+  it("appends the stable origin to operator-owned configuration, preserving every field", async () => {
+    const { siteId, siteUrl } = await newAddressedSite();
+    await upsertSiteConfiguration(env, {
+      siteId,
+      formDestination: "owner@stable-origin.example",
+      senderIdentity: "hello@verified.example",
+      allowedOrigins: ["https://operator-configured.example"],
+      turnstileRequired: true,
+    });
+    await ensureSiteAddressFormOrigin(env, siteId);
+    const config = await getSiteConfiguration(env, siteId);
+    expect(config!.allowedOrigins).toEqual(["https://operator-configured.example", siteUrl]);
+    expect(config!.formDestination).toBe("owner@stable-origin.example");
+    expect(config!.senderIdentity).toBe("hello@verified.example");
+    expect(config!.turnstileRequired).toBe(true);
+    // Idempotent: a second run does not duplicate the origin.
+    await ensureSiteAddressFormOrigin(env, siteId);
+    expect((await getSiteConfiguration(env, siteId))!.allowedOrigins).toHaveLength(2);
+  });
+
+  it("accepts the exact stable origin and rejects unrelated and internal origins", async () => {
+    const { siteId, siteUrl } = await newAddressedSite();
+    await ensureSiteAddressFormOrigin(env, siteId, "operator-admin@test.example");
+
+    const accepted = await acceptFormSubmission(env, {
+      origin: siteUrl,
+      remoteAddress: "203.0.113.90",
+      payload: { siteFormId: `site:${siteId}`, name: "Jane Visitor", email: "jane@visitor.example", message: "Hello through the stable address." },
+    });
+    expect(accepted.acceptedAt).toBeTruthy();
+
+    for (const rejectedOrigin of ["https://unrelated-site.example", `https://pub-something.${"wazibizwebsites.workers.dev"}`]) {
+      await expect(
+        acceptFormSubmission(env, {
+          origin: rejectedOrigin,
+          remoteAddress: "203.0.113.91",
+          payload: { siteFormId: `site:${siteId}`, name: "Jane Visitor", email: "jane@visitor.example", message: "Should not pass." },
+        })
+      ).rejects.toMatchObject({ code: "ORIGIN_NOT_ALLOWED" });
+    }
+    // Never a wildcard: a sibling subdomain of the Site Address is rejected.
+    await expect(
+      acceptFormSubmission(env, {
+        origin: `${siteUrl.replace("https://", "https://evil-")}`,
+        remoteAddress: "203.0.113.92",
+        payload: { siteFormId: `site:${siteId}`, name: "Jane Visitor", email: "jane@visitor.example", message: "Sibling host." },
+      })
+    ).rejects.toMatchObject({ code: "ORIGIN_NOT_ALLOWED" });
   });
 });

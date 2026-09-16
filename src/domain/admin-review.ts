@@ -6,6 +6,7 @@
 import type { Env } from "../env.d";
 import { listSiteNotes } from "./admin-site-notes";
 import { BUILD_LIFECYCLE_STATES } from "./lifecycle-schema";
+import { getSiteAddress } from "./site-address";
 
 export interface AdminBuildSummary {
   buildId: string;
@@ -24,6 +25,12 @@ export interface AdminBuildSummary {
 export interface AdminSiteReview {
   siteId: string;
   businessName: string;
+  /** Stable public Site Address (issue #48) — allocated once per Site; null
+   *  only for a legacy Site still awaiting backfill. */
+  siteAddress: { slug: string; host: string; url: string } | null;
+  /** True once the Site has a current Published Version served at the
+   *  Site Address. */
+  published: boolean;
   generations: Array<{
     id: string;
     sequenceNumber: number;
@@ -70,9 +77,17 @@ export async function getAdminSiteReview(env: Env, siteId: string): Promise<Admi
     .all<{ id: string; sequence_number: number; build_mode: string; created_at: string }>();
 
   const notes = await listSiteNotes(env, siteId);
+  const [address, publishedState] = await Promise.all([
+    getSiteAddress(env, siteId),
+    env.DB.prepare("SELECT 1 AS live FROM site_published_state WHERE site_id = ?")
+      .bind(siteId)
+      .first<{ live: number }>(),
+  ]);
   const review: AdminSiteReview = {
     siteId: site.site_id,
     businessName: site.business_name,
+    siteAddress: address ? { slug: address.slug, host: address.host, url: address.url } : null,
+    published: publishedState != null,
     generations: [],
     latestState: null,
     latestPreviewUrl: null,

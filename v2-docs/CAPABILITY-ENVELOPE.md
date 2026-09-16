@@ -14,6 +14,7 @@
 - Normal later Business/content changes that preserve Reference and Build Mode use Revision Request -> new Build.
 - Static/framework-light output using semantic HTML, shared CSS and minimal JavaScript.
 - Cloudflare-native build, Preview, artifact, Publication and Deployment lifecycle.
+- One stable public Site Address per Site (`https://{site-slug}.wazibiz.co.ke`, FINAL-DECISION-RECORD decision 132), served by a single wildcard gateway Worker over canonical publication state; per-version workers.dev hostnames remain internal origins.
 - `REFERENCE_BOUND` first; `ORIGINAL_DESIGN` after the 3/5 benchmark proof milestone.
 - Real Contact form delivery through the central WAZIBIZ Form Service and Cloudflare-native outbound email.
 - KIE-generated imagery with a normal target of 12 Accepted Images per completed Site.

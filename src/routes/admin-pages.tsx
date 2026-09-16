@@ -503,6 +503,20 @@ async function SiteReviewPage(c: Context<{ Bindings: Env }>, review: AdminSiteRe
             </>
           ) : null}
         </p>
+        {review.siteAddress ? (
+          <p>
+            <span class="muted">Site Address:</span>{" "}
+            {review.published ? (
+              <a href={review.siteAddress.url} target="_blank" rel="noreferrer">
+                {review.siteAddress.url}
+              </a>
+            ) : (
+              <>
+                {review.siteAddress.url} <span class="badge review">Not published</span>
+              </>
+            )}
+          </p>
+        ) : null}
         {review.generations.map((generation) => (
           <div>
             <h3 class="muted">

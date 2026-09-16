@@ -30,6 +30,7 @@ import {
   runBenchmarkPreflight,
   runBenchmarkStart,
 } from "./routes/v2.benchmark-driver";
+import { backfillSiteAddresses } from "./routes/v2.site-address-backfill";
 
 // V2-only route table. The V1 product routes (Fluent Forms webhook, jobs,
 // contact, reference upload in its V1 shape, GitHub deploy webhook) were
@@ -63,6 +64,12 @@ app.post("/api/v2/operator/benchmarks/:caseId/preflight", runBenchmarkPreflight)
 app.post("/api/v2/operator/benchmarks/:caseId/run", runBenchmarkStart);
 app.post("/api/v2/operator/benchmarks/:caseId/record", recordBenchmarkRunEndpoint);
 app.get("/api/v2/operator/benchmarks/runs/:runId", getBenchmarkRun);
+
+// Operator Site-Address backfill (issue #48): gives every legacy Site
+// identity its one stable public Site Address — dry-run report first, then
+// idempotent allocation. Requires an offline-minted
+// "site-address-backfill" capability; never public, never a release action.
+app.post("/api/v2/operator/site-addresses/backfill", backfillSiteAddresses);
 
 app.post("/api/internal/kie-callback", handleKieCallback);
 

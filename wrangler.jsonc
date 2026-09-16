@@ -104,6 +104,13 @@
   "vars": {
     "CF_ACCOUNT_ID": "c1c0f6b100d55a09ce6a7a3121a19224",
     "PUBLIC_APP_URL": "https://cf-website-factory-v2.wazibizwebsites.workers.dev",
+    // Stable public Site Addresses (issue #48, decision 132): every Site
+    // serves its current Published Version at https://{site-slug}.<base>.
+    // Hostnames are derived ONLY from this configuration — never from browser
+    // input or Site data. The published-origin suffix is the trusted internal
+    // workers.dev suffix the wildcard gateway validates origins against.
+    "SITES_BASE_DOMAIN": "wazibiz.co.ke",
+    "PUBLISHED_ORIGIN_SUFFIX": "wazibizwebsites.workers.dev",
     // Platform Sender Identity (issue #32/#33): the operator-approved mailbox
     // on wazibiz.ke, the domain onboarded to Cloudflare Email Service Email
     // Sending (Enabled, 2026-09-02). Configuration, not a secret.
@@ -188,6 +195,11 @@
       },
       "vars": {
         "PUBLIC_APP_URL": "https://cf-website-factory-staging.wazibizwebsites.workers.dev",
+        // Stable Site Address config (issue #48): staging allocates under an
+        // inert, never-routed base domain — the real wazibiz.co.ke wildcard
+        // serving path belongs to production only.
+        "SITES_BASE_DOMAIN": "staging.sites.example",
+        "PUBLISHED_ORIGIN_SUFFIX": "wazibizwebsites.workers.dev",
         // Platform Sender Identity (issue #32): the operator-approved
         // mailbox on wazibiz.ke — the domain onboarded to Cloudflare Email
         // Service / Email Sending on 2026-09-02 (guided #33 setup). The

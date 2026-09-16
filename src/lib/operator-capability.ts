@@ -27,7 +27,7 @@
 import type { Env } from "../env.d";
 import { hmacSha256, timingSafeEqualStrings } from "./crypto";
 
-export type OperatorCapabilityAction = "approve" | "publish" | "rollback" | "benchmark";
+export type OperatorCapabilityAction = "approve" | "publish" | "rollback" | "benchmark" | "site-address-backfill";
 
 /** Hard ceiling on token lifetime at verification time (defense against
  *  long-lived credentials minted with far-future expiry). */
@@ -70,7 +70,22 @@ export interface BenchmarkCapability {
   exp: number;
 }
 
-export type OperatorCapability = ApproveCapability | PublishCapability | RollbackCapability | BenchmarkCapability;
+// A Site-Address backfill capability (issue #48) authorizes exactly the
+// idempotent legacy-Site address backfill (dry-run or apply) — never any
+// release action. It binds no resource: the operation is global and
+// idempotent, and the 60-minute ceiling bounds exposure.
+export interface SiteAddressBackfillCapability {
+  action: "site-address-backfill";
+  /** Expiry, epoch milliseconds. */
+  exp: number;
+}
+
+export type OperatorCapability =
+  | ApproveCapability
+  | PublishCapability
+  | RollbackCapability
+  | BenchmarkCapability
+  | SiteAddressBackfillCapability;
 
 // Ids, hashes and other bound values are limited to this charset so the ':'
 // delimiter of the canonical string below can never be smuggled into a field.
@@ -86,6 +101,8 @@ function canonical(payload: OperatorCapability): string {
       return `v2opcap/1:rollback:${payload.siteId}:${payload.fromBuildVersionId}:${payload.exp}`;
     case "benchmark":
       return `v2opcap/1:benchmark:${payload.caseId}:${payload.exp}`;
+    case "site-address-backfill":
+      return `v2opcap/1:site-address-backfill:${payload.exp}`;
   }
 }
 
@@ -128,6 +145,8 @@ function boundFieldsValid(payload: OperatorCapability): boolean {
       return BOUND_VALUE.test(payload.siteId ?? "") && BOUND_VALUE.test(payload.fromBuildVersionId ?? "");
     case "benchmark":
       return BOUND_VALUE.test(payload.caseId ?? "");
+    case "site-address-backfill":
+      return true;
   }
 }
 
@@ -155,7 +174,15 @@ export async function verifyOperatorCapability(
     return null;
   }
 
-  if (decoded.action !== "approve" && decoded.action !== "publish" && decoded.action !== "rollback" && decoded.action !== "benchmark") return null;
+  if (
+    decoded.action !== "approve" &&
+    decoded.action !== "publish" &&
+    decoded.action !== "rollback" &&
+    decoded.action !== "benchmark" &&
+    decoded.action !== "site-address-backfill"
+  ) {
+    return null;
+  }
   if (typeof decoded.sig !== "string") return null;
   if (!boundFieldsValid(decoded)) return null;
   if (!Number.isSafeInteger(decoded.exp) || decoded.exp <= now || decoded.exp > now + OPERATOR_CAPABILITY_MAX_TTL_MS) {

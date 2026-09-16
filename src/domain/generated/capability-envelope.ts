@@ -158,7 +158,16 @@ export const CAPABILITY_ENVELOPE = {
     "publication_retry_preserves_approval_if_build_unchanged": true,
     "rollback_version": "IMMEDIATELY_PREVIOUS_PUBLISHED_VERSION",
     "rollback_creates_new_build": false,
-    "rollback_reverts_site_configuration_by_default": false
+    "rollback_reverts_site_configuration_by_default": false,
+    "stable_site_address": {
+      "enabled": true,
+      "scheme": "https://{site-slug}.wazibiz.co.ke",
+      "allocation": "ONCE_PER_SITE_IDENTITY",
+      "changes_with_publication_or_rollback": false,
+      "serving": "SINGLE_WILDCARD_GATEWAY_WORKER",
+      "internal_origin_suffix": "wazibizwebsites.workers.dev",
+      "decision": "FINAL-DECISION-RECORD 132"
+    }
   },
   "prompts": {
     "manifest": "prompts/PROMPT-MANIFEST.md",

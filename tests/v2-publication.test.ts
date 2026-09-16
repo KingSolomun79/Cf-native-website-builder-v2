@@ -131,7 +131,7 @@ describe("Approval", () => {
     expect(approval.artifactManifestHash).toBe("hash-alpha");
 
     // Approval alone: no publication, no live state, build state is APPROVED.
-    expect(await getPublicationState(env, context.siteId)).toEqual({ current: null, rollback: null });
+    expect(await getPublicationState(env, context.siteId)).toEqual({ siteUrl: expect.any(String), current: null, rollback: null });
     const state = await env.DB.prepare("SELECT state FROM builds WHERE id = ?")
       .bind(context.buildId)
       .first<{ state: string }>();
@@ -199,7 +199,7 @@ describe("Publication", () => {
       .bind(context.buildVersionId)
       .all<{ status: string; attempt: number }>();
     expect((failedRows.results ?? []).map((row) => row.status)).toEqual(["failed"]);
-    expect(await getPublicationState(env, context.siteId)).toEqual({ current: null, rollback: null });
+    expect(await getPublicationState(env, context.siteId)).toEqual({ siteUrl: expect.any(String), current: null, rollback: null });
 
     // A newer candidate becomes approved while v1's publication is still
     // unretried — the retry must deploy v1, never implicitly v2.
@@ -265,7 +265,7 @@ describe("Publication", () => {
     ).rejects.toMatchObject({ code: "APPROVAL_HASH_MISMATCH" });
 
     // Nothing deployed, nothing recorded.
-    expect(await getPublicationState(env, context.siteId)).toEqual({ current: null, rollback: null });
+    expect(await getPublicationState(env, context.siteId)).toEqual({ siteUrl: expect.any(String), current: null, rollback: null });
     const publications = await env.DB.prepare("SELECT COUNT(*) AS n FROM publications WHERE build_version_id = ?")
       .bind(context.buildVersionId)
       .first<{ n: number }>();
@@ -404,6 +404,7 @@ describe("Rollback", () => {
     // longer referenced by published state at all, and only the current
     // version's deployment holds an active published role.
     expect(await getPublicationState(env, context.siteId)).toEqual({
+      siteUrl: expect.any(String),
       current: { publicationId: afterV3.current!.publicationId, buildVersionId: v3.buildVersionId, url: afterV3.current!.url },
       rollback: { publicationId: afterV3.rollback!.publicationId, buildVersionId: v2.buildVersionId, expiresAt: afterV3.rollback!.expiresAt },
     });
@@ -457,5 +458,60 @@ describe("Rollback", () => {
     await expect(
       rollbackPublication(env, { siteId: context.siteId, now: new Date(Date.now() + 8 * 24 * 60 * 60_000) })
     ).rejects.toMatchObject({ code: "ROLLBACK_WINDOW_EXPIRED" });
+  });
+});
+
+// ── Stable Site Address surfacing (issue #48, decision 132) ─────────────────
+
+describe("publication surfaces the stable Site Address", () => {
+  it("publish, state, idempotent republish and rollback expose the same siteUrl", async () => {
+    const context = await newSite();
+    await releaseReadyVersion({
+      siteGenerationId: context.siteGenerationId, buildId: context.buildId,
+      buildVersionId: context.buildVersionId, buildVersionNumber: 1, hash: "hash-addr-1",
+    });
+    const address = await env.DB
+      .prepare("SELECT host FROM site_addresses WHERE site_id = ?")
+      .bind(context.siteId)
+      .first<{ host: string }>();
+    expect(address).toBeTruthy();
+
+    await approveBuildVersion(env, context);
+    const published = await publishApprovedBuildVersion(env, {
+      ...context, buildVersionNumber: 1, deployer: deployer().deployer,
+    });
+    expect(published.publishedUrl).toContain(".workers.dev"); // internal origin meaning unchanged
+    expect(published.siteUrl).toBe(`https://${address!.host}`);
+
+    const state = await getPublicationState(env, context.siteId);
+    expect(state.siteUrl).toBe(published.siteUrl);
+
+    const idempotent = await publishApprovedBuildVersion(env, {
+      ...context, buildVersionNumber: 1, deployer: deployer().deployer,
+    });
+    expect(idempotent.alreadyPublished).toBe(true);
+    expect(idempotent.siteUrl).toBe(published.siteUrl);
+
+    // A newer published version changes WHICH version the address serves,
+    // never the address itself.
+    const next = await createNextBuildVersion(env, { buildId: context.buildId, cause: "revision" });
+    await releaseReadyVersion({
+      siteGenerationId: context.siteGenerationId, buildId: context.buildId,
+      buildVersionId: next.buildVersionId, buildVersionNumber: next.buildVersionNumber, hash: "hash-addr-2",
+    });
+    await approveBuildVersion(env, { buildId: context.buildId, buildVersionId: next.buildVersionId });
+    await publishApprovedBuildVersion(env, {
+      siteId: context.siteId, buildId: context.buildId,
+      buildVersionId: next.buildVersionId, buildVersionNumber: next.buildVersionNumber,
+      deployer: deployer().deployer,
+    });
+    const afterV2 = await getPublicationState(env, context.siteId);
+    expect(afterV2.siteUrl).toBe(published.siteUrl);
+
+    // Rollback: same hostname, restored exact prior version.
+    const rollback = await rollbackPublication(env, { siteId: context.siteId });
+    expect(rollback.siteUrl).toBe(published.siteUrl);
+    expect(rollback.restoredUrl).toContain(".workers.dev");
+    expect(rollback.restoredBuildVersionId).toBe(context.buildVersionId);
   });
 });

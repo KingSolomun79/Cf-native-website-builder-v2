@@ -90,6 +90,10 @@
   "vars": {
     "CF_ACCOUNT_ID": "c1c0f6b100d55a09ce6a7a3121a19224",
     "PUBLIC_APP_URL": "https://cf-website-factory-sandbox.wazibizwebsites.workers.dev",
+    // Stable Site Address config (issue #48): sandbox allocations stay under
+    // a sandbox-only base domain, never the production one.
+    "SITES_BASE_DOMAIN": "sandbox.sites.example",
+    "PUBLISHED_ORIGIN_SUFFIX": "wazibizwebsites.workers.dev",
     "WAZIBIZ_SENDER_EMAIL": "notifications@wazibiz.ke",
     "WAZIBIZ_ADMIN_EMAIL": "hello@wazibiz.ke",
     "KIE_API_URL": "https://api.kie.ai",

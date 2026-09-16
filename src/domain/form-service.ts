@@ -14,6 +14,7 @@
 
 import type { Env } from "../env.d";
 import { generateId, nowIso } from "../lib/crypto";
+import { getSiteAddress } from "./site-address";
 
 export const MAX_DELIVERY_ATTEMPTS = 5;
 export const RATE_LIMIT_WINDOW_MINUTES = 10;
@@ -144,8 +145,7 @@ export async function upsertSiteConfiguration(
   };
 }
 
-export async function getSiteConfiguration(env: Env, siteId: string): Promise<SiteFormConfiguration | null> {
-  const row = await env.DB.prepare("SELECT * FROM site_configurations WHERE site_id = ?")
+export async function getSiteConfiguration(env: Env, siteId: string): Promise<SiteFormConfiguration | null> {  const row = await env.DB.prepare("SELECT * FROM site_configurations WHERE site_id = ?")
     .bind(siteId)
     .first<{
       site_id: string;
@@ -166,6 +166,40 @@ export async function getSiteConfiguration(env: Env, siteId: string): Promise<Si
     turnstileRequired: row.turnstile_required === 1,
     updatedAt: row.updated_at,
   };
+}
+
+// Publication-setup hook (issue #48, decision 132): the Site's stable public
+// Site Address is always an exact allowed public Origin. Exact-match only —
+// never a wildcard, never any other Site's address — and every operator-owned
+// field (destination, sender identity, Turnstile requirement, other origins)
+// is preserved. A Site with no configuration row yet gets the platform
+// default (operator admin destination, platform sender, form enabled); when
+// no valid default destination is resolvable, no row is created and the form
+// keeps rejecting (existing fail-closed behavior) rather than guessing.
+export async function ensureSiteAddressFormOrigin(
+  env: Env,
+  siteId: string,
+  defaultDestination?: string
+): Promise<void> {
+  const address = await getSiteAddress(env, siteId);
+  if (!address) return; // legacy Site still awaiting address backfill
+  const config = await getSiteConfiguration(env, siteId);
+  if (!config) {
+    const destination = defaultDestination?.trim() ?? "";
+    if (!isValidEmailAddress(destination)) return;
+    await upsertSiteConfiguration(env, {
+      siteId,
+      formDestination: destination,
+      allowedOrigins: [address.url],
+    });
+    return;
+  }
+  if (config.allowedOrigins.includes(address.url)) return;
+  await env.DB.prepare(
+    "UPDATE site_configurations SET form_allowed_origins_json = ?, updated_at = ? WHERE site_id = ?"
+  )
+    .bind(JSON.stringify([...config.allowedOrigins, address.url]), nowIso(), siteId)
+    .run();
 }
 
 // ── Browser payload contract ────────────────────────────────────────────────

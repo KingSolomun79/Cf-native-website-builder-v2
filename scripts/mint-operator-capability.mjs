@@ -22,6 +22,8 @@
 //   node scripts/mint-operator-capability.mjs benchmark \
 //     --case-id <frozen benchmark case id> \
 //     [--ttl-minutes 30]   (issue #18: benchmark-driver surface, #18-#22)
+//   node scripts/mint-operator-capability.mjs site-address-backfill \
+//     [--ttl-minutes 30]   (issue #48: legacy-Site address backfill surface)
 //
 // The secret is read from --secret or $OPERATOR_CAPABILITY_SECRET.
 
@@ -45,6 +47,8 @@ function canonical(payload) {
       return `v2opcap/1:rollback:${payload.siteId}:${payload.fromBuildVersionId}:${payload.exp}`;
     case "benchmark":
       return `v2opcap/1:benchmark:${payload.caseId}:${payload.exp}`;
+    case "site-address-backfill":
+      return `v2opcap/1:site-address-backfill:${payload.exp}`;
   }
 }
 
@@ -89,8 +93,10 @@ if (action === "approve" || action === "publish") {
   const { "case-id": caseId } = values;
   if (!caseId) die("benchmark requires --case-id");
   payload = { action, caseId, exp };
+} else if (action === "site-address-backfill") {
+  payload = { action, exp };
 } else {
-  die(`unknown action '${action ?? ""}' (expected 'approve', 'publish', 'rollback' or 'benchmark')`);
+  die(`unknown action '${action ?? ""}' (expected 'approve', 'publish', 'rollback', 'benchmark' or 'site-address-backfill')`);
 }
 
 const sig = createHmac("sha256", secret).update(canonical(payload)).digest("hex");

@@ -119,6 +119,17 @@ export interface Env {
   ADMIN_DASHBOARD_BASE_URL?: string;
   // Days a superseded Published Version stays available as Rollback Version.
   ROLLBACK_WINDOW_DAYS?: string;
+  // Stable public Site Addresses (issue #48, decision 132): every Site serves
+  // its current Published Version at https://{site-slug}.<base domain>.
+  // Hostnames are derived ONLY from this configuration — never from browser
+  // input or Site data. Optional at the type level; allocation falls back to
+  // the production default.
+  SITES_BASE_DOMAIN?: string;
+  // Trusted internal published-Worker origin suffix. The wildcard site
+  // gateway constructs origins ONLY from the stored worker_name plus this
+  // suffix and fails closed when a persisted URL disagrees — it never fetches
+  // an arbitrary URL read from D1.
+  PUBLISHED_ORIGIN_SUFFIX?: string;
   // HMAC secret for operator capability tokens on the Approval/Rollback
   // routes (Worker secret, never a var). Optional at the type level so the
   // Worker still boots without it: verification then fails closed and every

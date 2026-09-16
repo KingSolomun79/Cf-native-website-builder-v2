@@ -31,6 +31,9 @@ _Avoid_: Site Generation, Build, Build Version, Deployment.
 **Site Configuration**: Mutable operational state for a Site whose effect can be applied without changing generated Build artifacts, such as Form Destination and Sender Identity. A change that alters generated content, design or page behavior is not Site Configuration.
 _Avoid_: Build-immutability bypass, generated-content setting.
 
+**Site Address**: The stable public hostname (`https://{site-slug}.wazibiz.co.ke`) allocated once to a Site identity and used to serve whichever exact Published Version is currently active. It belongs to the Site, not to any Build Version: it never changes because of a Revision, new Build, Automated Repair, new Site Generation, Build Mode change, Publication, Rollback or a later Business name change. The per-version `*.wazibizwebsites.workers.dev` hostnames of published Deployments are internal origins only.
+_Avoid_: per-version hostname as public URL, address reallocation, per-Site DNS record.
+
 **Build**: One end-to-end attempt to create or revise a Site from one fixed approved set of Business, content and design inputs. New human intent starts a new Build.
 _Avoid_: automated repair iteration.
 
