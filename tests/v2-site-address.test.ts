@@ -264,6 +264,46 @@ describe("allocation integration with the lifecycle", () => {
     const siteId = await seedSite(`No Address Yet ${stem()}`);
     expect(await getSiteAddress(env, siteId)).toBeNull();
   });
+
+  it("grandfathered Sites stay addressless: reads never lazily allocate", async () => {
+    // FINAL-DECISION-RECORD decision 133: historical pre-activation Sites may
+    // have no site_addresses row. That is a valid state — lookups must return
+    // null honestly and must NEVER allocate as a side effect of reading.
+    const siteId = await seedSite(`Grandfathered Traders ${stem()}`);
+    for (let read = 0; read < 3; read += 1) {
+      expect(await getSiteAddress(env, siteId)).toBeNull();
+    }
+    const rows = await env.DB.prepare("SELECT COUNT(*) AS n FROM site_addresses WHERE site_id = ?").bind(siteId).first<{ n: number }>();
+    expect(rows!.n).toBe(0);
+  });
+
+  it("a NEW Site keeps exactly one address row across a replacement Site Generation", async () => {
+    // Decision 133 invariant for post-activation Sites: creation allocates
+    // exactly once; a new Site Generation for the same stable Site reuses the
+    // same row — no second address, no reallocation.
+    const facts = {
+      businessName: `Single Address Traders ${stem()}`,
+      contactEmail: "hi@single-address.example",
+      ...canonicalStructuredFacts(),
+    };
+    const payload = {
+      buildMode: "REFERENCE_BOUND" as const,
+      facts,
+      reference: { screenshotR2Key: `references/uploads/sa-${stem()}.png` },
+    };
+    const first = await startSiteGeneration(env, { payload });
+    const countAfterCreation = await env.DB.prepare("SELECT COUNT(*) AS n FROM site_addresses WHERE site_id = ?").bind(first.siteId).first<{ n: number }>();
+    expect(countAfterCreation!.n).toBe(1);
+
+    const second = await startSiteGeneration(env, {
+      siteId: first.siteId,
+      payload: { ...payload, facts: { ...facts, businessName: `Renamed Once ${stem()}` } },
+    });
+    expect(second.siteId).toBe(first.siteId);
+    expect(second.siteAddress).toEqual(first.siteAddress);
+    const countAfterRegeneration = await env.DB.prepare("SELECT COUNT(*) AS n FROM site_addresses WHERE site_id = ?").bind(first.siteId).first<{ n: number }>();
+    expect(countAfterRegeneration!.n).toBe(1);
+  });
 });
 
 describe("operator backfill route", () => {
