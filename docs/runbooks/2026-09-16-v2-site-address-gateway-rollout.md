@@ -95,7 +95,54 @@ Read-only verification BEFORE any mutation — **two of the three GO preconditio
 2. **Redirect rule**: the narrowed rule must live on zone **`12493a8ccf1a2052758e93b6b1ef0499`** (account `c1c0f6b1…`) in **Redirect Rules** — and check the other redirect mechanisms too (Page Rules, Bulk Redirects): any remaining catch-all wins. Production truth test: `curl --resolve randomlabel.wazibiz.co.ke:443:188.114.97.5 https://randomlabel.wazibiz.co.ke/` must NOT return 301 → wazibiz.ke.
 3. **E2E candidate**: use RankForge Kenya (`5e1a9db8…`, origin alive) or re-publish the smoke site via canonical #15 authority (operator capabilities). Its `site_configurations.form_allowed_origins_json` will need the #48 provisioning to have run (re-publication provisions it) before the contact-form E2E.
 
-## Staged activation command set (unchanged — execute only after BOTH preconditions verify true)
+## Activation attempt 3 precondition audit (HOLD — investigate orphan, 2026-09-16) — retention proven innocent; orphan is external; gates 1-2 still fail
+
+### A. Missing current published worker — canonical chain + root cause
+
+Chain for **WAZIBIZ #30 Smoke Business** (site `5ce85bdf-e1a1-4e1a-bb0b-601ab934f82f`):
+
+| Link | Value |
+|---|---|
+| site_published_state | current_publication_id `7e0f7b9d-af70-4f5f-8f91-5320e02cf613`, current_build_version_id `edecd502-da5a-4b16-8f7f-660c8088c6e8`, rollback NULL, updated **2026-09-04T21:51:42.300Z** (rollback moment) |
+| publications (current) | `7e0f7b9d…` status `published`, attempt 1, error NULL, created 2026-09-02T22:13:40.083Z, completed 2026-09-02T22:14:00.345Z, worker `pub-dddd8e0d86-v2`, manifest `7faf8a6975f3…` |
+| build_deployments (current) | `4900c1f4-d833-4816-bffd-b6cd490a90e8` role `published`, **status `active`**, created 2026-09-02T22:14:00.345Z, updated 2026-09-04T21:51:42.300Z (re-activated by the rollback) |
+| Cloudflare Worker | **does not exist** (account worker list: only `pub-5320a22982-v2`); origin answers `404`, body `error code: 1042` (workers.dev edge "worker absent" signature) |
+| same-site second publication | `41c2dd04…` → worker `pub-7da9e4fa5c-v2`, published 2026-09-04T21:49:46Z, deployment `7a6cc44f…` marked `superseded` by the 09-04 21:51:42Z rollback, then **`deleted` 2026-09-16T13:20:48Z by the #16 cron sweep** |
+
+**Root-cause attribution: the #16 retention code is PROVEN INNOCENT for the orphan.**
+1. `cleanupDisposableDeployments` candidate selection (`loadDisposableCandidates`, src/domain/retention.ts:84-95) selects ONLY `role='preview'` rows or `role='published' AND status='superseded'` — an `active` published row is structurally unselectable, and pub 1's row was `active` continuously since the rollback.
+2. Even for candidates, `isVersionProtectedNow` (retention.ts:100-118) re-reads canonical protection immediately before every destructive delete — `edecd502…` was `current_build_version_id` in every sweep window since 09-04 (and current via state since 09-02→09-04), protected at all times.
+3. There is NO code path that deletes a worker and leaves its deployment row `active`: after any deletion attempt the row converges to `deleted` (success or "already absent"), and transport failures leave the row untouched for retry. D1 says `active` ⇒ this code never deleted that worker.
+4. Today's sweep behaved exactly per policy on pub 2: superseded 09-04 21:51:42Z + 7-day rollback window (`ROLLBACK_WINDOW_DAYS` default 7) → eligible from 09-11 → deleted+marked today. **#16 works as designed; no retention regression. No #16 correction required.**
+
+**Attribution: external/manual deletion, actor and exact time not determinable from this environment** (Cloudflare audit logs and API-token minting are both scope-blocked here — errors 7003/9109). The worker was removed out-of-band sometime after 09-04; the codebase has no deletion path consistent with the D1 evidence.
+
+### B. Current-publication health audit (all `site_published_state` rows — production)
+
+| Site | Publication | Worker | D1 coherence | Origin probe | Verdict |
+|---|---|---|---|---|---|
+| `5e1a9db8…` RankForge Kenya | `377bf98f…` | `pub-5320a22982-v2` | deployment `4e66e17a…` active, version/status cross-check OK | **200**, 6634 bytes | **HEALTHY** |
+| `5ce85bdf…` WAZIBIZ #30 Smoke Business | `7e0f7b9d…` | `pub-dddd8e0d86-v2` | deployment `4900c1f4…` says `active` — **incoherent with reality** | 404 `error code: 1042` | **ORPHANED** |
+
+current publications: **2** · healthy: **1** · orphaned: **1** (`7e0f7b9d-af70-4f5f-8f91-5320e02cf613` / site `5ce85bdf-e1a1-4e1a-bb0b-601ab934f82f`).
+
+### D. Recovery (canonical, exact — no regeneration, no new Approval)
+
+Approval (1), release record (1), 14 indexed artifact keys and the published publication row all survive for version `edecd502…` → exact re-publication through #15 is viable once the operator mints the capability:
+`node scripts/mint-operator-capability.mjs publish --build-id dddd8e0d-8620-46b8-a0d6-626aca6bc838 --build-version-id edecd502-da5a-4b16-8f7f-660c8088c6e8 --artifact-manifest-hash 7faf8a6975f3c23555da78664f5d17153bd2846961128d5805903416092d9bce`
+→ `POST /api/v2/build-versions/edecd502-da5a-4b16-8f7f-660c8088c6e8/publication` (same endpoint as any publication; re-provisions the Worker from retained artifacts).
+
+### E. Gateway orphan defense (shipped before activation)
+
+Test-first: reproduced the production failure at the gateway seam (`tests/v2-site-gateway.test.ts`), then fixed `src/site-gateway/gateway.ts` — an upstream 404 whose body is the edge-generated `error code: <NNNN>` now returns a generic **502** (no streaming the edge page, no fallback publication, no "latest" guess, no self-repair, no internal detail); a Site-authored 404 from a healthy origin passes through untouched (companion test pins it). 627/627, typecheck PASS, commit `949c363`, deployed `cf-site-gateway-v2` version `6f34cca5-aec0-4782-ae8d-2bad7b9f130f` from clean tree.
+
+### Gates at close of this audit
+
+- **GATE 1 — FAIL**: `site_addresses` = **0** / 70 sites (re-verified this run; `OPERATOR_CAPABILITY_SECRET` confirmed still absent here — backfill remains an operator-local action; exact command set + required response checks in this runbook §D-command block).
+- **GATE 2 — FAIL**: cache-busted `--resolve` probes, two fresh random labels (`gateway-negative-8fk2`, `gateway-negative-qw49`): both still `301 → https://wazibiz.ke/?cb=…`. The active redirect mechanism remains unreadable from this environment (rulesets/pagerules APIs scope-blocked: 10000/9109) — the operator must narrow it on zone `12493a8ccf1a2052758e93b6b1ef0499` (Redirect Rules **and** Page Rules **and** Bulk Redirects — any one catch-all wins).
+- **GATE 3 — PASS**: retention protection proven (see A); orphan explained as external; gateway orphan defense shipped, tested and deployed.
+
+## Staged activation command set (unchanged — execute only after GATES 1-2 verify true)
 
 ```sh
 # 0. Read the redirect rule (dashboard: wazibiz.co.ke -> Rules -> Redirect Rules) and narrow it
