@@ -19,6 +19,9 @@
 //   node scripts/mint-operator-capability.mjs rollback \
 //     --site-id <id> --from-build-version-id <current published version id> \
 //     [--ttl-minutes 30]
+//   node scripts/mint-operator-capability.mjs benchmark \
+//     --case-id <frozen benchmark case id> \
+//     [--ttl-minutes 30]   (issue #18: benchmark-driver surface, #18-#22)
 //
 // The secret is read from --secret or $OPERATOR_CAPABILITY_SECRET.
 
@@ -40,6 +43,8 @@ function canonical(payload) {
       return `v2opcap/1:publish:${payload.buildId}:${payload.buildVersionId}:${payload.artifactManifestHash}:${payload.exp}`;
     case "rollback":
       return `v2opcap/1:rollback:${payload.siteId}:${payload.fromBuildVersionId}:${payload.exp}`;
+    case "benchmark":
+      return `v2opcap/1:benchmark:${payload.caseId}:${payload.exp}`;
   }
 }
 
@@ -56,6 +61,7 @@ const { positionals, values } = parseArgs({
     "artifact-manifest-hash": { type: "string" },
     "site-id": { type: "string" },
     "from-build-version-id": { type: "string" },
+    "case-id": { type: "string" },
     "ttl-minutes": { type: "string", default: "30" },
   },
 });
@@ -79,8 +85,12 @@ if (action === "approve" || action === "publish") {
   const { "site-id": siteId, "from-build-version-id": fromBuildVersionId } = values;
   if (!siteId || !fromBuildVersionId) die("rollback requires --site-id and --from-build-version-id");
   payload = { action, siteId, fromBuildVersionId, exp };
+} else if (action === "benchmark") {
+  const { "case-id": caseId } = values;
+  if (!caseId) die("benchmark requires --case-id");
+  payload = { action, caseId, exp };
 } else {
-  die(`unknown action '${action ?? ""}' (expected 'approve', 'publish' or 'rollback')`);
+  die(`unknown action '${action ?? ""}' (expected 'approve', 'publish', 'rollback' or 'benchmark')`);
 }
 
 const sig = createHmac("sha256", secret).update(canonical(payload)).digest("hex");

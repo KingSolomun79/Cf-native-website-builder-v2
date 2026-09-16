@@ -153,6 +153,7 @@ export default defineWorkersConfig({
       "tests/v2-llm-model-routing.test.ts",
       "tests/v2-retention.test.ts",
       "tests/v2-benchmark-harness.test.ts",
+      "tests/v2-benchmark-driver.test.ts",
       "tests/v2-cpu-budget.test.ts",
       "tests/v2-workflow-reconciliation.test.ts",
       "tests/v2-image-orchestration.test.ts",

@@ -23,6 +23,12 @@ import { submitForm } from "./routes/v2.form-submit";
 import { createApproval } from "./routes/v2.approval-create";
 import { createPublication } from "./routes/v2.publication-create";
 import { rollbackSitePublication } from "./routes/v2.rollback";
+import {
+  getBenchmarkRun,
+  runBenchmarkFreeze,
+  runBenchmarkPreflight,
+  runBenchmarkStart,
+} from "./routes/v2.benchmark-driver";
 
 // V2-only route table. The V1 product routes (Fluent Forms webhook, jobs,
 // contact, reference upload in its V1 shape, GitHub deploy webhook) were
@@ -44,6 +50,15 @@ app.post("/api/v2/forms/submit", submitForm);
 app.post("/api/v2/build-versions/:buildVersionId/approval", createApproval);
 app.post("/api/v2/build-versions/:buildVersionId/publication", createPublication);
 app.post("/api/v2/sites/:siteId/rollback", rollbackSitePublication);
+
+// Operator benchmark driver (issues #18-#22): executes the FROZEN #17 harness
+// one case at a time against the real production-equivalent pipeline and real
+// providers. Every endpoint requires an offline-minted "benchmark" capability
+// bound to the exact caseId; it is never public and can never publish.
+app.post("/api/v2/operator/benchmarks/:caseId/freeze", runBenchmarkFreeze);
+app.post("/api/v2/operator/benchmarks/:caseId/preflight", runBenchmarkPreflight);
+app.post("/api/v2/operator/benchmarks/:caseId/run", runBenchmarkStart);
+app.get("/api/v2/operator/benchmarks/runs/:runId", getBenchmarkRun);
 
 app.post("/api/internal/kie-callback", handleKieCallback);
 
