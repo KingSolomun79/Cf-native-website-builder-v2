@@ -40,6 +40,8 @@ For the remaining implementation work, execute these GitHub issues **strictly se
 
 This order is an explicit project instruction and **overrides every opportunity to parallelize these tickets**, including the benchmark tickets.
 
+**OPERATOR UPDATE (2026-09-16, FINAL-DECISION-RECORD.md §21, decision 134): the benchmark tranche is PAUSED.** #18 = VALID FAIL (recorded), #19 = PASS (recorded), and `#20`/`#21`/`#22` are **PARKED — NOT RUN**: do not start them unless an operator explicitly resumes the tranche (resume conditions in decision 136). V2 is in **production operation/observation mode** (decision 135): the generation system (Blueprint, Builder, QA, repair/image policy, prompts, models, thresholds, benchmark definitions) must not be proactively changed, and the remaining sequence (`#23`–`#26`) is deferred to an explicit operator decision — no ticket may be started autonomously.
+
 # Non-negotiable per-issue completion gate
 
 For every issue from `#14` through `#26`, the following sequence is mandatory:
