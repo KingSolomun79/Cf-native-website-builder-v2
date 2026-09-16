@@ -587,13 +587,12 @@ describe("bounded artifact-prune sweep driver", () => {
     await storeGeneratedPage(context);
     await failBuild(context.buildId);
 
-    const caseId = generateId();
-    await env.DB.prepare(
-      `INSERT INTO benchmark_cases (id, slot, archetype, evidence_checksum, screenshot_checksum, replacement_brief_json, prompt_model_schema_json, frozen_at)
-       VALUES (?, 5, 'retention-test', 'e', 's', '{}', '{}', '2026-09-01T00:00:00Z')`
-    )
-      .bind(caseId)
-      .run();
+    // The canonical frozen case freeze (issue #17) — never a synthetic case
+    // row: benchmark_cases slots belong to the five real frozen cases.
+    const { freezeBenchmarkCases } = await import("../src/domain/benchmark/harness");
+    const frozen = await freezeBenchmarkCases(env, ["bench-01-editorial-asymmetric"]);
+    const caseId = "bench-01-editorial-asymmetric";
+    expect(frozen[0].caseId).toBe(caseId);
     await env.DB.prepare(
       `INSERT INTO benchmark_runs (id, benchmark_case_id, site_generation_id, build_id, build_version_id, status, release_ready, image_spend_usd, manual_source_edits, started_at)
        VALUES (?, ?, ?, ?, ?, 'pass', 1, 0, 0, '2026-09-01T00:00:00Z')`
@@ -601,12 +600,22 @@ describe("bounded artifact-prune sweep driver", () => {
       .bind(generateId(), caseId, context.siteGenerationId, context.buildId, context.buildVersionId)
       .run();
 
-    const report = await pruneDisposableBuildArtifacts(env, { buildIds: [context.buildId], deleteObject: async () => {} });
+    // The sweep derives benchmark sites canonically from benchmark_runs —
+    // asserted at the retention-class index (D1-derived keys; the driver's
+    // R2-existence mechanics are covered by the cap and cron tests).
+    const { benchmarkSiteIdsFromRuns } = await import("../src/domain/retention");
+    const derived = await benchmarkSiteIdsFromRuns(env);
+    expect(derived).toContain(context.siteId);
+    const index = await indexDisposableArtifacts(
+      env,
+      { buildId: context.buildId, buildVersionId: context.buildVersionId, siteGenerationId: context.siteGenerationId },
+      { benchmarkSiteIds: derived }
+    );
     // Diagnosis evidence stays on the longer benchmark policy; generated
     // source is disposable as usual.
-    expect(report.benchmarkProtectedKeys.some((key) => key.includes("/qa_evidence_bundle"))).toBe(true);
-    expect(report.prunedArtifactKeys.some((key) => key.includes("/qa_evidence_bundle"))).toBe(false);
-    expect(report.prunedArtifactKeys.some((key) => key.includes("/generated_page"))).toBe(true);
+    expect(index.benchmarkProtectedKeys.some((key) => key.includes("/qa_evidence_bundle"))).toBe(true);
+    expect(index.artifactKeys.some((key) => key.includes("/qa_evidence_bundle"))).toBe(false);
+    expect(index.artifactKeys.some((key) => key.includes("/generated_page"))).toBe(true);
   });
 });
 
@@ -623,15 +632,18 @@ describe("cron wiring", () => {
 
     // Drain disposable work from EARLIER tests (scoped away from this Build)
     // so this newest Build Version sits within the bounded per-run cron caps;
-    // resumability across runs is proven by the cap test above. Chunked: D1
-    // caps bound SQL variables, and the shared suite DB has many Builds.
-    const otherBuilds = ((await env.DB.prepare("SELECT id FROM builds WHERE id != ?")
-      .bind(context.buildId)
-      .all<{ id: string }>()).results ?? []).map((row) => row.id);
-    for (let index = 0; index < otherBuilds.length; index += 80) {
-      const chunk = otherBuilds.slice(index, index + 80);
+    // resumability across runs is proven by the cap test above. Paginated in
+    // both dimensions: D1 caps result pages and bound SQL variables, and the
+    // shared suite DB has many Builds.
+    for (let offset = 0; ; offset += 80) {
+      const chunk = ((await env.DB.prepare("SELECT id FROM builds WHERE id != ? ORDER BY id LIMIT 80 OFFSET ?")
+        .bind(context.buildId, offset)
+        .all<{ id: string }>()).results ?? []).map((row) => row.id);
+      if (chunk.length === 0) break;
       await cleanupDisposableDeployments(env, { deleter: async () => {}, buildIds: chunk });
-      await pruneDisposableBuildArtifacts(env, { buildIds: chunk, deleteObject: async () => {} });
+      // Real R2 deletes: a no-op recorder would leave the D1-indexed keys in
+      // place and the cron sweep would burn its cap re-pruning them.
+      await pruneDisposableBuildArtifacts(env, { buildIds: chunk });
     }
 
     // The Cloudflare API is an external provider: stub it as "already

@@ -27,7 +27,7 @@
 
 import type { Env } from "../env.d";
 import { nowIso } from "../lib/crypto";
-import { deleteObject } from "../lib/assets";
+import { deleteObject, objectExists } from "../lib/assets";
 import { rollbackWindowDays } from "./publication";
 
 export interface RetentionDeleter {
@@ -319,15 +319,38 @@ export async function cleanupDisposableDeployments(
 
 // ── Artifact pruning with compact Build Record survival ────────────────────
 
+/** Per-run bulky benchmark evidence retention (FDR 130.B, operator decision
+ *  2026-09-16): run-specific evidence/AI/QA payloads stay protected for this
+ *  long, then become cleanup-eligible under the normal rules. Frozen
+ *  benchmark DEFINITION inputs live under `benchmarks/` — never under a Build
+ *  Version — so they are structurally outside every cleanup path. */
+export const BENCHMARK_RUN_EVIDENCE_RETENTION_DAYS = 180;
+
 export interface PruneOptions {
   benchmarkSiteIds?: string[];
   /** Object deletor seam (tests inject an in-memory recorder). */
   deleteObject?: (key: string) => Promise<void>;
+  /** Reference clock for retention-class expiry (defaults to now). */
+  now?: Date;
 }
 
 export interface DisposableArtifactIndex {
   artifactKeys: string[];
   benchmarkProtectedKeys: string[];
+}
+
+// True when the benchmark run for this Build started at least
+// BENCHMARK_RUN_EVIDENCE_RETENTION_DAYS ago (FDR 130.B). Builds with no
+// recorded benchmark run are never treated as expired.
+async function benchmarkRunEvidenceExpired(env: Env, buildId: string, now: Date): Promise<boolean> {
+  const run = await env.DB.prepare("SELECT started_at FROM benchmark_runs WHERE build_id = ? ORDER BY started_at DESC LIMIT 1")
+    .bind(buildId)
+    .first<{ started_at: string }>();
+  if (!run?.started_at) return false;
+  const startedMs = Date.parse(run.started_at);
+  if (!Number.isFinite(startedMs)) return false;
+  const ageDays = (now.getTime() - startedMs) / (24 * 60 * 60_000);
+  return ageDays >= BENCHMARK_RUN_EVIDENCE_RETENTION_DAYS;
 }
 
 // Collects the disposable R2 keys for one Build Version: stage artifacts,
@@ -373,11 +396,17 @@ export async function indexDisposableArtifacts(
   for (const row of images.results ?? []) keys.push(row.r2_key);
 
   if (isBenchmark) {
-    // Benchmark diagnosis keeps evidence and AI/QA payloads on the longer
-    // retention policy; only generated source/manifests are disposable.
+    // Benchmark evidence/AI/QA payloads follow the 180-day per-run evidence
+    // class (FDR 130.B): protected while the run is young, cleanup-eligible
+    // after expiry. A build with no recorded benchmark run keeps the
+    // conservative protection (protects more, deletes less).
     const benchmarkProtected = keys.filter(
       (key) => key.includes("/evidence") || key.includes("/ai/") || key.includes("/qa")
     );
+    const expired = await benchmarkRunEvidenceExpired(env, input.buildId, options.now ?? new Date());
+    if (expired) {
+      return { artifactKeys: keys, benchmarkProtectedKeys: [] };
+    }
     return {
       artifactKeys: keys.filter((key) => !benchmarkProtected.includes(key)),
       benchmarkProtectedKeys: benchmarkProtected,
@@ -444,20 +473,20 @@ async function loadPruneCandidates(env: Env, limit: number, scope: Set<string> |
      FROM build_versions bv
      JOIN builds b ON b.id = bv.build_id
      WHERE (
-       b.state = 'FAILED'
-       OR (
-         EXISTS (
-           SELECT 1 FROM build_versions newer
-            WHERE newer.build_id = bv.build_id AND newer.version_number > bv.version_number
+         b.state = 'FAILED'
+         OR (
+           EXISTS (
+             SELECT 1 FROM build_versions newer
+              WHERE newer.build_id = bv.build_id AND newer.version_number > bv.version_number
+           )
+           AND EXISTS (
+             SELECT 1 FROM build_deployments d
+              JOIN build_versions owner ON owner.id = d.build_version_id
+              WHERE d.build_id = bv.build_id AND d.role = 'preview' AND d.status = 'active'
+                AND owner.version_number > bv.version_number
+           )
          )
-         AND EXISTS (
-           SELECT 1 FROM build_deployments d
-            JOIN build_versions owner ON owner.id = d.build_version_id
-            WHERE d.build_id = bv.build_id AND d.role = 'preview' AND d.status = 'active'
-              AND owner.version_number > bv.version_number
-         )
-       )
-     )${scopeFilter}
+       )${scopeFilter}
      ORDER BY bv.created_at, bv.id
      LIMIT ?`
   )
@@ -528,14 +557,22 @@ export async function pruneDisposableBuildArtifacts(
         candidate,
         { benchmarkSiteIds: [...benchmark] }
       );
-      if (index.artifactKeys.length === 0) continue; // already cleaned; a scan is not destructive work
+      // D1 artifact-index rows are permanent by design, so a version pruned
+      // by an earlier sweep still lists its keys. Destructive work is counted
+      // by keys that STILL EXIST in R2: already-pruned versions cost the run
+      // nothing and the sweep converges without extra state.
+      const existingKeys: string[] = [];
+      for (const key of index.artifactKeys) {
+        if (await objectExists(env, key)) existingKeys.push(key);
+      }
+      if (existingKeys.length === 0) continue; // nothing left to delete
       if (report.prunedVersions.length >= maxVersions) break; // resumable: next sweep continues oldest-first
       const remove = options.deleteObject ?? ((key: string) => deleteObject(env, key));
-      for (const key of index.artifactKeys) {
+      for (const key of existingKeys) {
         await remove(key);
       }
       report.prunedVersions.push(candidate.buildVersionId);
-      report.prunedArtifactKeys.push(...index.artifactKeys);
+      report.prunedArtifactKeys.push(...existingKeys);
       report.benchmarkProtectedKeys.push(...index.benchmarkProtectedKeys);
     } catch (error) {
       const message = (error instanceof Error ? error.message : String(error)).replace(/'/g, "").slice(0, 300);
