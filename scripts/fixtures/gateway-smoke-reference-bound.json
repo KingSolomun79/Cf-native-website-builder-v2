@@ -1,0 +1,87 @@
+{
+  "submission": {
+    "buildMode": "REFERENCE_BOUND",
+    "facts": {
+      "businessName": "Wazibiz Gateway Smoke Test",
+      "contactEmail": "hello@gateway-smoke-test.example",
+      "businessType": "Boutique web design studio (B2B service business)",
+      "businessDescription": "Wazibiz Gateway Smoke Test is a small Nairobi web design studio building fast, clear and dependable websites for local businesses. The studio focuses on simple site architecture, readable content, sensible imagery and measurable contact-point performance rather than heavy decoration. It delivers four-page business websites with straightforward maintenance.",
+      "idealClientProfile": "Small Kenyan service businesses — clinics, law offices, consultancies, cafés and local trades — that need a credible four-page website with a working contact route. Typical decision makers: owner, practice manager, operations lead. Website purpose: look credible and turn visitors into named enquiries.",
+      "city": "Nairobi",
+      "country": "Kenya",
+      "extraInformation": [
+        "Positioning: calm, precise, dependable, quietly premium. Positioning statement: websites that load fast, read clearly and make contacting the business effortless. Supporting message: the studio plans four-page sites around the single journey a customer takes from first look to first enquiry.",
+        "Services (exactly these three): Website Planning — page structure, content outline and the single customer journey the site must serve. Website Design — a clean four-page design adapted from a reference direction, readable on phones first. Website Care — launch checks, small content updates and a monthly look at contact-point performance.",
+        "Customer problems the site may describe without statistics: the current website looks dated; visitors cannot find contact details quickly; the site does not read well on phones; enquiries arrive without context; updates take too long.",
+        "Process, three stages: 01 Plan — agree the four pages and the customer journey. 02 Design — adapt the reference direction into a fast, readable site. 03 Care — keep content current and watch how visitors reach the contact page.",
+        "Home page direction: hero headline 'A clear website your customers can actually use.' with supporting copy about fast, readable four-page business sites; primary CTA 'Start a Project', secondary CTA 'See How We Work'; services preview; three-stage process; closing CTA 'Tell us about your business' with CTA 'Request a Quote'.",
+        "About page direction: headline like 'Small studio, deliberate work.' Explain the planning-first approach, the four-page structure and the care plan. Principles: clarity over decoration, phones first, contact always one tap away.",
+        "Contact page direction: headline like 'Tell us what your business needs.' Contact form fields: Name, Business, Email, Phone, 'What do you need?' (options: New Website, Website Refresh, Website Care, Not sure yet), Message.",
+        "Strict content constraints: do not invent testimonials, clients, portfolio items, revenue results, years in business, team members, certifications, awards, an office address or any quantitative claims. Do not promise ranking or traffic outcomes. The Reference site is a design source only: never copy its name, text, branding, logo, imagery or business content."
+      ],
+      "services": [
+        {
+          "name": "Website Planning"
+        },
+        {
+          "name": "Website Design"
+        },
+        {
+          "name": "Website Care"
+        }
+      ],
+      "businessHours": {
+        "monday": {
+          "status": "OPEN",
+          "open": "09:00",
+          "close": "17:00"
+        },
+        "tuesday": {
+          "status": "OPEN",
+          "open": "09:00",
+          "close": "17:00"
+        },
+        "wednesday": {
+          "status": "OPEN",
+          "open": "09:00",
+          "close": "17:00"
+        },
+        "thursday": {
+          "status": "OPEN",
+          "open": "09:00",
+          "close": "17:00"
+        },
+        "friday": {
+          "status": "OPEN",
+          "open": "09:00",
+          "close": "16:00"
+        },
+        "saturday": {
+          "status": "CLOSED"
+        },
+        "sunday": {
+          "status": "CLOSED"
+        }
+      }
+    },
+    "reference": {
+      "url": "https://morabeza.digital/",
+      "adaptationContract": {
+        "version": "1",
+        "unsupportedFeatures": [
+          {
+            "feature": "heavy_parallax",
+            "reason": "Reference uses scroll-linked parallax choreography outside static-light generated-site dependencies"
+          }
+        ],
+        "acceptedApproximations": [
+          {
+            "replaces": "heavy_parallax",
+            "substituteOutcome": "Macro composition, section rhythm and visual identity preserved statically; scroll-triggered reveal transitions and reduced-motion-safe depth cues substitute the parallax movement"
+          }
+        ],
+        "qaExceptions": []
+      }
+    }
+  }
+}

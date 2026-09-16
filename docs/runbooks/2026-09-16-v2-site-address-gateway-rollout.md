@@ -142,7 +142,38 @@ Test-first: reproduced the production failure at the gateway seam (`tests/v2-sit
 - **GATE 2 — FAIL**: cache-busted `--resolve` probes, two fresh random labels (`gateway-negative-8fk2`, `gateway-negative-qw49`): both still `301 → https://wazibiz.ke/?cb=…`. The active redirect mechanism remains unreadable from this environment (rulesets/pagerules APIs scope-blocked: 10000/9109) — the operator must narrow it on zone `12493a8ccf1a2052758e93b6b1ef0499` (Redirect Rules **and** Page Rules **and** Bulk Redirects — any one catch-all wins).
 - **GATE 3 — PASS**: retention protection proven (see A); orphan explained as external; gateway orphan defense shipped, tested and deployed.
 
-## Staged activation command set (unchanged — execute only after GATES 1-2 verify true)
+## Activation attempt 4 — GO "SIMPLIFY + RESUME" (2026-09-16, later) — GATEWAY LIVE
+
+**Operator decision 133** (commit `9e83955`): historical pre-activation Sites are grandfathered without addresses; global backfill CANCELLED; new-Site allocation mandatory; reads never allocate; reserved names stay.
+
+### Activation steps
+
+| Step | Result | Evidence |
+|---|---|---|
+| Redirect gate | **PASS** | Fresh random labels (`gateway-negative-w7e2`, `-k48f`, `-x51a` via second edge IP): **no 301/302 to wazibiz.ke** (edge 522 pre-DNS). Catch-all removal verified |
+| Wildcard DNS (operator-created) | **PASS** | Fresh labels publicly resolve to Cloudflare edge (`188.114.96/97.5`) — proxied `AAAA * → 100::` live |
+| Gateway route | **PASS** | `*.wazibiz.co.ke/*` → `cf-site-gateway-v2`, route id `98f2189c49624625ab86eed8ed3ee125`; inventory: 3 no-script exclusions + 1 wildcard route |
+| Unknown host | **PASS** | `unknown-3b8dfae5.wazibiz.co.ke` via public DNS → **404 `Not found`**, no redirect, no workers.dev leak |
+| Deep host | n/a | `a.b.wazibiz.co.ke` fails TLS pre-gateway (Universal SSL covers first-level only — in scope per decision 132) |
+| TLS | **PASS** | `CN=wazibiz.co.ke`, SAN `wazibiz.co.ke, *.wazibiz.co.ke` (Google Trust Services); HTTPS probes succeed without warning |
+| Protected hosts regression | **PASS with accepted drift** | apex `525`, `www` `525`, `wazigarden` `403`, `wbdesign` `403` byte-identical pre/post route. **Accepted drift (GO §4):** `factory` and `baharini-coral-lodge` — Workers Custom Domains — are intercepted by the wildcard route (empirical Cloudflare behavior: a wildcard Worker Route takes precedence over Custom Domains); both now return the gateway's generic 404. baharini served its V1 content (200) pre-route; its Worker `baharini-coral-lodge-260908100315-7985a1` is untouched and custom-domain serving is restored instantly by deleting route `98f2189c…`. Both hostnames are disposable test infrastructure per decision 133 |
+
+### New-Site E2E — Wazibiz Gateway Smoke Test (canonical path, no shortcuts)
+
+| Step | Result |
+|---|---|
+| Canonical intake (`smoke-site.mjs submit` → HMAC `POST /api/v2/onboarding-submissions`) | **201** — business `18991fea…`, **siteId `5fafbc96-43d8-42d4-bc17-652b564f9b5b`**, generation `1d4b5dfb…`, REFERENCE_BOUND |
+| Allocation at creation | **PASS** — `wazibiz-gateway-smoke-test.wazibiz.co.ke` row exists immediately |
+| Gateway state B (allocated, unpublished) | **PASS** — stable host returns gateway 404 before publication |
+| Build `25508915…` / workflow `d7c21d1c…` | Full pipeline, no shortcuts: INTAKE → REFERENCE_CHECK (URL_ONLY) → REFERENCE_EVIDENCE (SUPPORTED_WITH_LIMITATIONS) → BLUEPRINT (design-blueprint/2, one call) → IMAGE waves 1+2 (all slots accepted) → BUILDER → assembly (manifest `79335fc66dd4`, 14 files) → TECHNICAL_PREFLIGHT (166 checks passed) → PREVIEW → QA |
+| Bounded repair (#14) | ONE repair applied → new immutable Build Version v2 (`630c163c…`), site.css only |
+| Final QA | **HUMAN_REVIEW_REQUIRED** — 1 P1 finding; hard gate `MOBILE_PRESERVES_VISUAL_IDENTITY` failed after the ONE repair. Zero release records — the gate held; **no manual rescue per GO §9** |
+| Gateway state C (healthy publication → exact origin) | **PENDING** — no Release Ready Site exists yet; verified by tests, live proof awaits the first one |
+| Gateway state D (orphan → fail closed) | **PASS** by test (`949c363`); live case cannot occur for grandfathered Sites (they 404 at address resolution) |
+
+**Verdict: GATEWAY LIVE — AWAITING FIRST RELEASE_READY SITE E2E.** The smoke Site's Build needs operator human review (mobile composition vs the reference) through the canonical #14-revision path — not a #48 rescue.
+
+## Staged activation command set (superseded by attempt 4 — retained for history)
 
 ```sh
 # 0. Read the redirect rule (dashboard: wazibiz.co.ke -> Rules -> Redirect Rules) and narrow it
