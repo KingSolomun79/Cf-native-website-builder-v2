@@ -277,3 +277,31 @@ deleted"), then `UPDATE build_deployments SET status='deleted' …` per row
 
 No code changes, no deploys, no R2/evidence deletions, no commits. Compact
 Build/QA/provenance history in D1 preserved (UPDATE-only reconciliation).
+
+## Test Worker cleanup — batch 2 (2026-09-16, ~21:5x UTC)
+
+Second operator allowlist (12 names from the dashboard). Two names protected
+and KEPT untouched: `pub-5320a22982-v2` (RankForge live published origin, role
+`published`/active) and `b-5320a22982-v2` (preview Worker of build version
+`2fde2e2f-…`, which is RankForge's `current_build_version_id` — the exact
+approved+published version).
+
+10 deleted (all unprotected): production-D1 previews `b-282f9b9de6-v1`,
+`b-2c8e73ec38-v3`, `b-78c6da8bf4-v3`, `b-bbe8c8f9b1-v3` (versions matched no
+current publication; Smoke still `edecd502-…`); sandbox-D1 previews
+`b-06025a7d74-v1/-v5/-v6/-v7/-v9` (superseded) and `b-c160d79d99-v1` (active,
+build QA_EVIDENCE; sandbox sps=0, publications=0, open rights=0).
+
+Note: a third production publication went live between batches (site
+`5fafbc96-…` / publication `9dea1619-…` / `pub-567e35b5b6-v2`, version
+`3ef4f866-…`, 2026-09-16T21:18Z) — re-verified before deleting; no candidate
+version matched it and it was not touched.
+
+Executed: `wrangler delete --force` ×10 (all succeeded), D1 reconciliation ×10
+(4 production rows, 6 sandbox rows; changes=1 each; one sandbox UPDATE needed
+a retry after a silent no-output attempt — retry applied changes=1, confirming
+the first had not taken effect). Post-verification: 10/10 absent from CF, both
+KEPT workers still exist; allowlist not-deleted counts = 0 in both DBs while
+`pub-5320a22982-v2` and `b-5320a22982-v2` rows remain `active`;
+`site_published_state` unchanged (3 rows, rollback NULL); health: RankForge
+200, new `pub-567e35b5b6-v2` 200, platform root 404, gateway root 404.
