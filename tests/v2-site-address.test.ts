@@ -120,6 +120,7 @@ describe("address allocation", () => {
       ["FACTORY", "factory"],
       ["Wazigarden", "wazigarden"],
       ["WBDesign", "wbdesign"],
+      ["Baharini Coral Lodge", "baharini-coral-lodge"],
     ];
     for (const [businessName, infrastructureLabel] of infrastructure) {
       expect(slugifyBusinessName(businessName)).toBe(infrastructureLabel);

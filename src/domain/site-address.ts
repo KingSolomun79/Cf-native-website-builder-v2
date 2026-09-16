@@ -43,10 +43,12 @@ export const RESERVED_SITE_SLUGS: ReadonlySet<string> = new Set([
   "pay", "payments", "forms", "form", "webhook", "webhooks", "preview",
   "staging", "stage", "dev", "test",
   // Existing live Wazibiz hostnames on the production zone. They are excluded
-  // from the wildcard site gateway with more-specific no-script Worker Routes,
-  // so they must equally never be allocated as a Business Site Address
-  // (issue #48 rollout operator decision, 2026-09-16).
-  "factory", "wazigarden", "wbdesign",
+  // from the wildcard site gateway with more-specific no-script Worker Routes
+  // (plain-DNS hosts) or exact-hostname Worker Custom Domains, so they must
+  // equally never be allocated as a Business Site Address (issue #48 rollout
+  // operator decision, 2026-09-16; baharini-coral-lodge found by the
+  // account Custom Domain inventory during the activation audit).
+  "factory", "wazigarden", "wbdesign", "baharini-coral-lodge",
 ]);
 
 export type SiteAddressErrorCode =
