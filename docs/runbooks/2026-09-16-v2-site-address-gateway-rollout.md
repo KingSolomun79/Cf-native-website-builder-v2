@@ -73,7 +73,29 @@ The zone-wide redirect rule redirects every `wazibiz.co.ke` hostname to `wazibiz
 - Restrict the redirect rule's match to the six currently-live hostnames (apex + www + factory + wazigarden + wbdesign + baharini-coral-lodge). Every existing hostname's observable behavior stays byte-identical (verified reproducible via the baseline fingerprints); all other first-level labels are freed for the gateway.
 - Completeness caveat: the DNS record list is not readable from this environment (no `dns_records` scope), so "six live hostnames" rests on the Custom Domain inventory (authoritative for worker-attached hosts) + the 44-name DNS sweep + CT logs. After activation, the baseline fingerprints are the rollback gate.
 
-## Staged activation command set (operator, after the redirect-rule decision)
+## Activation attempt 2 (GO "RESUME FROM ACTIVATION", 2026-09-16, later) — HELD: operator preconditions not verified in production
+
+Read-only verification BEFORE any mutation — **two of the three GO preconditions are false at the production edge**:
+
+| GO precondition | Claimed | Verified in production | Evidence |
+|---|---|---|---|
+| Backfill applied, pending = 0 | ✅ | ❌ **`site_addresses` = 0 rows / 70 sites** | Triple-checked via `wrangler d1 execute website_factory_v2 --remote`: table + both immutability triggers exist; counts `addr=0, sites=70, pubs=3, states=2`. Rows cannot have been deleted (no-delete trigger) — the apply never landed in THIS database (`9e2597d1-9598-4c50-adcf-764c1b6319da`, the one `cf-website-factory-v2` binds) |
+| Redirect rule narrowed (random label no longer redirects) | ✅ | ❌ **catch-all still 301s unallocated labels** | Cache-busted `--resolve` edge probes on two distinct random labels (`gateway-scope-probe-7f3a`, `zz-unallocated-4t9x`) across both edge IPs + re-probe: all `301 → https://wazibiz.ke/` (Location echoes the `?cb=` param — live rule evaluation, not cache) |
+| Six hosts retain behavior | ✅ | ✅ | All six byte-identical to baseline fp `446a6087825fa73e` |
+
+**Additional finding:** the designated E2E site's published origin **`pub-dddd8e0d86-v2` no longer exists** (account worker list: only `pub-5320a22982-v2` present; the smoke origin 404s on `/`, `/index.html`, `/about/`). Retention lifecycle (#16) or cleanup removed the deployment. RankForge Kenya's origin (`pub-5320a22982-v2`) serves 200 — it is the viable E2E candidate after the preconditions are actually met.
+
+**Also verified (GO steps 1-2, read-only):** gateway `cf-site-gateway-v2` healthy (`/__gateway-health` → 200 `ok`); zone route inventory exactly the three no-script exclusions (`www`, `wazigarden`, `wbdesign`), no wildcard route.
+
+**Mutation decision: NONE.** Wildcard DNS and the `*.wazibiz.co.ke/*` route were NOT created — with the catch-all still live and zero address rows, activation would be doubly shadowed and the E2E impossible. Plausible root cause for both precondition failures: the dashboard/backfill work landed in a different account/zone than `c1c0f6b1…` / zone `12493a8c…` (wrangler `whoami` shows the operator identity spans multiple accounts — e.g. a narrowing made on `wazibiz.KE` or in the personal account `9a3b764a…` would produce exactly this signature), and/or the backfill curl ran against a non-production endpoint/environment.
+
+### Operator re-run checklist (production truth tests)
+
+1. **Backfill**: run the runbook §D curl set; the dry-run response must list ~70 items and the apply response `pendingAfter: 0`. Then verify independently: `npx wrangler d1 execute website_factory_v2 --remote --json --command "SELECT COUNT(*) AS n FROM site_addresses"` → must be 70.
+2. **Redirect rule**: the narrowed rule must live on zone **`12493a8ccf1a2052758e93b6b1ef0499`** (account `c1c0f6b1…`) in **Redirect Rules** — and check the other redirect mechanisms too (Page Rules, Bulk Redirects): any remaining catch-all wins. Production truth test: `curl --resolve randomlabel.wazibiz.co.ke:443:188.114.97.5 https://randomlabel.wazibiz.co.ke/` must NOT return 301 → wazibiz.ke.
+3. **E2E candidate**: use RankForge Kenya (`5e1a9db8…`, origin alive) or re-publish the smoke site via canonical #15 authority (operator capabilities). Its `site_configurations.form_allowed_origins_json` will need the #48 provisioning to have run (re-publication provisions it) before the contact-form E2E.
+
+## Staged activation command set (unchanged — execute only after BOTH preconditions verify true)
 
 ```sh
 # 0. Read the redirect rule (dashboard: wazibiz.co.ke -> Rules -> Redirect Rules) and narrow it
