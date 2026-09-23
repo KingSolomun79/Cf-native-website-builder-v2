@@ -19,6 +19,10 @@ export interface AdminBuildSummary {
   versions: Array<{ id: string; versionNumber: number; createdAt: string }>;
   previewUrl: string | null;
   scoreSummary: string | null;
+  /** The terminal workflow event's human-readable detail — WHY a build ended
+   *  RELEASE_READY / HUMAN_REVIEW_REQUIRED / DEGRADED / FAILED (incident
+   *  remediation 2026-09-23: the badge alone told the operator nothing). */
+  terminalReason: string | null;
   repairUsed: boolean;
 }
 
@@ -41,6 +45,21 @@ export interface AdminSiteReview {
   latestState: string | null;
   latestPreviewUrl: string | null;
   notes: Awaited<ReturnType<typeof listSiteNotes>>;
+}
+
+/** States whose terminal event detail explains the build outcome. */
+const TERMINAL_EVENT_STATES = new Set(["RELEASE_READY", "HUMAN_REVIEW_REQUIRED", "DEGRADED", "FAILED"]);
+
+/** The most recent terminal transition's detail — the canonical "why" string
+ *  written by the pipeline (e.g. "Final QA still failing after the ONE
+ *  pre-QA repair: visual fidelity 87 < 90"). */
+function extractTerminalReason(events: Array<{ to_state: string | null; detail: string | null }>): string | null {
+  for (const event of [...events].reverse()) {
+    if (event.to_state && TERMINAL_EVENT_STATES.has(event.to_state) && event.detail) {
+      return event.detail;
+    }
+  }
+  return null;
 }
 
 /** Extracts the score summary (visual/content/technical) from the terminal
@@ -116,10 +135,10 @@ export async function getAdminSiteReview(env: Env, siteId: string): Promise<Admi
       )
         .bind(build.id)
         .all<{ id: string; version_number: number; created_at: string }>();      const events = await env.DB.prepare(
-        "SELECT stage, detail FROM build_workflow_events WHERE build_id = ? ORDER BY created_at, id"
+        "SELECT stage, detail, to_state FROM build_workflow_events WHERE build_id = ? ORDER BY created_at, id"
       )
         .bind(build.id)
-        .all<{ stage: string | null; detail: string | null }>();
+        .all<{ stage: string | null; detail: string | null; to_state: string | null }>();
       const preview = await env.DB.prepare(
         `SELECT preview_url FROM build_deployments
          WHERE build_id = ? AND role = 'preview' AND status = 'active'
@@ -142,6 +161,7 @@ export async function getAdminSiteReview(env: Env, siteId: string): Promise<Admi
         })),
         previewUrl: preview?.preview_url ?? null,
         scoreSummary: extractScoreSummary(events.results ?? []),
+        terminalReason: extractTerminalReason(events.results ?? []),
         repairUsed: (versions.results ?? []).length > 1,
       });
     }

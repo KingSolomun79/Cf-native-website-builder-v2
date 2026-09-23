@@ -47,3 +47,15 @@ The public client-intake endpoint gained a bounded REJECTED ledger: parsed submi
 - **No new write paths.**
 
 **Verdict: SECURITY OK.**
+
+---
+
+# Addendum — Step 3: terminal reasons on the site review page (same engagement)
+
+**Scope:** `terminalReason` on `AdminBuildSummary` (extracted from the build's canonical terminal `build_workflow_events` row) + a "Why:" line on `SiteReviewPage`.
+
+- **Authz (pass):** rendered only on the Access-gated `/admin/sites/:siteId` page; the read model change also flows to the Access-gated `GET /api/admin/sites/:siteId`. No public surface.
+- **Data exposure (pass):** event details are pipeline-generated reasons (score gate failures, file-validation errors, bounded provider error slices ≤250 chars). Provider error bodies never contain credentials (auth rides headers). Rendering is JSX-escaped text.
+- **No new write paths; no state semantics changed (display-only).**
+
+**Verdict: SECURITY OK.**

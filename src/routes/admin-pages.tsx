@@ -667,6 +667,12 @@ async function SiteReviewPage(c: Context<{ Bindings: Env }>, review: AdminSiteRe
                   {build.repairUsed ? " · repair used" : ""}
                   {build.scoreSummary ? ` · ${build.scoreSummary}` : ""}
                 </div>
+                {build.terminalReason ? (
+                  <p style={{ margin: "0.5rem 0 0" }}>
+                    <span class="muted">Why: </span>
+                    {build.terminalReason}
+                  </p>
+                ) : null}
                 {build.previewUrl ? (
                   <div>
                     <a href={build.previewUrl} target="_blank" rel="noreferrer">
