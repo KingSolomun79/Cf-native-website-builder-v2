@@ -63,6 +63,19 @@ The public client-intake endpoint gained a bounded REJECTED ledger: parsed submi
 
 ---
 
+# Addendum — Step 4: recovery regeneration (FDR decision 137, same engagement)
+
+**Scope:** `regenerateFromDraft` + `POST /api/admin/intake-drafts/:draftId/regenerate` + migration 0042 (recovery pointer) + editor affordance.
+
+- **Authz (pass):** the route sits behind the same Cloudflare Access guard as every admin intake route; no client-controllable surface reaches it.
+- **Domain guardrails (pass):** recovery applies ONLY to the Site's latest generation and only when its latest Build is FAILED/DEGRADED/HUMAN_REVIEW_REQUIRED (or has no Build — the heal branch); non-terminal states answer 409 `RECOVERY_CONFLICT`. It creates a NEW immutable Onboarding Submission through the existing canonical validation on the SAME Site and Build Mode; historical submissions and Builds are never mutated; nothing is auto-published.
+- **Write surface (pass):** writes are limited to the mutable draft row (pointer CAS + optional Reference inheritance onto the draft payload) plus the canonical lifecycle inserts; the frozen submission payload is read-only.
+- **Race behavior (documented):** the pointer compare-and-set makes concurrent operator clicks converge on one winner; a loser may leave one unstarted generation row (never started, never served) — accepted and recorded in decision 137.
+
+**Verdict: SECURITY OK.**
+
+---
+
 # Addendum — Step 3: terminal reasons on the site review page (same engagement)
 
 **Scope:** `terminalReason` on `AdminBuildSummary` (extracted from the build's canonical terminal `build_workflow_events` row) + a "Why:" line on `SiteReviewPage`.

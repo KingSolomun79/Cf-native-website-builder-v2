@@ -6,6 +6,7 @@ import {
   editIntakeDraft,
   getIntakeDraft,
   listIntakeDrafts,
+  regenerateFromDraft,
   setDraftReferenceScreenshot,
   validateAndGenerateFromDraft,
   type DraftConversionInput,
@@ -36,7 +37,7 @@ function draftErrorResponse(error: IntakeDraftError): Response {
   const status =
     error.code === "DRAFT_NOT_FOUND"
       ? 404
-      : error.code === "DRAFT_IMMUTABLE" || error.code === "DRAFT_ALREADY_CONVERTED"
+      : error.code === "DRAFT_IMMUTABLE" || error.code === "DRAFT_ALREADY_CONVERTED" || error.code === "RECOVERY_CONFLICT"
         ? 409
         : error.code === "WORKFLOW_START_FAILED"
           ? 502
@@ -167,6 +168,43 @@ export async function validateAndGenerateDraft(c: Context<{ Bindings: Env }>): P
   }
 }
 
+/**
+ * Recovery regeneration (FDR decision 137): a fresh immutable Onboarding
+ * Submission + new Site Generation on the SAME stable Site and Build Mode,
+ * allowed only while the governed generation is the Site's latest and its
+ * latest Build is terminally failed/gated. Same-mode contract means the
+ * request body carries no buildMode decision — the draft's original mode
+ * governs; optional referenceUrl refreshes the Reference input like V&G.
+ */
+export async function regenerateDraft(c: Context<{ Bindings: Env }>): Promise<Response> {
+  const denied = await guard(c);
+  if (denied) return denied;
+  let body: { referenceUrl?: unknown; creativeDirection?: unknown };
+  try {
+    body = (await c.req.json()) as typeof body;
+  } catch {
+    body = {};
+  }
+  const creativeDirection = body.creativeDirection === undefined ? undefined : parseCreativeDirection(body.creativeDirection) ?? undefined;
+  if (body.creativeDirection !== undefined && !creativeDirection) {
+    return c.json({ error: { code: "DRAFT_INVALID", message: "creativeDirection failed schema validation" } }, 400);
+  }
+  const input = {
+    ...(typeof body.referenceUrl === "string" && body.referenceUrl ? { referenceUrl: body.referenceUrl } : {}),
+    ...(creativeDirection ? { creativeDirection } : {}),
+  };
+
+  try {
+    const { recovered } = await regenerateFromDraft(c.env, c.req.param("draftId") as string, input, async (siteGenerationId) => {
+      return await startInitialBuildWorkflowIdempotent(c.env.WEBSITE_BUILD_WORKFLOW, siteGenerationId);
+    });
+    return c.json({ recovered }, 201);
+  } catch (error) {
+    if (error instanceof IntakeDraftError) return draftErrorResponse(error);
+    throw error;
+  }
+}
+
 // ── Site review + revision notes ─────────────────────────────────────────────
 
 export async function getSiteReview(c: Context<{ Bindings: Env }>): Promise<Response> {
@@ -227,6 +265,7 @@ export function registerAdminApiRoutes(app: Hono<{ Bindings: Env }>): void {
   app.patch("/api/admin/intake-drafts/:draftId", patchDraft);
   app.post("/api/admin/intake-drafts/:draftId/reference-screenshot", uploadDraftReferenceScreenshot);
   app.post("/api/admin/intake-drafts/:draftId/validate-and-generate", validateAndGenerateDraft);
+  app.post("/api/admin/intake-drafts/:draftId/regenerate", regenerateDraft);
   app.get("/api/admin/sites/:siteId", getSiteReview);
   app.post("/api/admin/sites/:siteId/notes", postSiteNote);
   app.post("/api/admin/sites/:siteId/generate-revision", postGenerateRevision);

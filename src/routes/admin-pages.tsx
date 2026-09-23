@@ -102,12 +102,12 @@ async function IntakesPage(c: Context<{ Bindings: Env }>): Promise<Response> {
   for (const draft of drafts) {
     let latestBuildState: string | null = null;
     let published = false;
-    if (draft.convertedSiteGenerationId) {
+    if (draft.latestSiteGenerationId) {
       const build = await c.env.DB.prepare(
         `SELECT b.state FROM builds b
          WHERE b.site_generation_id = ? ORDER BY b.created_at DESC, b.id DESC LIMIT 1`
       )
-        .bind(draft.convertedSiteGenerationId)
+        .bind(draft.latestSiteGenerationId)
         .first<{ state: string }>();
       latestBuildState = build?.state ?? null;
       if (draft.convertedSiteId) {
@@ -171,6 +171,14 @@ async function retryWorkflow() {
   const result = await response.json();
   if (!response.ok && response.status !== 200) { flash('Retry failed: ' + (result.error && (result.error.message || result.error) || response.status), true); return; }
   flash('Workflow started for the existing generation.');
+  setTimeout(function () { location.reload(); }, 600);
+}
+async function regenerate() {
+  const response = await fetch(API + '/regenerate', { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' });
+  const result = await response.json();
+  if (!response.ok && response.status !== 200) { flash('Recovery failed: ' + (result.error && (result.error.message || result.error) || response.status), true); return; }
+  if (result.recovered && result.recovered.healedWorkflowStart) { flash('Workflow healed for the existing generation.'); }
+  else { flash('New generation started on the same site.'); }
   setTimeout(function () { location.reload(); }, 600);
 }
 function serviceRow(name, description) {
@@ -328,17 +336,24 @@ async function IntakeEditorPage(c: Context<{ Bindings: Env }>, draft: IntakeDraf
   if (draft.status === "REJECTED" && !validateIntakeDraftPayload(draft.payload).valid) {
     return RejectedIntakeDiagnosticPage(c, draft);
   }
-  // Crash-safety affordance: a converted draft whose generation has NO build
-  // means the workflow start failed or died pre-step-1.0 — offer the heal.
+  // Crash-safety + recovery affordances (FDR decision 137): a converted draft
+  // whose governed generation has NO build means the workflow start failed
+  // (offer the heal); a generation whose latest build is terminally
+  // failed/gated opens the recovery regeneration path.
   let workflowNeverStarted = false;
+  let latestBuildState: string | null = null;
   if (draft.convertedSiteGenerationId) {
+    const governedGenerationId = draft.recoveredSiteGenerationId ?? draft.convertedSiteGenerationId;
     const buildRow = await c.env.DB.prepare(
-      "SELECT 1 AS live FROM builds WHERE site_generation_id = ? LIMIT 1"
+      "SELECT state FROM builds WHERE site_generation_id = ? ORDER BY created_at DESC, id DESC LIMIT 1"
     )
-      .bind(draft.convertedSiteGenerationId)
-      .first<{ live: number }>();
+      .bind(governedGenerationId)
+      .first<{ state: string }>();
+    latestBuildState = buildRow?.state ?? null;
     workflowNeverStarted = !buildRow;
   }
+  const recoveryOpen =
+    latestBuildState === "FAILED" || latestBuildState === "DEGRADED" || latestBuildState === "HUMAN_REVIEW_REQUIRED";
   const business = draft.payload.business;
   const prefs = draft.payload.designPreferences ?? {};
   const converted = Boolean(draft.convertedSiteGenerationId);
@@ -376,6 +391,18 @@ async function IntakeEditorPage(c: Context<{ Bindings: Env }>, draft: IntakeDraf
               </p>
               <button type="button" class="secondary" onclick="retryWorkflow()">
                 Retry workflow start
+              </button>
+            </>
+          ) : null}
+          {recoveryOpen ? (
+            <>
+              <p style={{ margin: "0.75rem 0 0" }}>
+                The latest build ended <strong>{latestBuildState}</strong> with no publishable release. Recovery starts a
+                NEW generation on this same site and Build Mode from a fresh immutable submission built from this draft's
+                current payload — history is preserved, nothing is auto-published.
+              </p>
+              <button type="button" class="secondary" onclick="regenerate()">
+                Start new generation (recovery)
               </button>
             </>
           ) : null}

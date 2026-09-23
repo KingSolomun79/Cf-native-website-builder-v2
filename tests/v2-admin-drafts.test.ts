@@ -13,6 +13,7 @@ import {
   patchDraft,
   uploadDraftReferenceScreenshot,
   validateAndGenerateDraft,
+  regenerateDraft,
   getDraft,
   listDrafts,
 } from "../src/routes/admin-api";
@@ -58,6 +59,7 @@ function fullApp(env: Env): Hono<{ Bindings: Env }> {
   app.get("/api/admin/intake-drafts/:draftId", getDraft);
   app.post("/api/admin/intake-drafts/:draftId/reference-screenshot", uploadDraftReferenceScreenshot);
   app.post("/api/admin/intake-drafts/:draftId/validate-and-generate", validateAndGenerateDraft);
+  app.post("/api/admin/intake-drafts/:draftId/regenerate", regenerateDraft);
   return app;
 }
 
@@ -383,6 +385,122 @@ describe("admin draft review, edit and conversion", () => {
 
     const generations = await healthy.DB.prepare(
       "SELECT COUNT(*) AS n FROM site_generations g JOIN client_intake_drafts d ON d.converted_site_generation_id = g.id WHERE d.id = ?"
+    )
+      .bind(draftId)
+      .first<{ n: number }>();
+    expect(generations?.n).toBe(1);
+  });
+
+  it("recovery regeneration creates a fresh submission + generation on the SAME site after a terminal gate", async () => {
+    const { createInitialBuild, appendBuildWorkflowEvent } = await import("../src/domain/lifecycle");
+    const env = runtimeEnv(vi.fn(async () => ({ id: "w-recovery-instance" })));
+    const draftId = await createDraftViaPublicForm(env, "Recovery Path Studio");
+    const app = fullApp(env);
+
+    // Convert once (REFERENCE_BOUND with a reference URL).
+    const first = await app.request(`https://test.example.com/api/admin/intake-drafts/${draftId}/validate-and-generate`, {
+      method: "POST",
+      headers: { "content-type": "application/json", ...ACCESS_HEADERS },
+      body: JSON.stringify({ buildMode: "REFERENCE_BOUND", referenceUrl: "https://reference.example.com/original" }),
+    }, env);
+    expect(first.status).toBe(201);
+    const firstBody = (await first.json()) as { siteId: string; siteGenerationId: string; onboardingSubmissionId: string };
+    const submissionsBefore = await env.DB.prepare("SELECT COUNT(*) AS n FROM onboarding_submissions WHERE site_id = ?").bind(firstBody.siteId).first<{ n: number }>();
+
+    // The gated terminal state that opens recovery (canonical event writer).
+    const initial = await createInitialBuild(env, { siteGenerationId: firstBody.siteGenerationId });
+    await appendBuildWorkflowEvent(env, {
+      buildId: initial.buildId,
+      fromState: "CONFIRMATION",
+      toState: "HUMAN_REVIEW_REQUIRED",
+      stage: "simple_final_qa",
+      detail: "Final QA still failing after the ONE pre-QA repair: visual fidelity 86 < 90",
+    });
+
+    const recovery = await app.request(`https://test.example.com/api/admin/intake-drafts/${draftId}/regenerate`, {
+      method: "POST",
+      headers: { "content-type": "application/json", ...ACCESS_HEADERS },
+      body: "{}",
+    }, env);
+    expect(recovery.status).toBe(201);
+    const body = (await recovery.json()) as {
+      recovered: { siteId: string; siteGenerationId: string; healedWorkflowStart: boolean; workflowInstanceId: string };
+    };
+    expect(body.recovered.siteId).toBe(firstBody.siteId);
+    expect(body.recovered.siteGenerationId).not.toBe(firstBody.siteGenerationId);
+    expect(body.recovered.healedWorkflowStart).toBe(false);
+    expect(body.recovered.workflowInstanceId).toBe(`${body.recovered.siteGenerationId}-initial`);
+
+    // Fresh immutable submission, SAME site, sequence 2; the original is untouched.
+    const submissionsAfter = await env.DB.prepare("SELECT COUNT(*) AS n FROM onboarding_submissions WHERE site_id = ?").bind(firstBody.siteId).first<{ n: number }>();
+    expect(submissionsAfter!.n).toBe(submissionsBefore!.n + 1);
+    const sequence = await env.DB.prepare("SELECT sequence_number FROM site_generations WHERE id = ?").bind(body.recovered.siteGenerationId).first<{ sequence_number: number }>();
+    expect(sequence?.sequence_number).toBe(2);
+    const original = await env.DB.prepare("SELECT payload_json FROM onboarding_submissions WHERE id = ?").bind(firstBody.onboardingSubmissionId).first<{ payload_json: string }>();
+    expect(JSON.parse(original!.payload_json)).toMatchObject({ buildMode: "REFERENCE_BOUND" });
+
+    // The draft's recovery pointer governs the NEW generation; original provenance stays.
+    const draftRow = await env.DB.prepare(
+      "SELECT converted_site_generation_id, recovered_site_generation_id FROM client_intake_drafts WHERE id = ?"
+    )
+      .bind(draftId)
+      .first<{ converted_site_generation_id: string; recovered_site_generation_id: string }>();
+    expect(draftRow?.converted_site_generation_id).toBe(firstBody.siteGenerationId);
+    expect(draftRow?.recovered_site_generation_id).toBe(body.recovered.siteGenerationId);
+  });
+
+  it("recovery regeneration is refused while the latest build is not terminally failed", async () => {
+    const { createInitialBuild } = await import("../src/domain/lifecycle");
+    const env = runtimeEnv(vi.fn(async () => ({ id: "w-running-instance" })));
+    const draftId = await createDraftViaPublicForm(env, "Still Running Studio");
+    const app = fullApp(env);
+
+    const first = await app.request(`https://test.example.com/api/admin/intake-drafts/${draftId}/validate-and-generate`, {
+      method: "POST",
+      headers: { "content-type": "application/json", ...ACCESS_HEADERS },
+      body: JSON.stringify({ buildMode: "REFERENCE_BOUND", referenceUrl: "https://reference.example.com/running" }),
+    }, env);
+    expect(first.status).toBe(201);
+    const firstBody = (await first.json()) as { siteGenerationId: string };
+
+    // A build that exists but has NOT terminally failed (INTAKE_READY) blocks recovery.
+    await createInitialBuild(env, { siteGenerationId: firstBody.siteGenerationId });
+    const refused = await app.request(`https://test.example.com/api/admin/intake-drafts/${draftId}/regenerate`, {
+      method: "POST",
+      headers: { "content-type": "application/json", ...ACCESS_HEADERS },
+      body: "{}",
+    }, env);
+    expect(refused.status).toBe(409);
+    expect(((await refused.json()) as { error: { code: string } }).error.code).toBe("RECOVERY_CONFLICT");
+  });
+
+  it("recovery regeneration heals a governed generation whose workflow never started", async () => {
+    const env = runtimeEnv(vi.fn(async () => ({ id: "w-heal-recovery-instance" })));
+    const draftId = await createDraftViaPublicForm(env, "Heal Recovery Studio");
+    const app = fullApp(env);
+
+    // Convert with a FAILING workflow start: generation exists, no builds.
+    const failing = runtimeEnv(vi.fn(async () => { throw new Error("binding down"); }));
+    const failed = await fullApp(failing).request(`https://test.example.com/api/admin/intake-drafts/${draftId}/validate-and-generate`, {
+      method: "POST",
+      headers: { "content-type": "application/json", ...ACCESS_HEADERS },
+      body: JSON.stringify({ buildMode: "REFERENCE_BOUND", referenceUrl: "https://reference.example.com/heal" }),
+    }, failing);
+    expect(failed.status).toBe(502);
+
+    const healthy = runtimeEnv(vi.fn(async () => ({ id: "w-heal-recovery-instance" })));
+    const healed = await fullApp(healthy).request(`https://test.example.com/api/admin/intake-drafts/${draftId}/regenerate`, {
+      method: "POST",
+      headers: { "content-type": "application/json", ...ACCESS_HEADERS },
+      body: "{}",
+    }, healthy);
+    expect(healed.status).toBe(201);
+    const body = (await healed.json()) as { recovered: { healedWorkflowStart: boolean; siteGenerationId: string } };
+    expect(body.recovered.healedWorkflowStart).toBe(true);
+
+    // NO second generation was stacked on top of the healed one.
+    const generations = await healthy.DB.prepare(
+      "SELECT COUNT(*) AS n FROM site_generations g JOIN client_intake_drafts d ON COALESCE(d.recovered_site_generation_id, d.converted_site_generation_id) = g.id WHERE d.id = ?"
     )
       .bind(draftId)
       .first<{ n: number }>();

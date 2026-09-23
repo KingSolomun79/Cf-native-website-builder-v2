@@ -102,6 +102,7 @@ export interface IntakeDraftRow {
   admin_notes: string | null;
   converted_site_id: string | null;
   converted_site_generation_id: string | null;
+  recovered_site_generation_id: string | null;
   converted_onboarding_submission_id: string | null;
   converted_build_mode: string | null;
   created_at: string;
@@ -109,7 +110,13 @@ export interface IntakeDraftRow {
 }
 
 export class IntakeDraftError extends Error {
-  readonly code: "DRAFT_INVALID" | "DRAFT_NOT_FOUND" | "DRAFT_IMMUTABLE" | "DRAFT_ALREADY_CONVERTED" | "WORKFLOW_START_FAILED";
+  readonly code:
+    | "DRAFT_INVALID"
+    | "DRAFT_NOT_FOUND"
+    | "DRAFT_IMMUTABLE"
+    | "DRAFT_ALREADY_CONVERTED"
+    | "WORKFLOW_START_FAILED"
+    | "RECOVERY_CONFLICT";
 
   constructor(code: IntakeDraftError["code"], message: string) {
     super(message);
@@ -151,6 +158,7 @@ function rowToDraft(row: IntakeDraftRow): IntakeDraft {
     adminNotes: row.admin_notes,
     convertedSiteId: row.converted_site_id,
     convertedSiteGenerationId: row.converted_site_generation_id,
+    recoveredSiteGenerationId: row.recovered_site_generation_id,
     convertedOnboardingSubmissionId: row.converted_onboarding_submission_id,
     convertedBuildMode: row.converted_build_mode,
     createdAt: row.created_at,
@@ -169,6 +177,9 @@ export interface IntakeDraft {
   adminNotes: string | null;
   convertedSiteId: string | null;
   convertedSiteGenerationId: string | null;
+  /** The generation the draft's recovery currently governs (FDR decision
+   *  137) — null until the first recovery regeneration. */
+  recoveredSiteGenerationId: string | null;
   convertedOnboardingSubmissionId: string | null;
   convertedBuildMode: string | null;
   createdAt: string;
@@ -242,6 +253,9 @@ export interface IntakeDraftListItem {
   updatedAt: string;
   convertedSiteId: string | null;
   convertedSiteGenerationId: string | null;
+  /** recovered_site_generation_id ?? converted_site_generation_id — the
+   *  generation the draft currently governs (drives progress display). */
+  latestSiteGenerationId: string | null;
   convertedBuildMode: string | null;
 }
 
@@ -255,6 +269,7 @@ interface IntakeDraftListRow {
   created_at: string;
   updated_at: string;
   converted_site_id: string | null;
+  recovered_site_generation_id: string | null;
   converted_site_generation_id: string | null;
   converted_build_mode: string | null;
 }
@@ -266,7 +281,7 @@ export async function listIntakeDrafts(
   const limit = Math.min(Math.max(options.limit ?? 100, 1), 200);
   const rows = await env.DB.prepare(
     `SELECT id, status, business_name, submitter_name, submitter_email, rejection_reason, created_at, updated_at,
-            converted_site_id, converted_site_generation_id, converted_build_mode
+            converted_site_id, recovered_site_generation_id, converted_site_generation_id, converted_build_mode
      FROM client_intake_drafts ORDER BY updated_at DESC, created_at DESC LIMIT ?`
   )
     .bind(limit)
@@ -282,6 +297,7 @@ export async function listIntakeDrafts(
     updatedAt: row.updated_at,
     convertedSiteId: row.converted_site_id,
     convertedSiteGenerationId: row.converted_site_generation_id,
+    latestSiteGenerationId: row.recovered_site_generation_id ?? row.converted_site_generation_id,
     convertedBuildMode: row.converted_build_mode,
   }));
 }
@@ -581,6 +597,172 @@ export async function validateAndGenerateFromDraft(
       workflowInstanceId,
     },
     alreadyConverted: false,
+  };
+}
+
+export interface DraftRecoveryResult {
+  siteId: string;
+  siteGenerationId: string;
+  workflowInstanceId: string;
+  /** True when no new generation was created because the governed
+   *  generation never started — the workflow start was healed instead. */
+  healedWorkflowStart: boolean;
+}
+
+// Terminal outcomes that leave the Site without a live release candidate and
+// therefore open the recovery path (FDR decision 137).
+const RECOVERY_ALLOWED_BUILD_STATES = new Set(["FAILED", "DEGRADED", "HUMAN_REVIEW_REQUIRED"]);
+
+/**
+ * Recovery regeneration (FDR decision 137): starts a NEW Site Generation on
+ * the SAME stable Site from a FRESH immutable Onboarding Submission built
+ * from the draft's CURRENT payload — never a re-run of a terminal Build,
+ * never a mutation of history, never a mode change. Allowed only while the
+ * governed generation is the Site's latest AND its latest Build is terminally
+ * failed/gated (or it has no Build because its workflow start failed — that
+ * case heals the start instead of stacking generations). The recovery pointer
+ * (recovered_site_generation_id) is advanced with a compare-and-set against
+ * the previous pointer so concurrent operator clicks converge on one winner.
+ */
+export async function regenerateFromDraft(
+  env: Env,
+  draftId: string,
+  input: Omit<DraftConversionInput, "buildMode">,
+  startWorkflow: (siteGenerationId: string) => Promise<string>
+): Promise<{ recovered: DraftRecoveryResult }> {
+  let draft = await getIntakeDraft(env, draftId);
+  if (!draft) throw new IntakeDraftError("DRAFT_NOT_FOUND", `Intake Draft ${draftId} does not exist`);
+  if (!draft.convertedSiteGenerationId || !draft.convertedSiteId || !draft.convertedBuildMode) {
+    throw new IntakeDraftError("DRAFT_INVALID", "Recovery regeneration requires a converted draft — use Validate & Generate first");
+  }
+
+  const governedGenerationId = draft.recoveredSiteGenerationId ?? draft.convertedSiteGenerationId;
+  const latest = await env.DB.prepare(
+    "SELECT id FROM site_generations WHERE site_id = ? ORDER BY sequence_number DESC LIMIT 1"
+  )
+    .bind(draft.convertedSiteId)
+    .first<{ id: string }>();
+  if (latest?.id !== governedGenerationId) {
+    throw new IntakeDraftError(
+      "RECOVERY_CONFLICT",
+      "Recovery regeneration only applies to the Site's latest generation — the Site has moved on through another path"
+    );
+  }
+
+  const buildRows = await env.DB.prepare(
+    "SELECT state FROM builds WHERE site_generation_id = ? ORDER BY created_at DESC, id DESC LIMIT 1"
+  )
+    .bind(governedGenerationId)
+    .first<{ state: string }>();
+
+  if (!buildRows) {
+    // Governed generation never ran (workflow start failed pre-step-1.0):
+    // heal the start instead of stacking another generation on top of it.
+    const workflowInstanceId = await startWorkflow(governedGenerationId);
+    return {
+      recovered: {
+        siteId: draft.convertedSiteId,
+        siteGenerationId: governedGenerationId,
+        workflowInstanceId,
+        healedWorkflowStart: true,
+      },
+    };
+  }
+
+  if (!RECOVERY_ALLOWED_BUILD_STATES.has(buildRows.state)) {
+    throw new IntakeDraftError(
+      "RECOVERY_CONFLICT",
+      `The Site's latest build is '${buildRows.state}' — recovery regeneration opens only after FAILED, DEGRADED or HUMAN_REVIEW_REQUIRED`
+    );
+  }
+
+  // Same-design-origin inheritance: the recovery preserves the governed
+  // generation's design origin. A conversion-time-only referenceUrl never
+  // persists on the draft, so when the draft's mutable payload carries no
+  // Reference input the governed generation's FROZEN submission supplies it
+  // (likewise an admin-authored creativeDirection for ORIGINAL_DESIGN).
+  const previous = await env.DB.prepare(
+    `SELECT s.payload_json FROM onboarding_submissions s
+     JOIN site_generations g ON g.onboarding_submission_id = s.id WHERE g.id = ?`
+  )
+    .bind(governedGenerationId)
+    .first<{ payload_json: string }>();
+  const previousPayload = previous
+    ? (JSON.parse(previous.payload_json) as {
+        reference?: { screenshotR2Key?: string; url?: string };
+        creativeDirection?: Record<string, unknown>;
+      })
+    : {};
+
+  let effectiveInput: Omit<DraftConversionInput, "buildMode"> = { ...input };
+  if (draft.convertedBuildMode === "REFERENCE_BOUND") {
+    const hasReference = draft.payload.referenceScreenshotR2Key || draft.payload.referenceUrl || input.referenceUrl;
+    if (!hasReference) {
+      const inherited = previousPayload.reference ?? {};
+      if (inherited.screenshotR2Key || inherited.url) {
+        const nextPayload: IntakeDraftPayload = JSON.parse(JSON.stringify(draft.payload));
+        if (inherited.screenshotR2Key) nextPayload.referenceScreenshotR2Key = inherited.screenshotR2Key;
+        if (inherited.url && !nextPayload.referenceUrl) nextPayload.referenceUrl = inherited.url;
+        await env.DB.prepare("UPDATE client_intake_drafts SET payload_json = ?, updated_at = ? WHERE id = ?")
+          .bind(JSON.stringify(nextPayload), nowIso(), draftId)
+          .run();
+        const refreshed = await getIntakeDraft(env, draftId);
+        if (refreshed) draft = refreshed;
+      }
+    }
+  } else if (!effectiveInput.creativeDirection && !creativeDirectionFromPreferences(draft.payload.designPreferences)) {
+    const inherited = previousPayload.creativeDirection;
+    if (inherited && Value.Check(CreativeDirectionSchema, inherited)) {
+      effectiveInput = { ...effectiveInput, creativeDirection: inherited };
+    }
+  }
+
+  const buildMode = draft.convertedBuildMode as "REFERENCE_BOUND" | "ORIGINAL_DESIGN";
+  const built = buildCanonicalSubmissionPayload(draft, { buildMode, ...effectiveInput });
+  if (!built.valid) {
+    throw new IntakeDraftError(
+      "DRAFT_INVALID",
+      `Recovery regeneration rejected: ${built.issues.map((i) => `${i.path} ${i.message}`).join("; ")}`
+    );
+  }
+
+  const { startSiteGeneration } = await import("./lifecycle");
+  const started = await startSiteGeneration(env, { siteId: draft.convertedSiteId, payload: built.payload });
+
+  // Compare-and-set the recovery pointer: a concurrent operator click loses
+  // cleanly and reports the winner's generation instead of racing workflows.
+  const claim = await env.DB.prepare(
+    `UPDATE client_intake_drafts
+     SET recovered_site_generation_id = ?, updated_at = ?
+     WHERE id = ? AND COALESCE(recovered_site_generation_id, converted_site_generation_id) = ?`
+  )
+    .bind(started.siteGenerationId, nowIso(), draftId, governedGenerationId)
+    .run();
+  if ((claim.meta.changes ?? 0) === 0) {
+    const winner = await getIntakeDraft(env, draftId);
+    throw new IntakeDraftError(
+      "RECOVERY_CONFLICT",
+      `Recovery already advanced this draft to generation ${winner?.recoveredSiteGenerationId ?? "unknown"} — reload and review`
+    );
+  }
+
+  let workflowInstanceId: string;
+  try {
+    workflowInstanceId = await startWorkflow(started.siteGenerationId);
+  } catch (error) {
+    throw new IntakeDraftError(
+      "WORKFLOW_START_FAILED",
+      `Recovery generation ${started.siteGenerationId} was created but its workflow could not be started: ${(error as Error).message}. Retry — it heals the workflow start without creating a new generation.`
+    );
+  }
+
+  return {
+    recovered: {
+      siteId: started.siteId,
+      siteGenerationId: started.siteGenerationId,
+      workflowInstanceId,
+      healedWorkflowStart: false,
+    },
   };
 }
 
