@@ -20,6 +20,23 @@ import { canonicalStructuredFacts } from "./helpers/canonical-facts";
 import { createAccessHarness, type AccessHarness } from "./helpers/access-test";
 
 function runtimeEnv(createWorkflow: ReturnType<typeof vi.fn> = vi.fn()): Env {
+  // Registry-backed workflow double matching the REAL binding contract the
+  // idempotent starter relies on: get(id) throws when the instance does not
+  // exist, create({ id }) registers it. A retry with the same deterministic
+  // id therefore converges on the existing instance (Step 5 crash-safety).
+  const instances = new Map<string, { id: string }>();
+  const binding = {
+    create: async (options: { id?: string; params: { siteGenerationId: string } }) => {
+      const instance = await (createWorkflow as (options: unknown) => Promise<{ id: string }>)(options);
+      instances.set(options?.id ?? instance.id, instance);
+      return instance;
+    },
+    get: async (id: string) => {
+      const instance = instances.get(id);
+      if (!instance) throw new Error(`workflow instance ${id} not found`);
+      return instance;
+    },
+  };
   return {
     ...(providedEnv as unknown as Env),
     ...access.envVars,
@@ -29,7 +46,7 @@ function runtimeEnv(createWorkflow: ReturnType<typeof vi.fn> = vi.fn()): Env {
     TURNSTILE_SECRET_KEY: "test-turnstile-secret",
     CLIENT_INTAKE_TURNSTILE_SECRET_KEY: "test-turnstile-secret",
     SITE_BUCKET: (providedEnv as unknown as Env).SITE_BUCKET,
-    WEBSITE_BUILD_WORKFLOW: { create: createWorkflow } as unknown as Workflow,
+    WEBSITE_BUILD_WORKFLOW: binding as unknown as Workflow,
   };
 }
 
@@ -154,7 +171,11 @@ describe("admin draft review, edit and conversion", () => {
       workflowInstanceId: string;
     };
     expect(body.siteGenerationId).toBeTruthy();
-    expect(createWorkflow).toHaveBeenCalledWith({ params: { siteGenerationId: body.siteGenerationId } });
+    // Exactly-once start (Step 5): the instance id is deterministic per generation.
+    expect(createWorkflow).toHaveBeenCalledWith({
+      id: `${body.siteGenerationId}-initial`,
+      params: { siteGenerationId: body.siteGenerationId },
+    });
 
     // Canonical submission: mode + facts + creativeDirection; NO reference.
     const submission = await env.DB.prepare("SELECT payload_json, fact_snapshot_json FROM onboarding_submissions WHERE id = ?")
@@ -318,5 +339,53 @@ describe("admin draft review, edit and conversion", () => {
       body: JSON.stringify({ buildMode: "REFERENCE_BOUND" }),
     }, env);
     expect(asReference.status).toBe(400);
+  });
+
+  it("a workflow start failure marks the draft but a retry heals without a second generation", async () => {
+    // First attempt: workflow creation throws AFTER the conversion markers
+    // commit (Step 5 ordering) — the draft is marked, the generation exists,
+    // and the API surfaces a retryable WORKFLOW_START_FAILED (502).
+    const failing = runtimeEnv(vi.fn(async () => { throw new Error("binding unavailable"); }));
+    const draftId = await createDraftViaPublicForm(failing, "Healable Start Studio");
+    const app = fullApp(failing);
+    const generateBody = { buildMode: "ORIGINAL_DESIGN", creativeDirection: { direction: "Calm procedural clarity" } };
+
+    const failed = await app.request(`https://test.example.com/api/admin/intake-drafts/${draftId}/validate-and-generate`, {
+      method: "POST",
+      headers: { "content-type": "application/json", ...ACCESS_HEADERS },
+      body: JSON.stringify(generateBody),
+    }, failing);
+    expect(failed.status).toBe(502);
+    expect(((await failed.json()) as { error: { code: string } }).error.code).toBe("WORKFLOW_START_FAILED");
+
+    const draftRow = await failing.DB.prepare(
+      "SELECT status, converted_site_generation_id FROM client_intake_drafts WHERE id = ?"
+    )
+      .bind(draftId)
+      .first<{ status: string; converted_site_generation_id: string }>();
+    expect(draftRow?.status).toBe("GENERATION_STARTED");
+    expect(draftRow?.converted_site_generation_id).toBeTruthy();
+
+    // Retry with a healthy binding: the SAME generation is used — no second
+    // Site Generation, no second Business — and the workflow starts.
+    const healthy = runtimeEnv(vi.fn(async () => ({ id: "w-healed-instance" })));
+    const retry = await fullApp(healthy).request(`https://test.example.com/api/admin/intake-drafts/${draftId}/validate-and-generate`, {
+      method: "POST",
+      headers: { "content-type": "application/json", ...ACCESS_HEADERS },
+      body: JSON.stringify(generateBody),
+    }, healthy);
+    expect(retry.status).toBe(200);
+    const retryBody = (await retry.json()) as { alreadyConverted: boolean; workflowInstanceId: string; siteGenerationId: string };
+    expect(retryBody.alreadyConverted).toBe(true);
+    // The healed start reuses the DETERMINISTIC instance id for the generation.
+    expect(retryBody.workflowInstanceId).toBe(`${draftRow?.converted_site_generation_id}-initial`);
+    expect(retryBody.siteGenerationId).toBe(draftRow?.converted_site_generation_id);
+
+    const generations = await healthy.DB.prepare(
+      "SELECT COUNT(*) AS n FROM site_generations g JOIN client_intake_drafts d ON d.converted_site_generation_id = g.id WHERE d.id = ?"
+    )
+      .bind(draftId)
+      .first<{ n: number }>();
+    expect(generations?.n).toBe(1);
   });
 });

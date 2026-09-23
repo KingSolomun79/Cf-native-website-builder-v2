@@ -164,8 +164,15 @@ async function IntakesPage(c: Context<{ Bindings: Env }>): Promise<Response> {
 
 // ── Intake editor ────────────────────────────────────────────────────────────
 
-const EDITOR_JS = (apiPath: string) => `
+const EDITOR_JS = (apiPath: string, retryBuildMode: string | null) => `
 const API = '${apiPath}';
+async function retryWorkflow() {
+  const response = await fetch(API + '/validate-and-generate', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ buildMode: '${retryBuildMode ?? ""}' }) });
+  const result = await response.json();
+  if (!response.ok && response.status !== 200) { flash('Retry failed: ' + (result.error && (result.error.message || result.error) || response.status), true); return; }
+  flash('Workflow started for the existing generation.');
+  setTimeout(function () { location.reload(); }, 600);
+}
 function serviceRow(name, description) {
   const div = document.createElement('div');
   div.className = 'row service-row';
@@ -321,6 +328,17 @@ async function IntakeEditorPage(c: Context<{ Bindings: Env }>, draft: IntakeDraf
   if (draft.status === "REJECTED" && !validateIntakeDraftPayload(draft.payload).valid) {
     return RejectedIntakeDiagnosticPage(c, draft);
   }
+  // Crash-safety affordance: a converted draft whose generation has NO build
+  // means the workflow start failed or died pre-step-1.0 — offer the heal.
+  let workflowNeverStarted = false;
+  if (draft.convertedSiteGenerationId) {
+    const buildRow = await c.env.DB.prepare(
+      "SELECT 1 AS live FROM builds WHERE site_generation_id = ? LIMIT 1"
+    )
+      .bind(draft.convertedSiteGenerationId)
+      .first<{ live: number }>();
+    workflowNeverStarted = !buildRow;
+  }
   const business = draft.payload.business;
   const prefs = draft.payload.designPreferences ?? {};
   const converted = Boolean(draft.convertedSiteGenerationId);
@@ -351,6 +369,16 @@ async function IntakeEditorPage(c: Context<{ Bindings: Env }>, draft: IntakeDraf
           <a class="badge ready" href={`/admin/sites/${draft.convertedSiteId}`}>
             Open site review
           </a>
+          {workflowNeverStarted ? (
+            <>
+              <p style={{ margin: "0.75rem 0 0" }}>
+                The workflow for this generation was never started (start failed or crashed before the first Build).
+              </p>
+              <button type="button" class="secondary" onclick="retryWorkflow()">
+                Retry workflow start
+              </button>
+            </>
+          ) : null}
         </div>
       ) : (
         <>
@@ -477,7 +505,7 @@ async function IntakeEditorPage(c: Context<{ Bindings: Env }>, draft: IntakeDraf
           </div>
         </>
       )}
-      <script dangerouslySetInnerHTML={{ __html: EDITOR_JS(`/api/admin/intake-drafts/${draft.id}`) }} />
+      <script dangerouslySetInnerHTML={{ __html: EDITOR_JS(`/api/admin/intake-drafts/${draft.id}`, draft.convertedBuildMode) }} />
     </Layout>
   );
 }

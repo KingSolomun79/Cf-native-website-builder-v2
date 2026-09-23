@@ -50,6 +50,19 @@ The public client-intake endpoint gained a bounded REJECTED ledger: parsed submi
 
 ---
 
+# Addendum — Step 5: crash-safe Validate & Generate ordering (same engagement)
+
+**Scope:** `validateAndGenerateFromDraft` reorder (conversion markers commit before workflow creation), `startInitialBuildWorkflowIdempotent` (deterministic instance id `{siteGenerationId}-initial` with get→create→get-converge), `WORKFLOW_START_FAILED` → 502 mapping, "Retry workflow start" affordance on the converted-editor card.
+
+- **Exactly-once semantics (pass):** the guarded `UPDATE … WHERE converted_site_generation_id IS NULL` + `meta.changes` check keeps conversion single-shot under concurrency; the deterministic instance id makes workflow starts idempotent at the platform level (one generation ⇒ at most one initial workflow instance, across crashes and concurrent retries).
+- **Instance id (pass):** derived from a server-generated UUID — unguessable, workflow-scoped; no enumeration or collision risk. Revision instances unchanged.
+- **Error surface (pass):** 502 bodies expose only the binding-level failure message (admin-gated); no secrets, no client data.
+- **Retry affordance (pass):** the button posts the draft's already-committed `convertedBuildMode`; a forged mode is refused server-side (`DRAFT_ALREADY_CONVERTED`, 409). Access-gated.
+
+**Verdict: SECURITY OK.**
+
+---
+
 # Addendum — Step 3: terminal reasons on the site review page (same engagement)
 
 **Scope:** `terminalReason` on `AdminBuildSummary` (extracted from the build's canonical terminal `build_workflow_events` row) + a "Why:" line on `SiteReviewPage`.

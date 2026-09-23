@@ -18,6 +18,7 @@ import {
 } from "../domain/admin-site-notes";
 import { getAdminSiteReview } from "../domain/admin-review";
 import { parseCreativeDirection } from "../domain/creative-direction";
+import { startInitialBuildWorkflowIdempotent } from "../domain/workflow-start";
 
 // Operator admin APIs (operator GO 2026-09-12; fail-closed Access
 // verification per the 2026-09-12 integration blocker correction). Every
@@ -32,7 +33,14 @@ import { parseCreativeDirection } from "../domain/creative-direction";
 // in this ticket.
 
 function draftErrorResponse(error: IntakeDraftError): Response {
-  const status = error.code === "DRAFT_NOT_FOUND" ? 404 : error.code === "DRAFT_IMMUTABLE" || error.code === "DRAFT_ALREADY_CONVERTED" ? 409 : 400;
+  const status =
+    error.code === "DRAFT_NOT_FOUND"
+      ? 404
+      : error.code === "DRAFT_IMMUTABLE" || error.code === "DRAFT_ALREADY_CONVERTED"
+        ? 409
+        : error.code === "WORKFLOW_START_FAILED"
+          ? 502
+          : 400;
   return Response.json({ error: { code: error.code, message: error.message } }, { status });
 }
 
@@ -145,8 +153,9 @@ export async function validateAndGenerateDraft(c: Context<{ Bindings: Env }>): P
 
   try {
     const { converted, alreadyConverted } = await validateAndGenerateFromDraft(c.env, c.req.param("draftId") as string, conversion, async (siteGenerationId) => {
-      const instance = await c.env.WEBSITE_BUILD_WORKFLOW.create({ params: { siteGenerationId } });
-      return instance.id;
+      // Exactly-once initial workflow start: a deterministic instance id
+      // converges retries and crash-heals without double-starting.
+      return await startInitialBuildWorkflowIdempotent(c.env.WEBSITE_BUILD_WORKFLOW, siteGenerationId);
     });
     return c.json(
       { ...converted, alreadyConverted },

@@ -109,7 +109,7 @@ export interface IntakeDraftRow {
 }
 
 export class IntakeDraftError extends Error {
-  readonly code: "DRAFT_INVALID" | "DRAFT_NOT_FOUND" | "DRAFT_IMMUTABLE" | "DRAFT_ALREADY_CONVERTED";
+  readonly code: "DRAFT_INVALID" | "DRAFT_NOT_FOUND" | "DRAFT_IMMUTABLE" | "DRAFT_ALREADY_CONVERTED" | "WORKFLOW_START_FAILED";
 
   constructor(code: IntakeDraftError["code"], message: string) {
     super(message);
@@ -464,10 +464,18 @@ export interface DraftConversionResult {
 /**
  * Validate & Generate — the ONLY initial generation start action for a draft.
  * Idempotent: once a draft carries converted_site_generation_id, repeated
- * calls return the existing conversion and never create a second Site
- * Generation. The canonical payload goes through the EXISTING canonical
- * domain validation and lifecycle services (startSiteGeneration + the
- * workflow binding) — no internal HTTP hop, no new generation semantics.
+ * calls never create a second Site Generation. The canonical payload goes
+ * through the EXISTING canonical domain validation and lifecycle services
+ * (startSiteGeneration + the workflow binding) — no internal HTTP hop, no new
+ * generation semantics.
+ *
+ * Crash-safety (incident remediation 2026-09-23): the draft's conversion
+ * markers commit BEFORE the workflow is created. A workflow-start failure
+ * therefore leaves a marked draft over an unrun generation (retry heals it —
+ * see below) instead of an unmarked draft that a retry would duplicate into
+ * a second Site Generation. A retry over a converted draft whose generation
+ * has NO Build (re)starts that generation's workflow exactly once; a
+ * generation with a Build is left untouched.
  */
 export async function validateAndGenerateFromDraft(
   env: Env,
@@ -487,12 +495,30 @@ export async function validateAndGenerateFromDraft(
         `Intake Draft already generated as '${draft.convertedBuildMode}' — changing Build Mode requires a new Site Generation`
       );
     }
+    // Crash-healing retry: no Build means the generation never ran (its
+    // workflow start failed or died before step 1.0) — restart it.
+    const build = await env.DB.prepare(
+      "SELECT 1 AS live FROM builds WHERE site_generation_id = ? LIMIT 1"
+    )
+      .bind(draft.convertedSiteGenerationId)
+      .first<{ live: number }>();
+    let workflowInstanceId = "";
+    if (!build) {
+      try {
+        workflowInstanceId = await startWorkflow(draft.convertedSiteGenerationId);
+      } catch (error) {
+        throw new IntakeDraftError(
+          "WORKFLOW_START_FAILED",
+          `Workflow start for Site Generation ${draft.convertedSiteGenerationId} failed: ${(error as Error).message}`
+        );
+      }
+    }
     return { converted: {
       draft,
       siteId: draft.convertedSiteId ?? "",
       onboardingSubmissionId: draft.convertedOnboardingSubmissionId ?? "",
       siteGenerationId: draft.convertedSiteGenerationId,
-      workflowInstanceId: "",
+      workflowInstanceId,
     }, alreadyConverted: true };
   }
 
@@ -507,18 +533,43 @@ export async function validateAndGenerateFromDraft(
   // Existing canonical lifecycle services — the draft layer never reimplements them.
   const { startSiteGeneration } = await import("./lifecycle");
   const started = await startSiteGeneration(env, { siteId: null, payload: built.payload });
-  const workflowInstanceId = await startWorkflow(started.siteGenerationId);
 
-  const now = nowIso();
-  await env.DB.prepare(
+  // Markers BEFORE workflow creation: exactly-once under concurrency via the
+  // guarded UPDATE, and a workflow.create crash can no longer duplicate the
+  // generation on retry.
+  const update = await env.DB.prepare(
     `UPDATE client_intake_drafts
      SET status = 'GENERATION_STARTED',
          converted_site_id = ?, converted_site_generation_id = ?,
          converted_onboarding_submission_id = ?, converted_build_mode = ?, updated_at = ?
      WHERE id = ? AND converted_site_generation_id IS NULL`
   )
-    .bind(started.siteId, started.siteGenerationId, started.onboardingSubmissionId, input.buildMode, now, draftId)
+    .bind(started.siteId, started.siteGenerationId, started.onboardingSubmissionId, input.buildMode, nowIso(), draftId)
     .run();
+  if ((update.meta.changes ?? 0) === 0) {
+    // Lost a concurrent conversion race — report the existing conversion.
+    const existing = await getIntakeDraft(env, draftId);
+    if (!existing?.convertedSiteGenerationId) {
+      throw new IntakeDraftError("DRAFT_INVALID", "Intake Draft conversion lost an unexpected race — retry");
+    }
+    return { converted: {
+      draft: existing,
+      siteId: existing.convertedSiteId ?? "",
+      onboardingSubmissionId: existing.convertedOnboardingSubmissionId ?? "",
+      siteGenerationId: existing.convertedSiteGenerationId,
+      workflowInstanceId: "",
+    }, alreadyConverted: true };
+  }
+
+  let workflowInstanceId: string;
+  try {
+    workflowInstanceId = await startWorkflow(started.siteGenerationId);
+  } catch (error) {
+    throw new IntakeDraftError(
+      "WORKFLOW_START_FAILED",
+      `Site Generation ${started.siteGenerationId} was created but its workflow could not be started: ${(error as Error).message}. Retry Validate & Generate — it heals the workflow start without creating a new generation.`
+    );
+  }
 
   const updated = await getIntakeDraft(env, draftId);
   return {
