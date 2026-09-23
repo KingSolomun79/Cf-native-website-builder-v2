@@ -8,7 +8,7 @@
 import { Hono, type Context } from "hono";
 import type { Env } from "../env.d";
 import { requireCloudflareAccess } from "../domain/admin-access";
-import { getIntakeDraft, listIntakeDrafts, type IntakeDraft } from "../domain/intake-draft";
+import { getIntakeDraft, listIntakeDrafts, validateIntakeDraftPayload, type IntakeDraft } from "../domain/intake-draft";
 import { getAdminSiteReview, type AdminSiteReview } from "../domain/admin-review";
 
 type Bindings = Env;
@@ -86,6 +86,8 @@ function displayStatus(status: string, latestBuildState: string | null, publishe
       if (latestBuildState === "HUMAN_REVIEW_REQUIRED") return { label: "Human Review", css: "review" };
       if (latestBuildState === "FAILED" || latestBuildState === "DEGRADED") return { label: "Failed", css: "failed" };
       return { label: "Generation Started", css: "" };
+    case "REJECTED":
+      return { label: "Rejected", css: "failed" };
     default:
       return { label: status, css: "" };
   }
@@ -129,6 +131,9 @@ async function IntakesPage(c: Context<{ Bindings: Env }>): Promise<Response> {
         <td>{draft.createdAt.slice(0, 16).replace("T", " ")}</td>
         <td>
           <span class={`badge ${display.css}`}>{display.label}</span>
+          {draft.status === "REJECTED" && draft.rejectionReason ? (
+            <div class="muted">{draft.rejectionReason}</div>
+          ) : null}
         </td>
         <td>{draft.convertedBuildMode ?? <span class="muted">—</span>}</td>
       </tr>
@@ -308,6 +313,12 @@ function textField(id: string, label: string, value: string, type = "text") {
 }
 
 async function IntakeEditorPage(c: Context<{ Bindings: Env }>, draft: IntakeDraft): Promise<Response> {
+  // A REJECTED attempt whose stored body is not a valid draft payload cannot
+  // drive the structured editor — render the diagnostic view instead so the
+  // operator can still read the raw submission and its rejection reason.
+  if (draft.status === "REJECTED" && !validateIntakeDraftPayload(draft.payload).valid) {
+    return RejectedIntakeDiagnosticPage(c, draft);
+  }
   const business = draft.payload.business;
   const prefs = draft.payload.designPreferences ?? {};
   const converted = Boolean(draft.convertedSiteGenerationId);
@@ -341,6 +352,23 @@ async function IntakeEditorPage(c: Context<{ Bindings: Env }>, draft: IntakeDraf
         </div>
       ) : (
         <>
+          {draft.status === "REJECTED" ? (
+            <div class="card">
+              <h2>Rejected submission — rescue path</h2>
+              <p>
+                Rejection reason: <strong>{draft.rejectionReason ?? "unknown"}</strong>
+              </p>
+              <p class="muted">
+                This public submission was rejected before acceptance ({draft.rejectionReason === "TURNSTILE_FAILED"
+                  ? "Turnstile verification failed"
+                  : draft.rejectionReason === "RATE_LIMITED"
+                    ? "the source had exhausted its submission budget for the hour"
+                    : "schema validation failed"}
+                ). The client's data below is intact. Review it, correct anything, then Save (mark In Review) and Validate &amp;
+                Generate as usual — the rejection no longer blocks anything.
+              </p>
+            </div>
+          ) : null}
           <div class="card">
             <h2>{draft.businessName}</h2>
             <p class="muted">
@@ -448,6 +476,43 @@ async function IntakeEditorPage(c: Context<{ Bindings: Env }>, draft: IntakeDraf
         </>
       )}
       <script dangerouslySetInnerHTML={{ __html: EDITOR_JS(`/api/admin/intake-drafts/${draft.id}`) }} />
+    </Layout>
+  );
+}
+
+/**
+ * Read-only diagnostic view for a REJECTED intake attempt whose stored body is
+ * not a valid draft payload (so the structured editor cannot render it). The
+ * raw submission and the rejection reason stay operator-visible — the incident
+ * this page exists for is a real client's brief being invisibly lost.
+ */
+async function RejectedIntakeDiagnosticPage(c: Context<{ Bindings: Env }>, draft: IntakeDraft): Promise<Response> {
+  const validation = validateIntakeDraftPayload(draft.payload);
+  const issues = validation.valid ? [] : validation.issues;
+  return c.html(
+    <Layout active="intakes">
+      <div class="card">
+        <h2>{draft.businessName} — rejected submission (malformed body)</h2>
+        <p>
+          Rejection reason: <strong>{draft.rejectionReason ?? "unknown"}</strong>
+        </p>
+        <p class="muted">
+          Submitted {draft.createdAt.slice(0, 16).replace("T", " ")} · Submitter {draft.submitterName} &lt;
+          {draft.submitterEmail}&gt; (private intake contact). The stored body did not pass draft schema validation, so the
+          structured editor is unavailable — the raw submission is below for manual recovery. Rejected attempts can never
+          start a Site Generation.
+        </p>
+        {issues.length > 0 ? (
+          <ul>
+            {issues.map((issue) => (
+              <li class="muted">
+                {issue.path} — {issue.message}
+              </li>
+            ))}
+          </ul>
+        ) : null}
+        <pre>{JSON.stringify(draft.payload, null, 2)}</pre>
+      </div>
     </Layout>
   );
 }

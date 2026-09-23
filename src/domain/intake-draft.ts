@@ -28,8 +28,15 @@ import {
 import { CreativeDirectionSchema, type CreativeDirection } from "./creative-direction";
 import type { ReferenceInput } from "./lifecycle-schema";
 
-export const DRAFT_STATUSES = ["SUBMITTED", "IN_REVIEW", "GENERATION_STARTED"] as const;
+export const DRAFT_STATUSES = ["SUBMITTED", "IN_REVIEW", "GENERATION_STARTED", "REJECTED"] as const;
 export type DraftStatus = (typeof DRAFT_STATUSES)[number];
+
+// Why a public submission was rejected before becoming a real draft (incident
+// remediation 2026-09-23: rejected attempts previously left zero trace, so a
+// real client's brief could be lost invisibly). RATE_LIMITED is recorded once
+// per source+window at the cap boundary, never for every blocked attempt.
+export const REJECTION_REASONS = ["VALIDATION_FAILED", "TURNSTILE_FAILED", "RATE_LIMITED"] as const;
+export type RejectionReason = (typeof REJECTION_REASONS)[number];
 
 // The public form's contact/identity block. Private by design: it labels the
 // DRAFT (and the admin notification), never the website.
@@ -91,6 +98,7 @@ export interface IntakeDraftRow {
   business_name: string;
   submitter_name: string;
   submitter_email: string;
+  rejection_reason: string | null;
   admin_notes: string | null;
   converted_site_id: string | null;
   converted_site_generation_id: string | null;
@@ -139,6 +147,7 @@ function rowToDraft(row: IntakeDraftRow): IntakeDraft {
     businessName: row.business_name,
     submitterName: row.submitter_name,
     submitterEmail: row.submitter_email,
+    rejectionReason: (row.rejection_reason as RejectionReason | null) ?? null,
     adminNotes: row.admin_notes,
     convertedSiteId: row.converted_site_id,
     convertedSiteGenerationId: row.converted_site_generation_id,
@@ -156,6 +165,7 @@ export interface IntakeDraft {
   businessName: string;
   submitterName: string;
   submitterEmail: string;
+  rejectionReason: RejectionReason | null;
   adminNotes: string | null;
   convertedSiteId: string | null;
   convertedSiteGenerationId: string | null;
@@ -188,6 +198,32 @@ export async function createIntakeDraft(
   return await getIntakeDraft(env, id) as IntakeDraft;
 }
 
+/**
+ * Durable record of a PUBLIC submission rejected BEFORE draft acceptance
+ * (rate limit / schema validation / Turnstile). The raw body is stored minus
+ * the Turnstile token; labels are best-effort extractions because a rejected
+ * body may be arbitrarily malformed. A rejected attempt never starts a Site
+ * Generation and is never emailed as a new brief; it exists so the operator
+ * can see and rescue the client's data. Best-effort by design: a failure here
+ * is logged by the caller and the original 4xx verdict still returns.
+ */
+export async function createRejectedIntakeDraft(
+  env: Env,
+  rawPayload: unknown,
+  reason: RejectionReason,
+  labels: { businessName: string; submitterName: string; submitterEmail: string }
+): Promise<string> {
+  const id = generateId();
+  const now = nowIso();
+  await env.DB.prepare(
+    `INSERT INTO client_intake_drafts (id, status, payload_json, business_name, submitter_name, submitter_email, rejection_reason, created_at, updated_at)
+     VALUES (?, 'REJECTED', ?, ?, ?, ?, ?, ?, ?)`
+  )
+    .bind(id, JSON.stringify(rawPayload ?? null), labels.businessName, labels.submitterName, labels.submitterEmail, reason, now, now)
+    .run();
+  return id;
+}
+
 export async function getIntakeDraft(env: Env, id: string): Promise<IntakeDraft | null> {
   const row = await env.DB.prepare("SELECT * FROM client_intake_drafts WHERE id = ?")
     .bind(id)
@@ -201,6 +237,7 @@ export interface IntakeDraftListItem {
   businessName: string;
   submitterName: string;
   submitterEmail: string;
+  rejectionReason: RejectionReason | null;
   createdAt: string;
   updatedAt: string;
   convertedSiteId: string | null;
@@ -214,6 +251,7 @@ interface IntakeDraftListRow {
   business_name: string;
   submitter_name: string;
   submitter_email: string;
+  rejection_reason: string | null;
   created_at: string;
   updated_at: string;
   converted_site_id: string | null;
@@ -227,7 +265,7 @@ export async function listIntakeDrafts(
 ): Promise<IntakeDraftListItem[]> {
   const limit = Math.min(Math.max(options.limit ?? 100, 1), 200);
   const rows = await env.DB.prepare(
-    `SELECT id, status, business_name, submitter_name, submitter_email, created_at, updated_at,
+    `SELECT id, status, business_name, submitter_name, submitter_email, rejection_reason, created_at, updated_at,
             converted_site_id, converted_site_generation_id, converted_build_mode
      FROM client_intake_drafts ORDER BY updated_at DESC, created_at DESC LIMIT ?`
   )
@@ -239,6 +277,7 @@ export async function listIntakeDrafts(
     businessName: row.business_name,
     submitterName: row.submitter_name,
     submitterEmail: row.submitter_email,
+    rejectionReason: (row.rejection_reason as RejectionReason | null) ?? null,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     convertedSiteId: row.converted_site_id,
@@ -288,7 +327,10 @@ export async function editIntakeDraft(
     );
   }
 
-  const nextStatus: DraftStatus = edit.markInReview && draft.status === "SUBMITTED" ? "IN_REVIEW" : draft.status;
+  const nextStatus: DraftStatus =
+    edit.markInReview && (draft.status === "SUBMITTED" || draft.status === "REJECTED")
+      ? "IN_REVIEW"
+      : draft.status;
   const adminNotes =
     edit.adminNotes !== undefined ? (edit.adminNotes?.trim() ? edit.adminNotes.trim() : null) : draft.adminNotes;
 

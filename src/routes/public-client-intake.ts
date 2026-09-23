@@ -1,19 +1,26 @@
 import { Context } from "hono";
 import type { Env } from "../env.d";
-import { createIntakeDraft, validateIntakeDraftPayload, type IntakeDraftPayload } from "../domain/intake-draft";
+import {
+  createIntakeDraft,
+  createRejectedIntakeDraft,
+  validateIntakeDraftPayload,
+  type IntakeDraftPayload,
+  type RejectionReason,
+} from "../domain/intake-draft";
 import {
   attemptAdminNotificationSend,
   composeNewIntakeEmail,
   enqueueAdminNotification,
 } from "../domain/admin-notifications";
 
-// PUBLIC client intake (operator GO 2026-09-12).
+// PUBLIC client intake (operator GO 2026-09-12; rejection ledger per the
+// operator-approved incident remediation, 2026-09-23).
 //
 // The wazibiz.ke website form posts a DRAFT here. This endpoint deliberately
 // does NOT use WEBHOOK_SECRET (no HMAC capability ever reaches browser code)
 // and it can NEVER start a Site Generation: it only persists a mutable Intake
 // Draft and notifies the admin. Canonical generation starts exclusively
-// through the admin Validate & Generate action on the operator surface.
+// through the operator admin surface.
 //
 // Protections (all fail closed):
 //   - strict schema validation (draft shape, no unknown fields)
@@ -22,12 +29,21 @@ import {
 //     missing secret rejects. Never falls back to TURNSTILE_SECRET_KEY,
 //     which belongs exclusively to the generated-sites Form Service)
 //   - fixed-window rate limit keyed by a HASHED remote address
-//     (SHA-256 with the platform secret as salt — no raw IP persisted)
+//     (SHA-256 with the platform secret as salt — no raw IP persisted).
+//     Counted BEFORE validation/Turnstile (attempts, not acceptances) so the
+//     rejection ledger below is write-bounded per source.
 //   - strict Origin allowlist (wazibiz.ke only)
 //   - body size limit
 //   - CORS: the preflight and the response headers exist ONLY for the
 //     allowlisted origin (integration GO 2026-09-13) — the browser mapper
 //     posts JSON cross-origin and must be able to read the JSON verdict.
+//
+// Rejection ledger: a parsed submission rejected by the rate limiter,
+// validation or Turnstile persists a REJECTED client_intake_drafts row (raw
+// payload minus the Turnstile token) so a real client's brief is never lost
+// invisibly again. Requests rejected BEFORE the rate-limit gate (foreign
+// origin, oversize, unparseable JSON) stay traceless — hostile traffic must
+// never earn durable writes.
 
 const ALLOWED_ORIGINS = new Set(["https://wazibiz.ke"]);
 const MAX_BODY_BYTES = 64 * 1024;
@@ -91,24 +107,10 @@ export async function submitClientIntake(c: Context<{ Bindings: Env }>): Promise
   } catch {
     return c.json({ error: "Invalid JSON body" }, { status: 400, headers: cors });
   }
-
   const draftPayload = (body ?? {}) as Record<string, unknown>;
-  const validated = validateIntakeDraftPayload({
-    submitter: draftPayload.submitter,
-    business: draftPayload.business,
-    designPreferences: draftPayload.designPreferences,
-  });
-  if (!validated.valid) {
-    return c.json({ error: { code: "DRAFT_INVALID", issues: validated.issues } }, { status: 400, headers: cors });
-  }
 
-  // Turnstile BEFORE any durable write.
-  const turnstileToken = typeof draftPayload.turnstileToken === "string" ? draftPayload.turnstileToken : "";
-  if (!turnstileToken || !(await verifyTurnstile(c.env, turnstileToken))) {
-    return c.json({ error: { code: "TURNSTILE_FAILED", message: "Turnstile verification failed" } }, { status: 403, headers: cors });
-  }
-
-  // Rate limit keyed by the HASHED remote address (never the raw IP).
+  // Rate limit BEFORE validation/Turnstile: every parsed attempt consumes
+  // budget, so the rejection ledger below is write-bounded per source.
   const remoteAddress = c.req.header("CF-Connecting-IP") ?? "unknown";
   const hashedIp = await hashRemoteAddress(c.env, remoteAddress);
   const windowHour = new Date(Date.now() - RATE_LIMIT_WINDOW_MS).toISOString().slice(0, 13);
@@ -118,6 +120,18 @@ export async function submitClientIntake(c: Context<{ Bindings: Env }>): Promise
     .bind(hashedIp, windowHour)
     .first<{ hit_count: number }>();
   if ((recent?.hit_count ?? 0) >= RATE_LIMIT_MAX_PER_WINDOW) {
+    // Record only the FIRST blocked attempt of the window: a real client
+    // behind a shared address stays recoverable, while flooding an exhausted
+    // window never earns additional durable writes. The counter bump marks
+    // the window as recorded (blocked attempts otherwise never advance it).
+    if ((recent?.hit_count ?? 0) === RATE_LIMIT_MAX_PER_WINDOW) {
+      await persistRejection(c, draftPayload, "RATE_LIMITED");
+      await c.env.DB.prepare(
+        "UPDATE public_intake_rate_limits SET hit_count = hit_count + 1 WHERE hashed_ip = ? AND window_hour = ?"
+      )
+        .bind(hashedIp, windowHour)
+        .run();
+    }
     return c.json({ error: { code: "RATE_LIMITED", message: "Too many submissions; try again later" } }, { status: 429, headers: cors });
   }
   if (recent) {
@@ -134,8 +148,26 @@ export async function submitClientIntake(c: Context<{ Bindings: Env }>): Promise
       .run();
   }
 
-  // Durable draft commit — the ONLY write this endpoint performs. A public
-  // submission never creates a Site Generation, Build or workflow instance.
+  const validated = validateIntakeDraftPayload({
+    submitter: draftPayload.submitter,
+    business: draftPayload.business,
+    designPreferences: draftPayload.designPreferences,
+  });
+  if (!validated.valid) {
+    await persistRejection(c, draftPayload, "VALIDATION_FAILED");
+    return c.json({ error: { code: "DRAFT_INVALID", issues: validated.issues } }, { status: 400, headers: cors });
+  }
+
+  // Turnstile BEFORE the durable draft commit.
+  const turnstileToken = typeof draftPayload.turnstileToken === "string" ? draftPayload.turnstileToken : "";
+  if (!turnstileToken || !(await verifyTurnstile(c.env, turnstileToken))) {
+    await persistRejection(c, draftPayload, "TURNSTILE_FAILED");
+    return c.json({ error: { code: "TURNSTILE_FAILED", message: "Turnstile verification failed" } }, { status: 403, headers: cors });
+  }
+
+  // Durable draft commit — the accepted draft. A public submission never
+  // creates a Site Generation, Build or workflow instance. (Rejected attempts
+  // leave REJECTED ledger rows; see persistRejection.)
   const storedPayload: IntakeDraftPayload = JSON.parse(JSON.stringify(validated.value));
   const draft = await createIntakeDraft(c.env, storedPayload);
 
@@ -163,6 +195,37 @@ export async function submitClientIntake(c: Context<{ Bindings: Env }>): Promise
     },
     { status: 201, headers: cors }
   );
+}
+
+/**
+ * Best-effort rejection ledger write: the raw parsed body minus the Turnstile
+ * token, with labels extracted as far as a malformed body allows. Never
+ * throws — the original 4xx verdict must still return — and never blocks the
+ * response path.
+ */
+async function persistRejection(
+  c: Context<{ Bindings: Env }>,
+  draftPayload: Record<string, unknown>,
+  reason: RejectionReason
+): Promise<void> {
+  try {
+    const raw = JSON.parse(JSON.stringify(draftPayload)) as Record<string, unknown>;
+    delete raw.turnstileToken;
+    const submitter = (raw.submitter ?? {}) as { name?: unknown; email?: unknown };
+    const business = (raw.business ?? {}) as { businessName?: unknown };
+    await createRejectedIntakeDraft(c.env, raw, reason, {
+      businessName: bestEffortLabel(business.businessName, 200),
+      submitterName: bestEffortLabel(submitter.name, 200),
+      submitterEmail: bestEffortLabel(submitter.email, 320),
+    });
+  } catch (error) {
+    console.error(`(error) admin_intake_rejection_record_failed { reason: '${reason}', message: '${(error as Error).message.replace(/'/g, "")}' }`);
+  }
+}
+
+/** Never-empty label for NOT NULL columns; a rejected body may be garbage. */
+function bestEffortLabel(value: unknown, max: number): string {
+  return typeof value === "string" && value.trim().length > 0 ? value.trim().slice(0, max) : "-";
 }
 
 async function hashRemoteAddress(env: Env, remoteAddress: string): Promise<string> {

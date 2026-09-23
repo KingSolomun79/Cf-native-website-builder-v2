@@ -10,8 +10,9 @@ This document is the single source of truth for the payload the public WAZIBIZ w
 
 - Requires header `Origin: https://wazibiz.ke` (strict allowlist; no other origin is accepted).
 - Body: JSON, max 64 KB.
-- `turnstileToken` is verified server-side against Cloudflare Turnstile BEFORE any durable write (fail closed when the token is missing or the secret is unconfigured).
-- Rate limit: 5 accepted submissions per source per rolling hour (keyed by a salted hash of the remote address; the raw IP is never persisted).
+- Rate limit: 5 submission ATTEMPTS per source per rolling hour (keyed by a salted hash of the remote address; the raw IP is never persisted). Attempts are counted after JSON parsing and BEFORE validation/Turnstile, so the rejection ledger below is write-bounded per source.
+- `turnstileToken` is verified server-side against Cloudflare Turnstile BEFORE the durable draft commit (fail closed when the token is missing or the secret is unconfigured).
+- Rejection ledger (operator-approved incident remediation, 2026-09-23): a parsed submission rejected by the rate limiter, schema validation or Turnstile persists a REJECTED `client_intake_drafts` row — the raw body minus `turnstileToken`, with best-effort submitter labels — visible to operators on the admin intake list. A rejected attempt NEVER starts a Site Generation and is never notified as a new brief. Requests rejected BEFORE the rate-limit gate (foreign origin, oversize body, unparseable JSON) leave no record. Rate-limited windows record only the FIRST blocked attempt.
 - A successful call creates a MUTABLE Intake Draft only. It can NEVER start a Site Generation, Build or workflow — canonical generation starts exclusively through the operator admin surface.
 
 ## CORS (browser preflight)
@@ -92,10 +93,10 @@ Rules:
 | status | body | meaning |
 | ------ | ---- | ------- |
 | `201`  | `{ "draftId", "status", "receivedAt", "message" }` | Draft accepted |
-| `400`  | `{ "error": { "code": "DRAFT_INVALID", "issues": [{ "path", "message" }] } }` | Shape violations: unknown fields, malformed `HH:MM`, OPEN missing `open`/`close`, missing day, fewer than 3 services, … |
-| `403`  | `Origin not allowed` or `{ "error": { "code": "TURNSTILE_FAILED" } }` | Origin outside the allowlist / Turnstile rejected |
-| `413`  | `Body size out of allowed range` | Body over 64 KB |
-| `429`  | `{ "error": { "code": "RATE_LIMITED" } }` | Rate limit exceeded |
+| `400`  | `{ "error": { "code": "DRAFT_INVALID", "issues": [{ "path", "message" }] } }` | Shape violations: unknown fields, malformed `HH:MM`, OPEN missing `open`/`close`, missing day, fewer than 3 services, … The attempt is recorded as a REJECTED intake draft (operator-visible). |
+| `403`  | `Origin not allowed` or `{ "error": { "code": "TURNSTILE_FAILED" } }` | Origin outside the allowlist (no record) / Turnstile rejected (recorded as a REJECTED intake draft) |
+| `413`  | `Body size out of allowed range` | Body over 64 KB (no record) |
+| `429`  | `{ "error": { "code": "RATE_LIMITED" } }` | Rate limit exceeded; the first blocked attempt of the window is recorded as a REJECTED intake draft |
 
 ## Mapper notes
 
