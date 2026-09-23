@@ -34,3 +34,16 @@ The public client-intake endpoint gained a bounded REJECTED ledger: parsed submi
 ## 5. Verdict
 
 **SECURITY OK WITH WATCH ITEMS** — no Critical/High findings. Proceed to commit and deployment behind the standard gates.
+
+---
+
+# Addendum — Step 2: `/admin/notifications` ledger view (same engagement)
+
+**Scope:** `listAdminNotifications` (read-only SELECT), `NotificationsPage` + `GET /admin/notifications` route, nav link, tests.
+
+- **Authz (pass):** the route sits behind `requireCloudflareAccess`; test-enforced 401 without a cert-verifiable JWT, 200 with one. No API endpoint exposes the ledger unauthenticated.
+- **Data exposure (pass):** the page shows kind/status/attempts/subject/`last_error`/timestamps. Subjects carry business names (already admin-visible elsewhere); `last_error` carries transport error codes, never secrets or recipient PII beyond the configured operator mailbox name.
+- **Input handling (pass):** no user-controlled input on this page; all rendering is JSX-escaped.
+- **No new write paths.**
+
+**Verdict: SECURITY OK.**

@@ -9,6 +9,7 @@ import { Hono, type Context } from "hono";
 import type { Env } from "../env.d";
 import { requireCloudflareAccess } from "../domain/admin-access";
 import { getIntakeDraft, listIntakeDrafts, validateIntakeDraftPayload, type IntakeDraft } from "../domain/intake-draft";
+import { listAdminNotifications } from "../domain/admin-notifications";
 import { getAdminSiteReview, type AdminSiteReview } from "../domain/admin-review";
 
 type Bindings = Env;
@@ -65,6 +66,7 @@ function Layout(props: { active: string; children?: unknown }) {
         <header>
           <strong>Wazibiz Builder</strong>
           <a href="/admin/intakes">Intakes</a>
+          <a href="/admin/notifications">Notifications</a>
         </header>
         <main>{props.children as never}</main>
       </body>
@@ -517,6 +519,75 @@ async function RejectedIntakeDiagnosticPage(c: Context<{ Bindings: Env }>, draft
   );
 }
 
+// ── Notifications ledger ─────────────────────────────────────────────────────
+
+function notificationBadge(status: string): { label: string; css: string } {
+  switch (status) {
+    case "SENT":
+      return { label: "Sent", css: "ready" };
+    case "PERMANENT_FAILED":
+      return { label: "Failed", css: "failed" };
+    case "SENDING":
+      return { label: "Sending", css: "review" };
+    default:
+      return { label: "Pending", css: "" };
+  }
+}
+
+async function NotificationsPage(c: Context<{ Bindings: Env }>): Promise<Response> {
+  const notifications = await listAdminNotifications(c.env, { limit: 200 });
+  const failed = notifications.filter((notification) => notification.status === "PERMANENT_FAILED").length;
+  const rows = notifications.map((notification) => {
+    const badge = notificationBadge(notification.status);
+    return (
+      <tr>
+        <td>{notification.createdAt.slice(0, 16).replace("T", " ")}</td>
+        <td>{notification.kind}</td>
+        <td>
+          <span class={`badge ${badge.css}`}>{badge.label}</span>
+          {notification.attempts > 1 ? <div class="muted">{notification.attempts} attempts</div> : null}
+        </td>
+        <td>{notification.subject}</td>
+        <td>
+          {notification.lastError ? <div class="muted">{notification.lastError}</div> : null}
+          {notification.status === "PENDING" && notification.nextAttemptAfter ? (
+            <div class="muted">retry after {notification.nextAttemptAfter.slice(0, 16).replace("T", " ")}</div>
+          ) : null}
+        </td>
+      </tr>
+    );
+  });
+  return c.html(
+    <Layout active="notifications">
+      <div class="card">
+        <h2>Admin notification ledger</h2>
+        <p class="muted">
+          Every operator email (new brief, ready, human review, generation failed) is recorded here with its delivery
+          outcome — a missing email means a failure row on this page, never a missing ledger entry.
+          {failed > 0 ? (
+            <>
+              {" "}
+              <strong>{failed} PERMANENT_FAILED — delivery will not retry; diagnose the transport before relying on email.</strong>
+            </>
+          ) : null}
+        </p>
+        <table>
+          <thead>
+            <tr>
+              <th>Created</th>
+              <th>Kind</th>
+              <th>Status</th>
+              <th>Subject</th>
+              <th>Last error / retry</th>
+            </tr>
+          </thead>
+          <tbody>{rows as never}</tbody>
+        </table>
+      </div>
+    </Layout>
+  );
+}
+
 // ── Site review page ─────────────────────────────────────────────────────────
 
 const SITE_JS = (apiPath: string) => `
@@ -647,6 +718,11 @@ export function registerAdminPageRoutes(app: Hono<{ Bindings: Env }>): void {
     const denied = await guard(c);
     if (denied) return denied;
     return await IntakesPage(c);
+  });
+  app.get("/admin/notifications", async (c) => {
+    const denied = await guard(c);
+    if (denied) return denied;
+    return await NotificationsPage(c);
   });
   app.get("/admin/intakes/:draftId", async (c) => {
     const denied = await guard(c);
