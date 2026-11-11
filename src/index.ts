@@ -3,6 +3,12 @@ import type { Env } from "./env.d";
 import { processDueEmailDeliveries } from "./domain/form-service";
 import { processDueAdminNotifications } from "./domain/admin-notifications";
 import { reconcileWorkflowTerminations } from "./domain/workflow-reconciliation";
+import {
+  cleanupDisposableDeployments,
+  pruneDisposableBuildArtifacts,
+  SWEEP_MAX_DELETIONS,
+  SWEEP_MAX_VERSION_PRUNES,
+} from "./domain/retention";
 import { handleKieCallback } from "./routes/internal.kie-callback";
 import { submitOnboardingSubmission } from "./routes/v2.onboarding-submit";
 import { submitClientIntake, preflightClientIntake } from "./routes/public-client-intake";
@@ -17,6 +23,14 @@ import { submitForm } from "./routes/v2.form-submit";
 import { createApproval } from "./routes/v2.approval-create";
 import { createPublication } from "./routes/v2.publication-create";
 import { rollbackSitePublication } from "./routes/v2.rollback";
+import {
+  getBenchmarkRun,
+  recordBenchmarkRunEndpoint,
+  runBenchmarkFreeze,
+  runBenchmarkPreflight,
+  runBenchmarkStart,
+} from "./routes/v2.benchmark-driver";
+import { backfillSiteAddresses } from "./routes/v2.site-address-backfill";
 
 // V2-only route table. The V1 product routes (Fluent Forms webhook, jobs,
 // contact, reference upload in its V1 shape, GitHub deploy webhook) were
@@ -38,6 +52,24 @@ app.post("/api/v2/forms/submit", submitForm);
 app.post("/api/v2/build-versions/:buildVersionId/approval", createApproval);
 app.post("/api/v2/build-versions/:buildVersionId/publication", createPublication);
 app.post("/api/v2/sites/:siteId/rollback", rollbackSitePublication);
+
+// Operator benchmark driver (issues #18-#22): executes the FROZEN #17 harness
+// one case at a time through the PRODUCTION durable workflow engine and real
+// providers — seed the run, then record its append-only outcome row once the
+// pipeline reaches a terminal state. Every endpoint requires an offline-minted
+// "benchmark" capability bound to the exact caseId; it is never public and can
+// never publish.
+app.post("/api/v2/operator/benchmarks/:caseId/freeze", runBenchmarkFreeze);
+app.post("/api/v2/operator/benchmarks/:caseId/preflight", runBenchmarkPreflight);
+app.post("/api/v2/operator/benchmarks/:caseId/run", runBenchmarkStart);
+app.post("/api/v2/operator/benchmarks/:caseId/record", recordBenchmarkRunEndpoint);
+app.get("/api/v2/operator/benchmarks/runs/:runId", getBenchmarkRun);
+
+// Operator Site-Address backfill (issue #48): gives every legacy Site
+// identity its one stable public Site Address — dry-run report first, then
+// idempotent allocation. Requires an offline-minted
+// "site-address-backfill" capability; never public, never a release action.
+app.post("/api/v2/operator/site-addresses/backfill", backfillSiteAddresses);
 
 app.post("/api/internal/kie-callback", handleKieCallback);
 
@@ -75,6 +107,10 @@ app.onError((err, c) => {
 // Resource kills cannot run catch/finally in the dying invocation, so this
 // external status check is the guarantee that no Build stays non-terminal
 // forever. Bounded per run; reuses the existing cron (no new scheduler).
+//
+// It also runs the issue #16 retention lifecycle sweep (failed/superseded
+// preview deployments, expired non-rollback published deployments, bulky
+// artifacts of dead versions) under the same bounded/idempotent rules.
 export async function scheduled(event: ScheduledController, env: Env): Promise<void> {
   try {
     const processed = await processDueEmailDeliveries(env);
@@ -101,6 +137,33 @@ export async function scheduled(event: ScheduledController, env: Env): Promise<v
     }
   } catch (error) {
     console.error(`(error) workflow_reconciliation_sweep_failed { message: '${(error as Error).message.replace(/'/g, "")}' }`);
+  }
+  // Retention lifecycle sweep (issue #16): dispose failed/superseded Preview
+  // Deployments, expired non-rollback published deployments, and the bulky
+  // artifacts of dead Build Versions. Bounded per run (deletion/version caps,
+  // candidate LIMITs) and resumable: each item re-reads canonical protection
+  // state immediately before deletion, operational failures are logged and
+  // left for the next trigger, and compact Build Records / publication /
+  // rollback state are never touched. Uses the existing cron — no scheduler.
+  try {
+    const report = await cleanupDisposableDeployments(env, { maxDeletions: SWEEP_MAX_DELETIONS });
+    if (report.deletedWorkers.length > 0 || report.failedWorkers.length > 0) {
+      console.log(
+        `(info) retention_deployment_sweep { deleted: ${report.deletedWorkers.length}, protected: ${report.protectedWorkers.length}, failed: ${report.failedWorkers.length} }`
+      );
+    }
+  } catch (error) {
+    console.error(`(error) retention_deployment_sweep_failed { message: '${(error as Error).message.replace(/'/g, "")}' }`);
+  }
+  try {
+    const report = await pruneDisposableBuildArtifacts(env, { maxVersions: SWEEP_MAX_VERSION_PRUNES });
+    if (report.prunedVersions.length > 0 || report.failedVersions.length > 0) {
+      console.log(
+        `(info) retention_artifact_sweep { pruned_versions: ${report.prunedVersions.length}, pruned_keys: ${report.prunedArtifactKeys.length}, benchmark_protected: ${report.benchmarkProtectedKeys.length}, failed: ${report.failedVersions.length} }`
+      );
+    }
+  } catch (error) {
+    console.error(`(error) retention_artifact_sweep_failed { message: '${(error as Error).message.replace(/'/g, "")}' }`);
   }
 }
 

@@ -18,6 +18,7 @@ const ERROR_STATUS: Record<LifecycleError["code"], number> = {
   SITE_MISMATCH: 409,
   BUILD_VERSION_MISMATCH: 409,
   INITIAL_BUILD_ALREADY_EXISTS: 409,
+  SITE_ADDRESS_ALLOCATION_FAILED: 500,
 };
 
 export function lifecycleErrorResponse(error: LifecycleError): Response {

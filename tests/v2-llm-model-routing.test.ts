@@ -190,3 +190,76 @@ describe("AI-stage provenance records the routed Coding Plan identity", () => {
     expect(rows.results[0].provider).toBe("zai-coding-plan");
   });
 });
+
+describe("ORIGINAL_DESIGN blueprint model routing (operator GO 2026-11-09)", () => {
+  it("the text-only Design Blueprint runs on the coding model (glm-5.3) with system+user text turns and NO image parts", async () => {
+    const { vi } = await import("vitest");
+    const { runSimpleDesignBlueprintStage } = await import("../src/simple-design/design-blueprint");
+    const { deriveCreativeDirection } = await import("../src/domain/creative-direction");
+    const { simpleBlueprintFixture } = await import("./helpers/simple-scripts");
+
+    const creativeDirection = {
+      direction: "Sun-baked editorial minimalism",
+      audience: "Design-conscious homeowners",
+      conversionGoal: "Project enquiries",
+      preferredPalette: "Terracotta on warm off-white",
+      tone: "Calm, assured",
+      avoidances: "No generic three-card rows",
+    };
+    const started = await startSiteGeneration(env, {
+      payload: {
+        buildMode: "ORIGINAL_DESIGN",
+        facts: {
+          businessName: "Routing Check Studio",
+          contactEmail: "ops@routing.example",
+          ...(canonicalStructuredFacts()),
+        },
+        creativeDirection,
+      },
+    });
+    const created = await createInitialBuild(env, { siteGenerationId: started.siteGenerationId });
+
+    const captured: Array<{ model?: string; messages?: Array<{ role: string; content: unknown }> }> = [];
+    const encoder = new TextEncoder();
+    const fixtureJson = JSON.stringify(simpleBlueprintFixture());
+    const sse = new Response(
+      new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(encoder.encode(`data: {"choices":[{"delta":{"content":${JSON.stringify(fixtureJson)}}}]}\n\n`));
+          controller.enqueue(encoder.encode('data: {"choices":[{"delta":{},"finish_reason":"stop"}],"usage":{"prompt_tokens":7,"completion_tokens":3}}\n\n'));
+          controller.enqueue(encoder.encode("data: [DONE]\n\n"));
+          controller.close();
+        },
+      }),
+      { status: 200, headers: { "content-type": "text/event-stream" } }
+    );
+    vi.stubGlobal("fetch", async (_url: unknown, init?: { body?: string }) => {
+      const body = typeof init?.body === "string" ? JSON.parse(init.body) : {};
+      captured.push({ model: body.model, messages: body.messages });
+      return sse;
+    });
+    try {
+      const result = await runSimpleDesignBlueprintStage({ ...(env as unknown as Env), ZAI_CODING_API_KEY: "cp-key" } as Env, {
+        siteGenerationId: started.siteGenerationId,
+        buildId: created.buildId,
+        buildVersionId: created.buildVersionId,
+        buildVersionNumber: 1,
+        businessFactsRef: "onboarding-submission:test#fact-snapshot",
+        replacementBusiness: { name: "Routing Check Studio" },
+        originalDesign: {
+          creativeDirection: deriveCreativeDirection({ creativeDirection, facts: { businessName: "Routing Check Studio" } }),
+          creativeDirectionSha256: "a".repeat(64),
+          onboardingSubmissionId: "submission-routing-test",
+        },
+      });
+      expect(result.blueprint.version).toBe("2");
+      expect(captured).toHaveLength(1);
+      expect(captured[0].model).toBe("glm-5.3");
+      const messages = captured[0].messages ?? [];
+      expect(messages.some((message) => message.role === "system")).toBe(true);
+      expect(JSON.stringify(messages)).not.toContain("image_url");
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+});

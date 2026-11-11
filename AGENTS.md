@@ -40,6 +40,8 @@ For the remaining implementation work, execute these GitHub issues **strictly se
 
 This order is an explicit project instruction and **overrides every opportunity to parallelize these tickets**, including the benchmark tickets.
 
+**OPERATOR UPDATE (2026-09-16, FINAL-DECISION-RECORD.md §21, decision 134): the benchmark tranche is PAUSED.** #18 = VALID FAIL (recorded), #19 = PASS (recorded), and `#20`/`#21`/`#22` are **PARKED — NOT RUN**: do not start them unless an operator explicitly resumes the tranche (resume conditions in decision 136). V2 is in **production operation/observation mode** (decision 135): the generation system (Blueprint, Builder, QA, repair/image policy, prompts, models, thresholds, benchmark definitions) must not be proactively changed, and the remaining sequence (`#23`–`#26`) is deferred to an explicit operator decision — no ticket may be started autonomously.
+
 # Non-negotiable per-issue completion gate
 
 For every issue from `#14` through `#26`, the following sequence is mandatory:
@@ -242,12 +244,14 @@ Reference Screenshot controls static composition. Reference URL supplements runt
 
 ## QA and repair
 
-- QA-A: rendered visual/content quality + hard composition gates.
+- QA-A: rendered visual/content quality + hard composition gates. Visual QA attaches and judges every routed page (operator GO 2026-11-09).
 - QA-B: browser/source/DOM/network/accessibility/SEO/form contract.
 - Release Ready requires zero P0/P1 Release Blocker and all mandatory gates.
 - At most ONE durable Automated Repair per Build Version (no Fix Coordinator batch, no separate Release Blocker Fix — removed with the COMPLEX chain).
+- Bounded improving repair rounds (operator GO 2026-11-09, superseding the single-repair policy): up to `SIMPLE_REPAIR_ROUNDS` (default 3) repair rounds per Build, each still ONE semantic repair call on a NEW immutable Build Version; the loop stops early on release-ready, a non-improving visual score, or a Technical Preflight failure. The repair is multimodal — it sees the Reference and candidate renders of every routed page — and composition/layout findings REQUIRE HTML changes, not CSS-only patches.
 - Every material repair creates a new Build Version that must be re-evaluated.
 - Never create an unbounded retry/mutation loop.
+- Revision Builds reuse the parent Build's accepted Design Blueprint (and its Accepted Images) unless the revision note explicitly requests a redesign (operator GO 2026-11-09) — revisions improve ONE design instead of re-rolling the design authority.
 
 ## Contact form and email
 

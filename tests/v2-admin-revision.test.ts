@@ -191,4 +191,29 @@ describe("operator revision notes and Generate Revision", () => {
     expect(builderInstructionCalls[0].prompt).toContain("cannot change the Build Mode");
     expect(builderInstructionCalls[0].prompt).toContain("Business Facts remain the ONLY factual authority");
   });
+
+  it("site review surfaces the terminal reason so a gated build explains itself", async () => {
+    const { createInitialBuild, appendBuildWorkflowEvent } = await import("../src/domain/lifecycle");
+    const { getAdminSiteReview } = await import("../src/domain/admin-review");
+
+    const siteGenerationId = await startReferenceGeneration("references/simple/admin-review-reason.png");
+    const siteId = (
+      await env.DB.prepare("SELECT site_id FROM site_generations WHERE id = ?").bind(siteGenerationId).first<{ site_id: string }>()
+    )!.site_id;
+    const initial = await createInitialBuild(env, { siteGenerationId });
+    // The canonical terminal event a QA-gated build receives (same writer the
+    // pipeline uses): the badge alone must never be the whole story again.
+    await appendBuildWorkflowEvent(env, {
+      buildId: initial.buildId,
+      fromState: "CONFIRMATION",
+      toState: "HUMAN_REVIEW_REQUIRED",
+      stage: "simple_final_qa",
+      detail: "Final QA still failing after the ONE pre-QA repair: visual fidelity 87 < 90",
+    });
+
+    const review = await getAdminSiteReview(env, siteId);
+    const build = review?.generations.flatMap((generation) => generation.builds).find((candidate) => candidate.buildId === initial.buildId);
+    expect(build?.state).toBe("HUMAN_REVIEW_REQUIRED");
+    expect(build?.terminalReason).toBe("Final QA still failing after the ONE pre-QA repair: visual fidelity 87 < 90");
+  });
 });

@@ -14,6 +14,7 @@
 import type { Env } from "../env.d";
 import { generateId, nowIso } from "../lib/crypto";
 import { getObject } from "../lib/assets";
+import { getOrAllocateSiteAddress, SiteAddressError, type SiteAddress } from "./site-address";
 import {
   ONBOARDING_SUBMISSION_SCHEMA_VERSION,
   normalizeBusinessFacts,
@@ -32,7 +33,8 @@ export type LifecycleErrorCode =
   | "BUILD_NOT_FOUND"
   | "SITE_MISMATCH"
   | "BUILD_VERSION_MISMATCH"
-  | "INITIAL_BUILD_ALREADY_EXISTS";
+  | "INITIAL_BUILD_ALREADY_EXISTS"
+  | "SITE_ADDRESS_ALLOCATION_FAILED";
 
 export class LifecycleError extends Error {
   readonly code: LifecycleErrorCode;
@@ -153,6 +155,8 @@ export interface SiteGenerationStarted {
   siteGenerationId: string;
   buildMode: BuildMode;
   sequenceNumber: number;
+  /** Stable public Site Address, allocated exactly once per Site identity. */
+  siteAddress: SiteAddress;
 }
 
 export async function startSiteGeneration(
@@ -217,6 +221,19 @@ export async function startSiteGeneration(
     ]);
   }
 
+  // Site Address allocation (decision 132): a D1 side effect at the canonical
+  // Site-creation boundary only — idempotent per Site identity and never a
+  // mutation of the frozen submission/inputs below.
+  let siteAddress: SiteAddress;
+  try {
+    siteAddress = await getOrAllocateSiteAddress(env, siteId);
+  } catch (error) {
+    if (error instanceof SiteAddressError) {
+      throw new LifecycleError("SITE_ADDRESS_ALLOCATION_FAILED", error.message);
+    }
+    throw error;
+  }
+
   const sequence = await env.DB.prepare(
     "SELECT COALESCE(MAX(sequence_number), 0) + 1 AS next FROM site_generations WHERE site_id = ?"
   )
@@ -270,6 +287,7 @@ export async function startSiteGeneration(
     siteGenerationId: generationId,
     buildMode: payload.buildMode,
     sequenceNumber,
+    siteAddress,
   };
 }
 

@@ -487,10 +487,20 @@ describe("Assembly Preflight enforces the same shared invariant on assembled can
   });
 });
 
-// ── primary seam: the pipeline fails closed IN-STEP ─────────────────────────
+// ── primary seam: the pipeline spends the Build's ONE repair on the file ────
+//
+// Issue #14 (operator decision 2026-09-15): a CRITICAL coverage failure that
+// implicates exactly ONE page is a repair-eligible deterministic builder-gate
+// failure — the ONE pre-QA repair regenerates that page, the complete
+// applicable deterministic gates re-run, and the repaired immutable Build
+// Version carries the build forward (assemble → QA). A failure implicating
+// TWO pages has no mechanically identifiable single-file target: terminal
+// FAILED in-step, exactly as before (no candidate to inspect, #62 §8/§9; the
+// FAILED terminal also routes the operator email to the GENERATION_FAILED
+// composer).
 
-describe("pipeline: a Builder that cannot satisfy CRITICAL coverage terminates HUMAN_REVIEW_REQUIRED in-step", () => {
-  it("no assembly, no preview, no repair, no engine retry — the terminal carries the coverage reason", async () => {
+describe("pipeline: a single-page CRITICAL coverage failure spends the Build's ONE pre-QA repair", () => {
+  it("the repaired about page clears the coverage gate — a new immutable Build Version v2 carries the build to RELEASE_READY", async () => {
     const referenceKey = "references/simple/critical-coverage-pipeline.png";
     await persistSimpleScreenshot(env, referenceKey);
     const started = await startSiteGeneration(env, {
@@ -502,10 +512,49 @@ describe("pipeline: a Builder that cannot satisfy CRITICAL coverage terminates H
     });
     const outcome = await runBuildPipeline(env, {
       siteGenerationId: started.siteGenerationId,
-      deps: createSimpleScripts({ builderOmitsAboutHero: true }),
+      deps: createSimpleScripts({ builderOmitsAboutHero: true, preQaRepairSucceeds: true }),
     });
 
-    expect(outcome.terminal).toBe("HUMAN_REVIEW_REQUIRED");
+    expect(outcome.terminal).toBe("RELEASE_READY");
+    expect(outcome.repairApplied).toBe(true);
+    // the repaired version is the release candidate; the failed v1 has no bundle
+    const versions = await env.DB.prepare("SELECT id, version_number FROM build_versions WHERE build_id = ? ORDER BY version_number").bind(outcome.buildId).all<{ id: string; version_number: number }>();
+    expect(versions.results?.length).toBe(2);
+    const v1 = versions.results?.[0];
+    const v2 = versions.results?.[1];
+    expect(outcome.releaseReadyBuildVersionId).toBe(v2!.id);
+    expect(await getBuildStageArtifact<SiteBundle>(env, v1!.id, "site_bundle")).toBeNull();
+    expect(await getBuildStageArtifact<SiteBundle>(env, v2!.id, "site_bundle")).not.toBeNull();
+    expect(outcome.previewUrl).not.toBeNull();
+    // the audit trail names the repair and its target
+    const event = await env.DB.prepare(
+      "SELECT detail FROM build_workflow_events WHERE build_id = ? AND stage = 'simple_pre_qa_repair' AND to_state = 'FIX'"
+    )
+      .bind(outcome.buildId)
+      .first<{ detail: string }>();
+    expect(event?.detail).toContain("page-about");
+    // exactly ONE repair version: the durable one-per-Build budget held
+    expect(versions.results?.length).toBe(2);
+  });
+});
+
+describe("pipeline: a CRITICAL coverage failure implicating TWO pages has no single-file repair target", () => {
+  it("no assembly, no preview, no repair, no engine retry — the terminal carries the coverage reason", async () => {
+    const referenceKey = "references/simple/critical-coverage-two-pages.png";
+    await persistSimpleScreenshot(env, referenceKey);
+    const started = await startSiteGeneration(env, {
+      payload: {
+        buildMode: "REFERENCE_BOUND",
+        facts: FACTS as unknown as typeof FACTS & Record<string, never>,
+        reference: { screenshotR2Key: referenceKey, url: "https://reference.example.com/" },
+      },
+    });
+    const outcome = await runBuildPipeline(env, {
+      siteGenerationId: started.siteGenerationId,
+      deps: createSimpleScripts({ builderOmitsTwoHeroes: true }),
+    });
+
+    expect(outcome.terminal).toBe("FAILED");
     expect(outcome.reasons[0]).toContain("WEBSITE_BUILDER_CRITICAL_IMAGE_COVERAGE");
     expect(outcome.reasons[0]).toContain("about-hero");
     expect(outcome.reasons[0]).toContain("no further attempt");
@@ -525,16 +574,23 @@ describe("pipeline: a Builder that cannot satisfy CRITICAL coverage terminates H
     expect(await getBuildStageArtifact(env, version!.id, "qa_package")).toBeNull();
     // the audit trail names the stage and the terminal
     const event = await env.DB.prepare(
-      "SELECT stage, to_state FROM build_workflow_events WHERE build_id = ? AND stage = 'simple_website_build' AND to_state = 'HUMAN_REVIEW_REQUIRED'"
+      "SELECT stage, to_state FROM build_workflow_events WHERE build_id = ? AND stage = 'simple_website_build' AND to_state = 'FAILED'"
     )
       .bind(outcome.buildId)
       .first<{ stage: string; to_state: string }>();
     expect(event).not.toBeNull();
+    // the operator notification is the GENERATION_FAILED composer, not a review invitation
+    const notification = await env.DB.prepare(
+      "SELECT kind FROM admin_notifications WHERE dedupe_key = ?"
+    )
+      .bind(`build-terminal:${outcome.buildId}:FAILED`)
+      .first<{ kind: string }>();
+    expect(notification?.kind).toBe("GENERATION_FAILED");
   });
 });
 
-describe("pipeline: a Builder whose stylesheet invents structure terminates HUMAN_REVIEW_REQUIRED in-step", () => {
-  it("the DOM-first selector gate fails closed to review — no engine retry, no instance-killing escape", async () => {
+describe("pipeline: a Builder whose stylesheet invents structure repairs at the site-js seam", () => {
+  it("the unadopted selector is caught by the per-file JS validation — the ONE pre-QA repair regenerates site.js with the findings injected, and the repaired v2 reaches RELEASE_READY", async () => {
     const referenceKey = "references/simple/invented-structure-pipeline.png";
     await persistSimpleScreenshot(env, referenceKey);
     const started = await startSiteGeneration(env, {
@@ -546,35 +602,41 @@ describe("pipeline: a Builder whose stylesheet invents structure terminates HUMA
     });
     const outcome = await runBuildPipeline(env, {
       siteGenerationId: started.siteGenerationId,
-      deps: createSimpleScripts({ builderInventsCssSelectors: true }),
+      deps: createSimpleScripts({ builderInventsCssSelectors: true, preQaRepairSucceeds: true }),
     });
 
-    expect(outcome.terminal).toBe("HUMAN_REVIEW_REQUIRED");
-    expect(outcome.reasons[0]).toContain("WEBSITE_BUILDER_INVENTED_STRUCTURE");
-    // the gate names the invented selectors themselves
-    expect(outcome.reasons[0]).toContain(".field-error");
-    expect(outcome.reasons[0]).toContain(".js-reveal");
-    expect(outcome.repairApplied).toBe(false);
-    expect(outcome.releaseReadyBuildVersionId).toBeNull();
-    expect(outcome.previewUrl).toBeNull();
-
-    // exactly one Build Version: no repair version was ever created
-    const versionCount = await env.DB.prepare("SELECT COUNT(*) AS n FROM build_versions WHERE build_id = ?").bind(outcome.buildId).first<{ n: number }>();
-    expect(versionCount?.n).toBe(1);
-    // no site bundle was frozen, nothing assembled
-    const version = await env.DB.prepare("SELECT id FROM build_versions WHERE build_id = ? ORDER BY version_number DESC LIMIT 1")
-      .bind(outcome.buildId)
-      .first<{ id: string }>();
-    expect(await getBuildStageArtifact<SiteBundle>(env, version!.id, "site_bundle")).toBeNull();
-    expect(await getBuildStageArtifact(env, version!.id, "assembled_manifest")).toBeNull();
-    expect(await getBuildStageArtifact(env, version!.id, "qa_package")).toBeNull();
-    // the audit trail carries the review terminal
+    // the defect surfaced at the site-js file validation, naming the invented selectors
+    expect(outcome.terminal).toBe("RELEASE_READY");
+    expect(outcome.repairApplied).toBe(true);
+    const versions = await env.DB.prepare("SELECT id, version_number FROM build_versions WHERE build_id = ? ORDER BY version_number").bind(outcome.buildId).all<{ id: string; version_number: number }>();
+    expect(versions.results?.length).toBe(2);
+    const v1 = versions.results?.[0];
+    const v2 = versions.results?.[1];
+    expect(outcome.releaseReadyBuildVersionId).toBe(v2!.id);
+    expect(await getBuildStageArtifact<SiteBundle>(env, v1!.id, "site_bundle")).toBeNull();
+    const repairedBundle = await getBuildStageArtifact<SiteBundle>(env, v2!.id, "site_bundle");
+    expect(repairedBundle).not.toBeNull();
+    // the repaired site.js adopts the invented hook — the DOM-first gate clears
+    expect(repairedBundle!.value.sharedJs).toContain("js-reveal");
+    // per-file forensics: the v1 site-js run records WHY it was refused; the
+    // v2 repair run passed the same gate
+    const jsRuns = await env.DB.prepare(
+      "SELECT build_version_id, outcome, error_summary FROM ai_stage_runs WHERE schema_version = 'builder-file/site-js/1' AND build_version_id IN (?, ?)"
+    )
+      .bind(v1!.id, v2!.id)
+      .all<{ build_version_id: string; outcome: string; error_summary: string }>();
+    const v1Run = jsRuns.results?.find((run) => run.build_version_id === v1!.id);
+    const v2Run = jsRuns.results?.find((run) => run.build_version_id === v2!.id);
+    expect(v1Run?.outcome).toBe("invalid");
+    expect(v1Run?.error_summary).toContain(".js-reveal");
+    expect(v2Run?.outcome).toBe("valid");
+    // the repair version carries the repair decision event
     const event = await env.DB.prepare(
-      "SELECT to_state FROM build_workflow_events WHERE build_id = ? AND stage = 'simple_website_build' AND to_state = 'HUMAN_REVIEW_REQUIRED'"
+      "SELECT detail FROM build_workflow_events WHERE build_id = ? AND stage = 'simple_pre_qa_repair' AND to_state = 'FIX'"
     )
       .bind(outcome.buildId)
-      .first<{ to_state: string }>();
-    expect(event).not.toBeNull();
+      .first<{ detail: string }>();
+    expect(event?.detail).toContain("site-js");
   });
 });
 

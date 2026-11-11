@@ -50,7 +50,17 @@ export const PROMPT_MANIFEST: Record<PromptStageKey, PromptManifestEntry> = {
     promptVersion: "v1",
     bodyFile: "simple/05-original-design-blueprint.md",
   },
-  // v8 (operator GO 2026-09-11, DOM-FIRST/CSS-LAST VISUAL FIDELITY): the SIX
+  // v10 (operator GO 2026-11-10): TOUCH TARGETS (44x36 minimum for every
+  // interactive control) + MOBILE COMPOSITION (marker systems must connect
+  // to what they mark on mobile) hard requirements added; backed by the
+  // TAP_TARGET_TOO_SMALL deterministic gate in bundle QA. Everything from
+  // v9 unchanged.
+  // v9 (operator GO 2026-11-09): COPY STYLE hard requirement added — no em
+  // dash (—) or en dash (–) anywhere in page copy (headings, body, CTAs,
+  // labels, alt text, title, meta description); no stock AI phrasing. Backed
+  // deterministically by the COPY_STYLE_EMDASH technical check in bundle QA.
+  // Everything else unchanged from v8 (operator GO 2026-09-11,
+  // DOM-FIRST/CSS-LAST VISUAL FIDELITY): the SIX
   // calls reorder to home → about → services → contact → site.css → site.js.
   // Home defines the semantic DOM, the shared chrome and the structural class
   // vocabulary; the inner pages are realized on the frozen chrome +
@@ -64,29 +74,31 @@ export const PROMPT_MANIFEST: Record<PromptStageKey, PromptManifestEntry> = {
   // ontology, region graph, trait ledger or second design-analysis call.
   "simple-website-builder": {
     promptId: "simple-website-builder",
-    promptVersion: "v8",
+    promptVersion: "v10",
     bodyFile: "simple/02-website-builder.md",
   },
-  // v2 (operator GO, 2026-09-09): visual QA verifies photographic hero
-  // treatment on every routed page.
+  // v3 (operator GO, 2026-11-09): visual QA attaches and judges the desktop
+  // render of EVERY routed page (home, about, services, contact), not only
+  // home; hero treatment per page remains a finding.
   "simple-visual-qa": {
     promptId: "simple-visual-qa",
-    promptVersion: "v2",
+    promptVersion: "v4",
     bodyFile: "simple/03-visual-qa.md",
   },
-  // v1 (issue #24, operator GO 2026-09-12): ORIGINAL_DESIGN visual QA —
-  // candidate renders judged against the Blueprint + Creative Direction, NO
-  // Reference screenshots. SAME output schema as simple-visual-qa (nine
-  // dimensions reinterpreted; distinctiveness explicitly graded), so the
-  // release-gate machinery is shared unchanged.
+  // v2 (operator GO, 2026-11-09): all-page candidate renders attached and
+  // judged, same as simple-visual-qa v3.
   "simple-original-design-visual-qa": {
     promptId: "simple-original-design-visual-qa",
-    promptVersion: "v1",
+    promptVersion: "v3",
     bodyFile: "simple/06-original-design-visual-qa.md",
   },
+  // v3 (operator GO 2026-11-09): the repair is MULTIMODAL — the candidate's
+  // rendered screenshots (all routed pages) and the Reference are attached,
+  // so it repairs a render it can see; structural-defect rule added (HTML
+  // changes required for composition findings; v2's COPY STYLE rule kept).
   "simple-site-repair": {
     promptId: "simple-site-repair",
-    promptVersion: "v1",
+    promptVersion: "v3",
     bodyFile: "simple/04-site-repair.md",
   },
 };

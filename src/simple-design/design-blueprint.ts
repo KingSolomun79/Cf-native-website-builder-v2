@@ -1,9 +1,11 @@
 // SIMPLE stage 1: the Design Blueprint (spec sections 10/12/28-31).
 //
-// ONE multimodal schema-validated call: Reference screenshots in, ONE rich
-// implementation-ready design document out. The screenshot stays the visual
-// authority — the blueprint is its interpretation, never a replacement (spec
-// section 26), so the builder later receives BOTH.
+// ONE schema-validated call: REFERENCE_BOUND attaches Reference screenshots
+// (multimodal model); ORIGINAL_DESIGN invents from Business Facts + Creative
+// Direction text-only on the coding model (operator GO 2026-11-09). The
+// screenshot stays the visual authority in reference mode — the blueprint is
+// its interpretation, never a replacement (spec section 26), so the builder
+// later receives BOTH.
 //
 // Deterministic quality gate (spec section 30): structural checks only. The
 // schema boundary already spent the ONE targeted structural repair; a
@@ -34,7 +36,7 @@ import {
   type HeroMediaLinkCanonicalizationEntry,
 } from "./contracts";
 import { renderDesignBlueprintV2Markdown } from "./render-blueprint-v2";
-import { bytesToBase64, createSimpleVisionGenerate, mimeForKey } from "./vision";
+import { bytesToBase64, createSimpleTextGenerate, createSimpleVisionGenerate, mimeForKey } from "./vision";
 import type { CreativeDirectionContext } from "../domain/creative-direction";
 import { renderCreativeDirectionBrief } from "../domain/creative-direction";
 
@@ -81,6 +83,10 @@ export interface RunSimpleDesignBlueprintInput {
   visualInputs?: SimpleBlueprintVisualInput[];
   /** ORIGINAL_DESIGN mode: invent the blueprint from creative direction. */
   originalDesign?: OriginalDesignBlueprintInput;
+  /** Redesign-intent revision note (operator GO 2026-11-09): rides the ONE
+   *  generation call ONLY when the revision explicitly requests a redesign —
+   *  a bounded intent block like the Builder's, never a facts authority. */
+  humanRevisionInstruction?: string;
   generate?: RawAiGenerate;
 }
 
@@ -97,9 +103,18 @@ export interface SimpleDesignBlueprintResult {
   heroMediaLinkCanonicalization: HeroMediaLinkCanonicalization;
 }
 
+function renderBlueprintRevisionBlock(note: string): string {
+  const bounded = note.trim().slice(0, 2000);
+  return `
+HUMAN REVISION INSTRUCTION (redesign intent for THIS blueprint — steer the design concept; it is NOT a Business Fact authority and must not invent factual claims, names, statistics, testimonials or contact details):
+${bounded}
+`;
+}
+
 function buildBlueprintUserPrompt(input: RunSimpleDesignBlueprintInput): string {
   const { replacementBusiness } = input;
   return `Study the attached Reference screenshots (design authority only) and produce the Design Blueprint for the REPLACEMENT business below. Describe the design, never the reference business.
+${input.humanRevisionInstruction ? renderBlueprintRevisionBlock(input.humanRevisionInstruction) : ""}
 
 REPLACEMENT BUSINESS (context for [ADAPTATION] decisions only — you receive no other business content and must not invent any):
 - Name: ${replacementBusiness.name}
@@ -121,6 +136,7 @@ function buildOriginalBlueprintUserPrompt(input: RunSimpleDesignBlueprintInput):
   const original = input.originalDesign!;
   const { replacementBusiness } = input;
   return `Invent the Original Design Blueprint for the business below. There is NO reference website: you are the design authority. Create ONE coherent visual concept specifically for this business — not a safe generic website.
+${input.humanRevisionInstruction ? renderBlueprintRevisionBlock(input.humanRevisionInstruction) : ""}
 
 CREATIVE DIRECTION (design-intent authority):
 ${renderCreativeDirectionBrief(original.creativeDirection)}
@@ -205,7 +221,16 @@ export async function runSimpleDesignBlueprintStage(
   // shape travels in the boundary's prose output contract — the Coding Plan
   // endpoint does NOT enforce native response_format json_schema (live
   // end-to-end evidence 2026-09-11: schemaignored, v1-shaped output).
-  input.generate ?? createSimpleVisionGenerate(env, images, { buildId: input.buildId, stage: stageKey, buildVersionNumber: input.buildVersionNumber }, { maxTokens: 12288, temperature: 0.3 });
+  //
+  // Model routing (operator GO 2026-11-09): ORIGINAL_DESIGN carries NO images
+  // (Business Facts + Creative Direction are text-only), so it runs on the
+  // coding model (glm-5.3) via the text seam — the design authority deserves
+  // the stronger tier, and the flash tier went schema-invalid on attempt 1 in
+  // three consecutive live builds (2026-11-02..06). REFERENCE_BOUND attaches
+  // Reference screenshots and stays on the verified multimodal model.
+  input.generate ?? (isOriginalDesign
+    ? createSimpleTextGenerate(env, { buildId: input.buildId, stage: stageKey, buildVersionNumber: input.buildVersionNumber }, { maxTokens: 12288, temperature: 0.3 })
+    : createSimpleVisionGenerate(env, images, { buildId: input.buildId, stage: stageKey, buildVersionNumber: input.buildVersionNumber }, { maxTokens: 12288, temperature: 0.3 }));
 
   let run;
   try {

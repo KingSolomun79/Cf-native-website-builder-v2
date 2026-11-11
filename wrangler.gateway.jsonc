@@ -1,0 +1,56 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "cf-site-gateway-v2",
+  "main": "src/site-gateway/index.ts",
+  "compatibility_date": "2026-08-04",
+  "compatibility_flags": ["nodejs_compat"],
+  "account_id": "c1c0f6b100d55a09ce6a7a3121a19224",
+
+  // Wildcard Wazibiz site gateway (issue #48, decision 132): ONE Worker
+  // serving every stable Site Address https://{site-slug}.wazibiz.co.ke by
+  // resolving canonical publication state and streaming the exact immutable
+  // published Worker origin. SELECT-only D1, no secrets, no other bindings.
+
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "website_factory_v2",
+      "database_id": "9e2597d1-9598-4c50-adcf-764c1b6319da"
+    }
+  ],
+
+  "observability": {
+    "logs": {
+      "enabled": true,
+      "invocation_logs": true
+    },
+    "traces": {
+      "enabled": false
+    }
+  },
+
+  "vars": {
+    // Hostnames are derived ONLY from these two values — never from browser
+    // input or Site data.
+    "SITES_BASE_DOMAIN": "wazibiz.co.ke",
+    "PUBLISHED_ORIGIN_SUFFIX": "wazibizwebsites.workers.dev"
+  },
+
+  // Retained ONLY for pre-cutover smoke verification (issue #48 deployment
+  // order step 12): host validation 404s every request that does not arrive
+  // as {slug}.wazibiz.co.ke, so this endpoint serves no Site content. It can
+  // be disabled after the Worker Route cutover is verified.
+  "workers_dev": true
+
+  // ACTIVATION IS MANUAL AND LAST (issue #48 deployment order steps 13-15).
+  // Cloudflare Custom Domains do NOT support wildcard hostnames — a Worker
+  // Route is the only mechanism. Before enabling, run the zone audit
+  // (inventory existing wazibiz.co.ke DNS records and Worker routes; HOLD if
+  // the wildcard would intercept a real first-level subdomain that must not
+  // use the gateway), then create the proxied placeholder wildcard record
+  // (AAAA * -> 100::, orange-cloud) and uncomment:
+  //
+  // "routes": [
+  //   { "pattern": "*.wazibiz.co.ke/*", "zone_name": "wazibiz.co.ke" }
+  // ]
+}

@@ -690,7 +690,7 @@ describe("publication operator route", () => {
       expect(((await response.json()) as { error: { code: string } }).error.code).toBe("CAPABILITY_REQUIRED");
     }
     expect(await publicationCount(context.buildVersionId)).toBe(0);
-    expect(await getPublicationState(env, context.siteId)).toEqual({ current: null, rollback: null });
+    expect(await getPublicationState(env, context.siteId)).toEqual({ siteUrl: expect.any(String), current: null, rollback: null });
   });
 
   it("denies wrong actions and capabilities bound to another Build, Version or manifest", async () => {

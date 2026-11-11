@@ -170,14 +170,20 @@ for (const stage of ["visual-qa.ts", "design-blueprint.ts", "site-repair.ts"]) {
   }
 }
 // The active seam must remain imported by every normal-generation stage.
+// Operator GO 2026-11-09: site-repair rides the MULTIMODAL seam module
+// (createSimpleVisionGenerate in vision.ts) instead of importing
+// zai-coding-plan directly — same ONE Coding Plan provider underneath.
 for (const importer of [
   join(ROOT, "src", "simple-design", "vision.ts"),
-  join(ROOT, "src", "simple-design", "site-repair.ts"),
   join(ROOT, "src", "simple-design", "website-builder.ts"),
 ]) {
   if (!existsSync(importer) || !readFileSync(importer, "utf8").includes("zai-coding-plan")) {
     violations.push(`${importer.replace(ROOT, "")}: expected to import the active zai-coding-plan seam`);
   }
+}
+const repairStage = join(ROOT, "src", "simple-design", "site-repair.ts");
+if (!existsSync(repairStage) || !readFileSync(repairStage, "utf8").includes('from "./vision"')) {
+  violations.push("src/simple-design/site-repair.ts: expected to import the multimodal vision seam (operator GO 2026-11-09)");
 }
 
 const failedPositives = positives.filter(([ok]) => !ok).map(([, message]) => message);

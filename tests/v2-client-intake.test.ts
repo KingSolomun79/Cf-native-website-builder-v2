@@ -3,6 +3,9 @@
 // Turnstile (DEDICATED CLIENT_INTAKE_TURNSTILE_SECRET_KEY — the Wazibiz
 // website widget; no fallback to the generated-sites form secret) + strict
 // origin allowlist + hashed-IP rate limiting — never WEBHOOK_SECRET.
+// Incident remediation (2026-09-23): parsed attempts rejected by the rate
+// limiter, validation or Turnstile persist REJECTED ledger rows (raw payload
+// minus the Turnstile token) so a real client's brief is never lost invisibly.
 
 import { beforeAll, afterEach, describe, expect, it, vi } from "vitest";
 import { env as providedEnv } from "cloudflare:test";
@@ -55,13 +58,28 @@ function draftPayload(overrides: Record<string, unknown> = {}): Record<string, u
 async function post(app: Hono<{ Bindings: Env }>, env: Env, body: unknown, headers: Record<string, string> = {}): Promise<Response> {
   return app.request("https://test.example.com/api/public/client-intakes", {
     method: "POST",
-    headers: { "content-type": "application/json", Origin: ORIGIN, ...headers },
+    headers: {
+      "content-type": "application/json",
+      Origin: ORIGIN,
+      // Unique remote address unless overridden: attempts (not just
+      // acceptances) consume the shared-window rate budget, so each post
+      // without an explicit IP must not contend for the same bucket.
+      "CF-Connecting-IP": crypto.randomUUID(),
+      ...headers,
+    },
     body: JSON.stringify(body),
   }, env);
 }
 
 async function draftCount(env: Env): Promise<number> {
   const row = await env.DB.prepare("SELECT COUNT(*) AS n FROM client_intake_drafts").first<{ n: number }>();
+  return row?.n ?? 0;
+}
+
+async function rejectedCount(env: Env, reason?: string): Promise<number> {
+  const row = reason
+    ? await env.DB.prepare("SELECT COUNT(*) AS n FROM client_intake_drafts WHERE status = 'REJECTED' AND rejection_reason = ?").bind(reason).first<{ n: number }>()
+    : await env.DB.prepare("SELECT COUNT(*) AS n FROM client_intake_drafts WHERE status = 'REJECTED'").first<{ n: number }>();
   return row?.n ?? 0;
 }
 
@@ -184,17 +202,60 @@ describe("public client intake", () => {
     expect(rejected.headers.get("access-control-allow-origin")).toBe(ORIGIN);
   });
 
-  it("rejects a TURNSTILE failure before any durable write", async () => {
+  it("records a TURNSTILE failure as a REJECTED ledger row without the token", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ success: false }), { status: 200 })));
     const env = runtimeEnv();
-    const before = await draftCount(env);
+    const acceptedBefore = await draftCount(env);
     const noToken = JSON.parse(JSON.stringify(draftPayload())) as Record<string, unknown>;
     noToken.turnstileToken = "";
     const failed = await post(app(env), env, noToken);
     const missing = await post(app(env), env, (({ turnstileToken: _token, ...rest }) => rest)(JSON.parse(JSON.stringify(draftPayload())) as Record<string, unknown>));
     expect(failed.status).toBe(403);
     expect(missing.status).toBe(403);
-    expect(await draftCount(env)).toBe(before);
+
+    // Incident remediation: the rejected attempts are REJECTED ledger rows —
+    // recoverable operator-side — never SUBMITTED drafts, and the Turnstile
+    // token is never persisted.
+    const rows = await env.DB.prepare(
+      "SELECT id, status, rejection_reason, payload_json, business_name FROM client_intake_drafts WHERE created_at >= ? ORDER BY created_at"
+    )
+      .bind(new Date(Date.now() - 60_000).toISOString())
+      .all<{ id: string; status: string; rejection_reason: string | null; payload_json: string; business_name: string }>();
+    const recent = (rows.results ?? []).filter((row) => row.status === "REJECTED" && row.rejection_reason === "TURNSTILE_FAILED");
+    expect(recent.length).toBeGreaterThanOrEqual(2);
+    for (const row of recent) {
+      expect(JSON.stringify(JSON.parse(row.payload_json))).not.toContain("turnstileToken");
+      expect(row.business_name).toBe("Harbour Lights Cafe");
+    }
+    expect(await rejectedCount(env, "TURNSTILE_FAILED")).toBeGreaterThanOrEqual(2);
+    void acceptedBefore;
+  });
+
+  it("records a VALIDATION failure as a REJECTED ledger row with the raw payload", async () => {
+    const env = runtimeEnv();
+    const payload = draftPayload();
+    delete (payload.business as Record<string, unknown>).businessHours;
+    const before = await rejectedCount(env, "VALIDATION_FAILED");
+    const response = await post(app(env), env, payload);
+    expect(response.status).toBe(400);
+    const rows = await env.DB.prepare(
+      "SELECT payload_json, submitter_name, submitter_email FROM client_intake_drafts WHERE status = 'REJECTED' AND rejection_reason = 'VALIDATION_FAILED'"
+    ).all<{ payload_json: string; submitter_name: string; submitter_email: string }>();
+    expect((rows.results ?? []).length).toBeGreaterThan(before);
+    const mine = (rows.results ?? []).find((row) => (JSON.parse(row.payload_json) as { business?: { businessName?: string } }).business?.businessName === "Harbour Lights Cafe");
+    expect(mine).toBeTruthy();
+    expect(mine?.submitter_name).toBe("Jane Submitter");
+  });
+
+  it("a rejected attempt never carries conversion markers or a generation", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ success: false }), { status: 200 })));
+    const env = runtimeEnv();
+    const response = await post(app(env), env, draftPayload());
+    expect(response.status).toBe(403);
+    const row = await env.DB.prepare(
+      "SELECT converted_site_id, converted_site_generation_id, converted_build_mode FROM client_intake_drafts WHERE status = 'REJECTED' ORDER BY created_at DESC LIMIT 1"
+    ).first<{ converted_site_id: string | null; converted_site_generation_id: string | null; converted_build_mode: string | null }>();
+    expect(row).toMatchObject({ converted_site_id: null, converted_site_generation_id: null, converted_build_mode: null });
   });
 
   it("verifies with the DEDICATED client-intake secret — never the Form Service secret", async () => {
@@ -220,14 +281,14 @@ describe("public client intake", () => {
   it("fails closed without CLIENT_INTAKE_TURNSTILE_SECRET_KEY and never falls back to TURNSTILE_SECRET_KEY", async () => {
     // The generated-sites Form Service secret is deliberately STILL present
     // here: the intake endpoint must reject anyway (distinct widgets, no
-    // fallback) and must not write anything.
+    // fallback). The rejection leaves a REJECTED ledger row so a real client
+    // caught by a platform misconfiguration stays recoverable.
     const env = runtimeEnv();
     delete (env as unknown as Record<string, unknown>).CLIENT_INTAKE_TURNSTILE_SECRET_KEY;
-    const before = await draftCount(env);
     const response = await post(app(env), env, draftPayload(), { "CF-Connecting-IP": crypto.randomUUID() });
     expect(response.status).toBe(403);
     expect(((await response.json()) as { error: { code: string } }).error.code).toBe("TURNSTILE_FAILED");
-    expect(await draftCount(env)).toBe(before);
+    expect(await rejectedCount(env, "TURNSTILE_FAILED")).toBeGreaterThanOrEqual(1);
   });
 
   it("rejects origins outside the allowlist", async () => {
@@ -259,6 +320,14 @@ describe("public client intake", () => {
     (sixth.business as Record<string, unknown>).businessName = "Rate Limit Cafe 6";
     const response = await post(app(env), env, sixth, headers);
     expect(response.status).toBe(429);
+    // The first blocked attempt of the window is the ONE rate-limited ledger
+    // row for this source — flooding never earns additional durable writes.
+    const beforeFlood = await rejectedCount(env, "RATE_LIMITED");
+    expect(beforeFlood).toBeGreaterThanOrEqual(1);
+    const seventh = draftPayload();
+    (seventh.business as Record<string, unknown>).businessName = "Rate Limit Cafe 7";
+    expect((await post(app(env), env, seventh, headers)).status).toBe(429);
+    expect(await rejectedCount(env, "RATE_LIMITED")).toBe(beforeFlood);
     // No raw IP anywhere in the rate table.
     const rows = await env.DB.prepare("SELECT hashed_ip FROM public_intake_rate_limits").all<{ hashed_ip: string }>();
     for (const row of rows.results ?? []) expect(row.hashed_ip).not.toContain("203.0.113.10");

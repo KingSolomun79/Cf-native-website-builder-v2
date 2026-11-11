@@ -53,3 +53,4 @@ tests/_generated-migrations.ts
 .tmp-exp-phase1/
 .tmp-exp-transport/
 .qa-tmp/
+.zcode/

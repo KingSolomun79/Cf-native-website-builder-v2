@@ -21,6 +21,8 @@ import { getObject } from "../lib/assets";
 import { appendBuildWorkflowEvent } from "./lifecycle";
 import { getBuildStageArtifact } from "./stage-artifacts";
 import { buildVersionSourceKey } from "./artifact-keys";
+import { getSiteAddress } from "./site-address";
+import { ensureSiteAddressFormOrigin } from "./form-service";
 
 export type PublicationErrorCode =
   | "BUILD_NOT_FOUND"
@@ -146,6 +148,11 @@ export interface PublishInput {
 export interface PublicationResult {
   publicationId: string;
   attempt: number;
+  /** The Site's stable public address (issue #48). Null only for a legacy
+   *  Site still awaiting address backfill. */
+  siteUrl: string | null;
+  /** Internal workers.dev origin of the immutable published Worker — never
+   *  the visitor-facing URL. */
   publishedUrl: string;
   workerName: string;
   artifactManifestHash: string;
@@ -222,9 +229,12 @@ export async function publishApprovedBuildVersion(
       .bind(input.siteId)
       .first<{ current_build_version_id: string }>();
     if (currentState?.current_build_version_id === input.buildVersionId) {
+      const address = await getSiteAddress(env, input.siteId);
+      await ensurePublishedFormOrigin(env, input.siteId);
       return {
         publicationId: existing.id,
         attempt: existing.attempt,
+        siteUrl: address?.url ?? null,
         publishedUrl: existing.published_url,
         workerName: existing.worker_name,
         artifactManifestHash: existing.artifact_manifest_hash,
@@ -342,9 +352,13 @@ export async function publishApprovedBuildVersion(
     detail: `Published Version live at ${deployed.publishedUrl}${previous ? `; previous Published Version retained as Rollback Version for ${rollbackWindowDays(env)} day(s)` : ""}`,
   });
 
+  await ensurePublishedFormOrigin(env, input.siteId);
+
+  const address = await getSiteAddress(env, input.siteId);
   return {
     publicationId,
     attempt,
+    siteUrl: address?.url ?? null,
     publishedUrl: deployed.publishedUrl,
     workerName,
     artifactManifestHash: manifest.artifactManifestHash,
@@ -352,12 +366,29 @@ export async function publishApprovedBuildVersion(
   };
 }
 
+// Publication setup for the visitor-facing surface (issue #48, decision 132):
+// the stable Site Address must be the Site's exact allowed public form Origin
+// once a Published Version is being served. Mutable Site Configuration is the
+// operator's to own — a provisioning gap is logged and never fails a
+// publication that already deployed the exact approved bytes.
+async function ensurePublishedFormOrigin(env: Env, siteId: string): Promise<void> {
+  try {
+    await ensureSiteAddressFormOrigin(env, siteId, env.WAZIBIZ_ADMIN_EMAIL);
+  } catch (error) {
+    console.error(`[publication] form-origin provisioning failed for site ${siteId}: ${(error as Error).message}`);
+  }
+}
+
 // ── Rollback ────────────────────────────────────────────────────────────────
 
 export interface RollbackResult {
   restoredBuildVersionId: string;
   restoredPublicationId: string;
+  /** Internal workers.dev origin of the restored published Worker. */
   restoredUrl: string;
+  /** The Site's stable public address — unchanged by the rollback (the
+   *  gateway now serves the restored version on the same hostname). */
+  siteUrl: string | null;
 }
 
 export async function rollbackPublication(
@@ -440,21 +471,27 @@ export async function rollbackPublication(
     detail: `Rollback restored this exact previously published Build Version without a new Build, Build Version, Approval or regeneration; Site Configuration unchanged`,
   });
 
+  const address = await getSiteAddress(env, input.siteId);
   return {
     restoredBuildVersionId: restored.build_version_id,
     restoredPublicationId: restored.id,
     restoredUrl: restored.published_url,
+    siteUrl: address?.url ?? null,
   };
 }
 
 // ── Reader ──────────────────────────────────────────────────────────────────
 
 export interface PublicationStateView {
+  /** The Site's stable public address; null for a legacy Site awaiting
+   *  address backfill. Same hostname across every publication and rollback. */
+  siteUrl: string | null;
   current: { publicationId: string; buildVersionId: string; url: string } | null;
   rollback: { publicationId: string; buildVersionId: string; expiresAt: string | null } | null;
 }
 
 export async function getPublicationState(env: Env, siteId: string): Promise<PublicationStateView> {
+  const address = await getSiteAddress(env, siteId);
   const state = await env.DB.prepare("SELECT * FROM site_published_state WHERE site_id = ?")
     .bind(siteId)
     .first<{
@@ -464,11 +501,12 @@ export async function getPublicationState(env: Env, siteId: string): Promise<Pub
       rollback_build_version_id: string | null;
       rollback_expires_at: string | null;
     }>();
-  if (!state) return { current: null, rollback: null };
+  if (!state) return { siteUrl: address?.url ?? null, current: null, rollback: null };
   const current = await env.DB.prepare("SELECT published_url FROM publications WHERE id = ?")
     .bind(state.current_publication_id)
     .first<{ published_url: string }>();
   return {
+    siteUrl: address?.url ?? null,
     current: {
       publicationId: state.current_publication_id,
       buildVersionId: state.current_build_version_id,

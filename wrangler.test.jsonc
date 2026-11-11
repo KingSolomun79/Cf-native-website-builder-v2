@@ -30,6 +30,8 @@
   },
   "vars": {
     "PUBLIC_APP_URL": "https://test.example.com",
+    "SITES_BASE_DOMAIN": "test.example.com",
+    "PUBLISHED_ORIGIN_SUFFIX": "wazibizwebsites.workers.dev",
     "WEBHOOK_SECRET": "test-webhook-secret",
     "OPERATOR_CAPABILITY_SECRET": "test-operator-capability-secret",
     "WAZIBIZ_SENDER_EMAIL": "noreply@staging.wazibiz.example",

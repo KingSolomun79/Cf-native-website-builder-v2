@@ -28,8 +28,15 @@ import {
 import { CreativeDirectionSchema, type CreativeDirection } from "./creative-direction";
 import type { ReferenceInput } from "./lifecycle-schema";
 
-export const DRAFT_STATUSES = ["SUBMITTED", "IN_REVIEW", "GENERATION_STARTED"] as const;
+export const DRAFT_STATUSES = ["SUBMITTED", "IN_REVIEW", "GENERATION_STARTED", "REJECTED"] as const;
 export type DraftStatus = (typeof DRAFT_STATUSES)[number];
+
+// Why a public submission was rejected before becoming a real draft (incident
+// remediation 2026-09-23: rejected attempts previously left zero trace, so a
+// real client's brief could be lost invisibly). RATE_LIMITED is recorded once
+// per source+window at the cap boundary, never for every blocked attempt.
+export const REJECTION_REASONS = ["VALIDATION_FAILED", "TURNSTILE_FAILED", "RATE_LIMITED"] as const;
+export type RejectionReason = (typeof REJECTION_REASONS)[number];
 
 // The public form's contact/identity block. Private by design: it labels the
 // DRAFT (and the admin notification), never the website.
@@ -91,9 +98,11 @@ export interface IntakeDraftRow {
   business_name: string;
   submitter_name: string;
   submitter_email: string;
+  rejection_reason: string | null;
   admin_notes: string | null;
   converted_site_id: string | null;
   converted_site_generation_id: string | null;
+  recovered_site_generation_id: string | null;
   converted_onboarding_submission_id: string | null;
   converted_build_mode: string | null;
   created_at: string;
@@ -101,7 +110,13 @@ export interface IntakeDraftRow {
 }
 
 export class IntakeDraftError extends Error {
-  readonly code: "DRAFT_INVALID" | "DRAFT_NOT_FOUND" | "DRAFT_IMMUTABLE" | "DRAFT_ALREADY_CONVERTED";
+  readonly code:
+    | "DRAFT_INVALID"
+    | "DRAFT_NOT_FOUND"
+    | "DRAFT_IMMUTABLE"
+    | "DRAFT_ALREADY_CONVERTED"
+    | "WORKFLOW_START_FAILED"
+    | "RECOVERY_CONFLICT";
 
   constructor(code: IntakeDraftError["code"], message: string) {
     super(message);
@@ -139,9 +154,11 @@ function rowToDraft(row: IntakeDraftRow): IntakeDraft {
     businessName: row.business_name,
     submitterName: row.submitter_name,
     submitterEmail: row.submitter_email,
+    rejectionReason: (row.rejection_reason as RejectionReason | null) ?? null,
     adminNotes: row.admin_notes,
     convertedSiteId: row.converted_site_id,
     convertedSiteGenerationId: row.converted_site_generation_id,
+    recoveredSiteGenerationId: row.recovered_site_generation_id,
     convertedOnboardingSubmissionId: row.converted_onboarding_submission_id,
     convertedBuildMode: row.converted_build_mode,
     createdAt: row.created_at,
@@ -156,9 +173,13 @@ export interface IntakeDraft {
   businessName: string;
   submitterName: string;
   submitterEmail: string;
+  rejectionReason: RejectionReason | null;
   adminNotes: string | null;
   convertedSiteId: string | null;
   convertedSiteGenerationId: string | null;
+  /** The generation the draft's recovery currently governs (FDR decision
+   *  137) — null until the first recovery regeneration. */
+  recoveredSiteGenerationId: string | null;
   convertedOnboardingSubmissionId: string | null;
   convertedBuildMode: string | null;
   createdAt: string;
@@ -188,6 +209,32 @@ export async function createIntakeDraft(
   return await getIntakeDraft(env, id) as IntakeDraft;
 }
 
+/**
+ * Durable record of a PUBLIC submission rejected BEFORE draft acceptance
+ * (rate limit / schema validation / Turnstile). The raw body is stored minus
+ * the Turnstile token; labels are best-effort extractions because a rejected
+ * body may be arbitrarily malformed. A rejected attempt never starts a Site
+ * Generation and is never emailed as a new brief; it exists so the operator
+ * can see and rescue the client's data. Best-effort by design: a failure here
+ * is logged by the caller and the original 4xx verdict still returns.
+ */
+export async function createRejectedIntakeDraft(
+  env: Env,
+  rawPayload: unknown,
+  reason: RejectionReason,
+  labels: { businessName: string; submitterName: string; submitterEmail: string }
+): Promise<string> {
+  const id = generateId();
+  const now = nowIso();
+  await env.DB.prepare(
+    `INSERT INTO client_intake_drafts (id, status, payload_json, business_name, submitter_name, submitter_email, rejection_reason, created_at, updated_at)
+     VALUES (?, 'REJECTED', ?, ?, ?, ?, ?, ?, ?)`
+  )
+    .bind(id, JSON.stringify(rawPayload ?? null), labels.businessName, labels.submitterName, labels.submitterEmail, reason, now, now)
+    .run();
+  return id;
+}
+
 export async function getIntakeDraft(env: Env, id: string): Promise<IntakeDraft | null> {
   const row = await env.DB.prepare("SELECT * FROM client_intake_drafts WHERE id = ?")
     .bind(id)
@@ -201,10 +248,14 @@ export interface IntakeDraftListItem {
   businessName: string;
   submitterName: string;
   submitterEmail: string;
+  rejectionReason: RejectionReason | null;
   createdAt: string;
   updatedAt: string;
   convertedSiteId: string | null;
   convertedSiteGenerationId: string | null;
+  /** recovered_site_generation_id ?? converted_site_generation_id — the
+   *  generation the draft currently governs (drives progress display). */
+  latestSiteGenerationId: string | null;
   convertedBuildMode: string | null;
 }
 
@@ -214,9 +265,11 @@ interface IntakeDraftListRow {
   business_name: string;
   submitter_name: string;
   submitter_email: string;
+  rejection_reason: string | null;
   created_at: string;
   updated_at: string;
   converted_site_id: string | null;
+  recovered_site_generation_id: string | null;
   converted_site_generation_id: string | null;
   converted_build_mode: string | null;
 }
@@ -227,8 +280,8 @@ export async function listIntakeDrafts(
 ): Promise<IntakeDraftListItem[]> {
   const limit = Math.min(Math.max(options.limit ?? 100, 1), 200);
   const rows = await env.DB.prepare(
-    `SELECT id, status, business_name, submitter_name, submitter_email, created_at, updated_at,
-            converted_site_id, converted_site_generation_id, converted_build_mode
+    `SELECT id, status, business_name, submitter_name, submitter_email, rejection_reason, created_at, updated_at,
+            converted_site_id, recovered_site_generation_id, converted_site_generation_id, converted_build_mode
      FROM client_intake_drafts ORDER BY updated_at DESC, created_at DESC LIMIT ?`
   )
     .bind(limit)
@@ -239,10 +292,12 @@ export async function listIntakeDrafts(
     businessName: row.business_name,
     submitterName: row.submitter_name,
     submitterEmail: row.submitter_email,
+    rejectionReason: (row.rejection_reason as RejectionReason | null) ?? null,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     convertedSiteId: row.converted_site_id,
     convertedSiteGenerationId: row.converted_site_generation_id,
+    latestSiteGenerationId: row.recovered_site_generation_id ?? row.converted_site_generation_id,
     convertedBuildMode: row.converted_build_mode,
   }));
 }
@@ -288,7 +343,10 @@ export async function editIntakeDraft(
     );
   }
 
-  const nextStatus: DraftStatus = edit.markInReview && draft.status === "SUBMITTED" ? "IN_REVIEW" : draft.status;
+  const nextStatus: DraftStatus =
+    edit.markInReview && (draft.status === "SUBMITTED" || draft.status === "REJECTED")
+      ? "IN_REVIEW"
+      : draft.status;
   const adminNotes =
     edit.adminNotes !== undefined ? (edit.adminNotes?.trim() ? edit.adminNotes.trim() : null) : draft.adminNotes;
 
@@ -422,10 +480,18 @@ export interface DraftConversionResult {
 /**
  * Validate & Generate — the ONLY initial generation start action for a draft.
  * Idempotent: once a draft carries converted_site_generation_id, repeated
- * calls return the existing conversion and never create a second Site
- * Generation. The canonical payload goes through the EXISTING canonical
- * domain validation and lifecycle services (startSiteGeneration + the
- * workflow binding) — no internal HTTP hop, no new generation semantics.
+ * calls never create a second Site Generation. The canonical payload goes
+ * through the EXISTING canonical domain validation and lifecycle services
+ * (startSiteGeneration + the workflow binding) — no internal HTTP hop, no new
+ * generation semantics.
+ *
+ * Crash-safety (incident remediation 2026-09-23): the draft's conversion
+ * markers commit BEFORE the workflow is created. A workflow-start failure
+ * therefore leaves a marked draft over an unrun generation (retry heals it —
+ * see below) instead of an unmarked draft that a retry would duplicate into
+ * a second Site Generation. A retry over a converted draft whose generation
+ * has NO Build (re)starts that generation's workflow exactly once; a
+ * generation with a Build is left untouched.
  */
 export async function validateAndGenerateFromDraft(
   env: Env,
@@ -445,12 +511,30 @@ export async function validateAndGenerateFromDraft(
         `Intake Draft already generated as '${draft.convertedBuildMode}' — changing Build Mode requires a new Site Generation`
       );
     }
+    // Crash-healing retry: no Build means the generation never ran (its
+    // workflow start failed or died before step 1.0) — restart it.
+    const build = await env.DB.prepare(
+      "SELECT 1 AS live FROM builds WHERE site_generation_id = ? LIMIT 1"
+    )
+      .bind(draft.convertedSiteGenerationId)
+      .first<{ live: number }>();
+    let workflowInstanceId = "";
+    if (!build) {
+      try {
+        workflowInstanceId = await startWorkflow(draft.convertedSiteGenerationId);
+      } catch (error) {
+        throw new IntakeDraftError(
+          "WORKFLOW_START_FAILED",
+          `Workflow start for Site Generation ${draft.convertedSiteGenerationId} failed: ${(error as Error).message}`
+        );
+      }
+    }
     return { converted: {
       draft,
       siteId: draft.convertedSiteId ?? "",
       onboardingSubmissionId: draft.convertedOnboardingSubmissionId ?? "",
       siteGenerationId: draft.convertedSiteGenerationId,
-      workflowInstanceId: "",
+      workflowInstanceId,
     }, alreadyConverted: true };
   }
 
@@ -465,18 +549,43 @@ export async function validateAndGenerateFromDraft(
   // Existing canonical lifecycle services — the draft layer never reimplements them.
   const { startSiteGeneration } = await import("./lifecycle");
   const started = await startSiteGeneration(env, { siteId: null, payload: built.payload });
-  const workflowInstanceId = await startWorkflow(started.siteGenerationId);
 
-  const now = nowIso();
-  await env.DB.prepare(
+  // Markers BEFORE workflow creation: exactly-once under concurrency via the
+  // guarded UPDATE, and a workflow.create crash can no longer duplicate the
+  // generation on retry.
+  const update = await env.DB.prepare(
     `UPDATE client_intake_drafts
      SET status = 'GENERATION_STARTED',
          converted_site_id = ?, converted_site_generation_id = ?,
          converted_onboarding_submission_id = ?, converted_build_mode = ?, updated_at = ?
      WHERE id = ? AND converted_site_generation_id IS NULL`
   )
-    .bind(started.siteId, started.siteGenerationId, started.onboardingSubmissionId, input.buildMode, now, draftId)
+    .bind(started.siteId, started.siteGenerationId, started.onboardingSubmissionId, input.buildMode, nowIso(), draftId)
     .run();
+  if ((update.meta.changes ?? 0) === 0) {
+    // Lost a concurrent conversion race — report the existing conversion.
+    const existing = await getIntakeDraft(env, draftId);
+    if (!existing?.convertedSiteGenerationId) {
+      throw new IntakeDraftError("DRAFT_INVALID", "Intake Draft conversion lost an unexpected race — retry");
+    }
+    return { converted: {
+      draft: existing,
+      siteId: existing.convertedSiteId ?? "",
+      onboardingSubmissionId: existing.convertedOnboardingSubmissionId ?? "",
+      siteGenerationId: existing.convertedSiteGenerationId,
+      workflowInstanceId: "",
+    }, alreadyConverted: true };
+  }
+
+  let workflowInstanceId: string;
+  try {
+    workflowInstanceId = await startWorkflow(started.siteGenerationId);
+  } catch (error) {
+    throw new IntakeDraftError(
+      "WORKFLOW_START_FAILED",
+      `Site Generation ${started.siteGenerationId} was created but its workflow could not be started: ${(error as Error).message}. Retry Validate & Generate — it heals the workflow start without creating a new generation.`
+    );
+  }
 
   const updated = await getIntakeDraft(env, draftId);
   return {
@@ -488,6 +597,172 @@ export async function validateAndGenerateFromDraft(
       workflowInstanceId,
     },
     alreadyConverted: false,
+  };
+}
+
+export interface DraftRecoveryResult {
+  siteId: string;
+  siteGenerationId: string;
+  workflowInstanceId: string;
+  /** True when no new generation was created because the governed
+   *  generation never started — the workflow start was healed instead. */
+  healedWorkflowStart: boolean;
+}
+
+// Terminal outcomes that leave the Site without a live release candidate and
+// therefore open the recovery path (FDR decision 137).
+const RECOVERY_ALLOWED_BUILD_STATES = new Set(["FAILED", "DEGRADED", "HUMAN_REVIEW_REQUIRED"]);
+
+/**
+ * Recovery regeneration (FDR decision 137): starts a NEW Site Generation on
+ * the SAME stable Site from a FRESH immutable Onboarding Submission built
+ * from the draft's CURRENT payload — never a re-run of a terminal Build,
+ * never a mutation of history, never a mode change. Allowed only while the
+ * governed generation is the Site's latest AND its latest Build is terminally
+ * failed/gated (or it has no Build because its workflow start failed — that
+ * case heals the start instead of stacking generations). The recovery pointer
+ * (recovered_site_generation_id) is advanced with a compare-and-set against
+ * the previous pointer so concurrent operator clicks converge on one winner.
+ */
+export async function regenerateFromDraft(
+  env: Env,
+  draftId: string,
+  input: Omit<DraftConversionInput, "buildMode">,
+  startWorkflow: (siteGenerationId: string) => Promise<string>
+): Promise<{ recovered: DraftRecoveryResult }> {
+  let draft = await getIntakeDraft(env, draftId);
+  if (!draft) throw new IntakeDraftError("DRAFT_NOT_FOUND", `Intake Draft ${draftId} does not exist`);
+  if (!draft.convertedSiteGenerationId || !draft.convertedSiteId || !draft.convertedBuildMode) {
+    throw new IntakeDraftError("DRAFT_INVALID", "Recovery regeneration requires a converted draft — use Validate & Generate first");
+  }
+
+  const governedGenerationId = draft.recoveredSiteGenerationId ?? draft.convertedSiteGenerationId;
+  const latest = await env.DB.prepare(
+    "SELECT id FROM site_generations WHERE site_id = ? ORDER BY sequence_number DESC LIMIT 1"
+  )
+    .bind(draft.convertedSiteId)
+    .first<{ id: string }>();
+  if (latest?.id !== governedGenerationId) {
+    throw new IntakeDraftError(
+      "RECOVERY_CONFLICT",
+      "Recovery regeneration only applies to the Site's latest generation — the Site has moved on through another path"
+    );
+  }
+
+  const buildRows = await env.DB.prepare(
+    "SELECT state FROM builds WHERE site_generation_id = ? ORDER BY created_at DESC, id DESC LIMIT 1"
+  )
+    .bind(governedGenerationId)
+    .first<{ state: string }>();
+
+  if (!buildRows) {
+    // Governed generation never ran (workflow start failed pre-step-1.0):
+    // heal the start instead of stacking another generation on top of it.
+    const workflowInstanceId = await startWorkflow(governedGenerationId);
+    return {
+      recovered: {
+        siteId: draft.convertedSiteId,
+        siteGenerationId: governedGenerationId,
+        workflowInstanceId,
+        healedWorkflowStart: true,
+      },
+    };
+  }
+
+  if (!RECOVERY_ALLOWED_BUILD_STATES.has(buildRows.state)) {
+    throw new IntakeDraftError(
+      "RECOVERY_CONFLICT",
+      `The Site's latest build is '${buildRows.state}' — recovery regeneration opens only after FAILED, DEGRADED or HUMAN_REVIEW_REQUIRED`
+    );
+  }
+
+  // Same-design-origin inheritance: the recovery preserves the governed
+  // generation's design origin. A conversion-time-only referenceUrl never
+  // persists on the draft, so when the draft's mutable payload carries no
+  // Reference input the governed generation's FROZEN submission supplies it
+  // (likewise an admin-authored creativeDirection for ORIGINAL_DESIGN).
+  const previous = await env.DB.prepare(
+    `SELECT s.payload_json FROM onboarding_submissions s
+     JOIN site_generations g ON g.onboarding_submission_id = s.id WHERE g.id = ?`
+  )
+    .bind(governedGenerationId)
+    .first<{ payload_json: string }>();
+  const previousPayload = previous
+    ? (JSON.parse(previous.payload_json) as {
+        reference?: { screenshotR2Key?: string; url?: string };
+        creativeDirection?: Record<string, unknown>;
+      })
+    : {};
+
+  let effectiveInput: Omit<DraftConversionInput, "buildMode"> = { ...input };
+  if (draft.convertedBuildMode === "REFERENCE_BOUND") {
+    const hasReference = draft.payload.referenceScreenshotR2Key || draft.payload.referenceUrl || input.referenceUrl;
+    if (!hasReference) {
+      const inherited = previousPayload.reference ?? {};
+      if (inherited.screenshotR2Key || inherited.url) {
+        const nextPayload: IntakeDraftPayload = JSON.parse(JSON.stringify(draft.payload));
+        if (inherited.screenshotR2Key) nextPayload.referenceScreenshotR2Key = inherited.screenshotR2Key;
+        if (inherited.url && !nextPayload.referenceUrl) nextPayload.referenceUrl = inherited.url;
+        await env.DB.prepare("UPDATE client_intake_drafts SET payload_json = ?, updated_at = ? WHERE id = ?")
+          .bind(JSON.stringify(nextPayload), nowIso(), draftId)
+          .run();
+        const refreshed = await getIntakeDraft(env, draftId);
+        if (refreshed) draft = refreshed;
+      }
+    }
+  } else if (!effectiveInput.creativeDirection && !creativeDirectionFromPreferences(draft.payload.designPreferences)) {
+    const inherited = previousPayload.creativeDirection;
+    if (inherited && Value.Check(CreativeDirectionSchema, inherited)) {
+      effectiveInput = { ...effectiveInput, creativeDirection: inherited };
+    }
+  }
+
+  const buildMode = draft.convertedBuildMode as "REFERENCE_BOUND" | "ORIGINAL_DESIGN";
+  const built = buildCanonicalSubmissionPayload(draft, { buildMode, ...effectiveInput });
+  if (!built.valid) {
+    throw new IntakeDraftError(
+      "DRAFT_INVALID",
+      `Recovery regeneration rejected: ${built.issues.map((i) => `${i.path} ${i.message}`).join("; ")}`
+    );
+  }
+
+  const { startSiteGeneration } = await import("./lifecycle");
+  const started = await startSiteGeneration(env, { siteId: draft.convertedSiteId, payload: built.payload });
+
+  // Compare-and-set the recovery pointer: a concurrent operator click loses
+  // cleanly and reports the winner's generation instead of racing workflows.
+  const claim = await env.DB.prepare(
+    `UPDATE client_intake_drafts
+     SET recovered_site_generation_id = ?, updated_at = ?
+     WHERE id = ? AND COALESCE(recovered_site_generation_id, converted_site_generation_id) = ?`
+  )
+    .bind(started.siteGenerationId, nowIso(), draftId, governedGenerationId)
+    .run();
+  if ((claim.meta.changes ?? 0) === 0) {
+    const winner = await getIntakeDraft(env, draftId);
+    throw new IntakeDraftError(
+      "RECOVERY_CONFLICT",
+      `Recovery already advanced this draft to generation ${winner?.recoveredSiteGenerationId ?? "unknown"} — reload and review`
+    );
+  }
+
+  let workflowInstanceId: string;
+  try {
+    workflowInstanceId = await startWorkflow(started.siteGenerationId);
+  } catch (error) {
+    throw new IntakeDraftError(
+      "WORKFLOW_START_FAILED",
+      `Recovery generation ${started.siteGenerationId} was created but its workflow could not be started: ${(error as Error).message}. Retry — it heals the workflow start without creating a new generation.`
+    );
+  }
+
+  return {
+    recovered: {
+      siteId: started.siteId,
+      siteGenerationId: started.siteGenerationId,
+      workflowInstanceId,
+      healedWorkflowStart: false,
+    },
   };
 }
 

@@ -183,7 +183,7 @@ describe("Coding Plan routing and budgets (GO §4/§10)", () => {
 describe("stage discipline: SIX calls, one semantic generation each (GO §4)", () => {
   it("§3 the prompt contract is v8 and carries the raw-output discipline", () => {
     const composed = composeStagePrompt("simple-website-builder");
-    expect(composed.promptVersion).toBe("v8");
+    expect(composed.promptVersion).toBe("v10");
     expect(composed.systemPrompt).toContain("RAW source");
     expect(composed.systemPrompt).toContain("no Markdown fences");
     expect(composed.systemPrompt).toContain("DOM-FIRST");
@@ -239,6 +239,25 @@ describe("stage discipline: SIX calls, one semantic generation each (GO §4)", (
     // the final bundle still wires the shared assets (GO §26)
     expect(result.bundle.pages.home).toContain('href="site.css"');
     expect(result.bundle.pages.home).toContain('src="site.js"');
+  });
+
+  it("§4b the CSS/JS prompts carry the RECONCILED state-hook contract (2026-09-15 correction)", async () => {
+    const ctx = await scaffoldBuild("references/simple/dom-first-prompt-contract.png");
+    const seenUsers: Record<string, string> = {};
+    const seam = scriptedSixCallSeam({ onCall: (call, _s, user) => (seenUsers[call] = user) });
+    await runSimpleWebsiteBuilderStage(env, stageInput(ctx, blueprint(), seam.generate) as Parameters<typeof runSimpleWebsiteBuilderStage>[1]);
+
+    // The CSS prompt names state-hook minting as the ONE anchor exception and
+    // states its mechanical enforcement — no contradiction with the anchor rule
+    const css = seenUsers["site-css"];
+    expect(css).toContain("HARD ANCHOR RULE");
+    expect(css).toContain("THE ONE EXCEPTION — STATE HOOKS site.js ADOPTS");
+    expect(css).toContain("mechanically enforced");
+    expect(css).toContain("never hide content by default");
+    // the live .js-reveal rejection is named as evidence in the anchor rule
+    expect(css).toContain(".js-reveal");
+    // the JS prompt states its side of the enforced adoption contract
+    expect(seenUsers["site-js"]).toContain("mechanically validated");
   });
 
   it("§5 the assembled bundle passes SiteBundleSchema and persists under the deterministic strategy note", async () => {
@@ -457,7 +476,13 @@ describe("site.css cannot invent structure absent from the realized DOM (GO §26
     expect(cssSelectorFailures(anchored, pages(), CODE_JS)).toEqual([]);
   });
 
-  it("§19e the gate fails the STAGE closed: invented CSS structure never persists", async () => {
+  // 2026-09-15 correction: the unanchored-selector defect is now caught at the
+  // site-js PER-FILE seam (the JS call is validated to adopt every stylesheet
+  // selector anchored on no markup class), so the stage-level escape is
+  // SOURCE_INCOMPLETE attributed to the site-js run — earlier and with per-file
+  // forensics. The cssSelectorFailures unit tests above (§19a-§19d) remain the
+  // direct coverage of the end-of-stage gate, which stays as defense in depth.
+  it("§19e the stage fails closed: an unadopted invented selector never persists", async () => {
     const ctx = await scaffoldBuild("references/simple/dom-first-cssgate.png");
     const inventingCss = `.marketing-unicorn-band { display: grid; }\n${TOKENS_CSS}`;
     const seam = scriptedSixCallSeam({ css: inventingCss });
@@ -469,11 +494,54 @@ describe("site.css cannot invent structure absent from the realized DOM (GO §26
     }
     expect(thrown).toBeInstanceOf(SimpleWebsiteBuilderError);
     const error = thrown as SimpleWebsiteBuilderError;
-    expect(error.code).toBe("INVENTED_STRUCTURE");
-    expect(error.message).toContain("invented structure");
+    expect(error.code).toBe("SOURCE_INCOMPLETE");
+    expect(error.message).toContain(".marketing-unicorn-band");
+    expect(error.message).toContain("site.js");
     expect(seam.calls).toEqual(["home", "about", "services", "contact", "site-css", "site-js"]);
     expect(await getBuildStageArtifact<SiteBundle>(env, ctx.buildVersionId, "site_bundle")).toBeNull();
     expect(classifyStageFailure(error)).toBe("DETERMINISTIC_REVIEW_REQUIRED");
+  });
+
+  it("§19f the 2026-09-15 production incident shape (.js-reveal adopted by no one) fails at the site-js run with per-file forensics", async () => {
+    const ctx = await scaffoldBuild("references/simple/dom-first-cssgate-live.png");
+    const seam = scriptedSixCallSeam({ css: `${TOKENS_CSS}\n.js-reveal { opacity: 1; }\n` });
+    let thrown: unknown;
+    try {
+      await runSimpleWebsiteBuilderStage(env, stageInput(ctx, blueprint(), seam.generate) as Parameters<typeof runSimpleWebsiteBuilderStage>[1]);
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown).toBeInstanceOf(SimpleWebsiteBuilderError);
+    const error = thrown as SimpleWebsiteBuilderError;
+    expect(error.code).toBe("SOURCE_INCOMPLETE");
+    expect(error.message).toContain(".js-reveal");
+    // per-file forensics: the site-js run records WHY it was refused
+    const jsRun = await env.DB.prepare(
+      "SELECT outcome, error_summary FROM ai_stage_runs WHERE build_version_id = ? AND schema_version = 'builder-file/site-js/1'"
+    )
+      .bind(ctx.buildVersionId)
+      .first<{ outcome: string; error_summary: string }>();
+    expect(jsRun?.outcome).toBe("invalid");
+    expect(jsRun?.error_summary).toContain(".js-reveal");
+    expect(await getBuildStageArtifact<SiteBundle>(env, ctx.buildVersionId, "site_bundle")).toBeNull();
+  });
+
+  it("§19g a state hook the script DOES adopt is legitimate: the stage succeeds and the bundle persists", async () => {
+    const ctx = await scaffoldBuild("references/simple/dom-first-cssgate-adopted.png");
+    const mintingCss = `${TOKENS_CSS}\n.js-reveal { opacity: 1; }\n`;
+    const adoptingJs = `${CODE_JS}\nvar revealTargets = document.querySelectorAll('[data-reveal]'); if (revealTargets.length) { revealTargets[0].className = 'js-reveal'; }`;
+    const seam = scriptedSixCallSeam({ css: mintingCss, js: adoptingJs });
+    const result = await runSimpleWebsiteBuilderStage(env, stageInput(ctx, blueprint(), seam.generate) as Parameters<typeof runSimpleWebsiteBuilderStage>[1]);
+    expect(result.bundle.sharedCss).toContain(".js-reveal");
+    expect(await getBuildStageArtifact<SiteBundle>(env, ctx.buildVersionId, "site_bundle")).not.toBeNull();
+  });
+
+  it("§19h an anchored conditional state variant (.section.is-success) still passes the stage — conditionals are not invented structure", async () => {
+    const ctx = await scaffoldBuild("references/simple/dom-first-cssgate-anchored.png");
+    const conditionalCss = `${TOKENS_CSS}\n.section.is-success { color: var(--accent); }\n`;
+    const seam = scriptedSixCallSeam({ css: conditionalCss });
+    const result = await runSimpleWebsiteBuilderStage(env, stageInput(ctx, blueprint(), seam.generate) as Parameters<typeof runSimpleWebsiteBuilderStage>[1]);
+    expect(result.bundle.sharedCss).toContain(".section.is-success");
   });
 });
 
@@ -556,7 +624,7 @@ describe("provenance, cost telemetry and resume", () => {
     const ctx = await scaffoldBuild("references/simple/dom-first-resume.png");
     const provenance = {
       promptId: "simple-website-builder",
-      promptVersion: "v8",
+      promptVersion: "v10",
       promptDomainContractVersion: "1",
       model: "glm-5.3",
       schemaVersion: "builder-file/page-home/1",
@@ -607,7 +675,7 @@ describe("provenance, cost telemetry and resume", () => {
     const ctx = await scaffoldBuild("references/simple/dom-first-resume2.png");
     const provenance = {
       promptId: "simple-website-builder",
-      promptVersion: "v8",
+      promptVersion: "v10",
       promptDomainContractVersion: "1",
       model: "glm-5.3",
       schemaVersion: "builder-file/page-home/1",

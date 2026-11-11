@@ -319,3 +319,54 @@ export async function notifyBuildTerminal(env: Env, input: BuildTerminalNotifica
   await enqueueAdminNotification(env, { kind: input.terminal === "RELEASE_READY" ? "SITE_READY" : input.terminal === "HUMAN_REVIEW_REQUIRED" ? "SITE_HUMAN_REVIEW" : "GENERATION_FAILED", ...composed });
   await attemptAdminNotificationSend(env, composed.dedupeKey);
 }
+
+export interface AdminNotificationListItem {
+  id: string;
+  kind: string;
+  status: string;
+  attempts: number;
+  subject: string;
+  lastError: string | null;
+  createdAt: string;
+  sentAt: string | null;
+  nextAttemptAfter: string | null;
+}
+
+/**
+ * Read-only recent-activity view for the operator notifications page (incident
+ * remediation 2026-09-23: a failed admin email — e.g. the missed INTAKE_NEW —
+ * was previously invisible; the ledger always recorded it, nothing showed it).
+ */
+export async function listAdminNotifications(
+  env: Env,
+  options: { limit?: number } = {}
+): Promise<AdminNotificationListItem[]> {
+  const limit = Math.min(Math.max(options.limit ?? 100, 1), 500);
+  const rows = await env.DB.prepare(
+    `SELECT id, kind, status, attempts, subject, last_error, created_at, sent_at, next_attempt_after
+     FROM admin_notifications ORDER BY created_at DESC, id DESC LIMIT ?`
+  )
+    .bind(limit)
+    .all<{
+      id: string;
+      kind: string;
+      status: string;
+      attempts: number;
+      subject: string;
+      last_error: string | null;
+      created_at: string;
+      sent_at: string | null;
+      next_attempt_after: string | null;
+    }>();
+  return (rows.results ?? []).map((row) => ({
+    id: row.id,
+    kind: row.kind,
+    status: row.status,
+    attempts: row.attempts,
+    subject: row.subject,
+    lastError: row.last_error,
+    createdAt: row.created_at,
+    sentAt: row.sent_at,
+    nextAttemptAfter: row.next_attempt_after,
+  }));
+}

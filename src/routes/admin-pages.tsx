@@ -17,7 +17,8 @@
 import { Hono, type Context } from "hono";
 import type { Env } from "../env.d";
 import { requireCloudflareAccess } from "../domain/admin-access";
-import { getIntakeDraft, listIntakeDrafts, type IntakeDraft } from "../domain/intake-draft";
+import { getIntakeDraft, listIntakeDrafts, validateIntakeDraftPayload, type IntakeDraft } from "../domain/intake-draft";
+import { listAdminNotifications } from "../domain/admin-notifications";
 import { getAdminSiteReview, type AdminSiteReview } from "../domain/admin-review";
 
 type Bindings = Env;
@@ -50,6 +51,10 @@ const STYLES = `
   .badge.ready { border-color: var(--ok-line); color: var(--ok-ink); }
   .badge.review { border-color: #c98a3d; color: #f0c387; }
   .badge.failed { border-color: var(--err-line); color: var(--err-ink); }
+  .qa-failed { border: 1px solid var(--err-line); background: var(--err-bg); color: var(--err-ink); border-radius: 8px; padding: 0.75rem 1rem; margin: 0.7rem 0; font-size: 0.9rem; }
+  .qa-failed strong { color: var(--err-ink); }
+  .qa-failed ul { margin: 0.45rem 0 0.45rem; padding-left: 1.2rem; }
+  .qa-failed li { margin-bottom: 0.2rem; }
   .card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 1.4rem 1.6rem; margin-bottom: 1.4rem; }
   .card h2 { margin-top: 0; font-size: 1.15rem; }
   .card h3 { color: var(--ink); }
@@ -108,6 +113,7 @@ function Layout(props: { active: string; children?: unknown }) {
         <header>
           <span class="brand">Wazibiz Builder</span>
           <a href="/admin/intakes">Intakes</a>
+          <a href="/admin/notifications">Notifications</a>
         </header>
         <main>{props.children as never}</main>
       </body>
@@ -129,6 +135,8 @@ function displayStatus(status: string, latestBuildState: string | null, publishe
       if (latestBuildState === "HUMAN_REVIEW_REQUIRED") return { label: "Human Review", css: "review" };
       if (latestBuildState === "FAILED" || latestBuildState === "DEGRADED") return { label: "Failed", css: "failed" };
       return { label: "Generation Started", css: "" };
+    case "REJECTED":
+      return { label: "Rejected", css: "failed" };
     default:
       return { label: status, css: "" };
   }
@@ -141,12 +149,12 @@ async function IntakesPage(c: Context<{ Bindings: Env }>): Promise<Response> {
   for (const draft of drafts) {
     let latestBuildState: string | null = null;
     let published = false;
-    if (draft.convertedSiteGenerationId) {
+    if (draft.latestSiteGenerationId) {
       const build = await c.env.DB.prepare(
         `SELECT b.state FROM builds b
          WHERE b.site_generation_id = ? ORDER BY b.created_at DESC, b.id DESC LIMIT 1`
       )
-        .bind(draft.convertedSiteGenerationId)
+        .bind(draft.latestSiteGenerationId)
         .first<{ state: string }>();
       latestBuildState = build?.state ?? null;
       if (draft.convertedSiteId) {
@@ -172,6 +180,9 @@ async function IntakesPage(c: Context<{ Bindings: Env }>): Promise<Response> {
         <td>{draft.createdAt.slice(0, 16).replace("T", " ")}</td>
         <td>
           <span class={`badge ${display.css}`}>{display.label}</span>
+          {draft.status === "REJECTED" && draft.rejectionReason ? (
+            <div class="muted">{draft.rejectionReason}</div>
+          ) : null}
         </td>
         <td>{draft.convertedBuildMode ?? <span class="muted">—</span>}</td>
       </tr>
@@ -200,18 +211,22 @@ async function IntakesPage(c: Context<{ Bindings: Env }>): Promise<Response> {
 
 // ── Intake editor ────────────────────────────────────────────────────────────
 
-const EDITOR_JS = (apiPath: string) => `
+const EDITOR_JS = (apiPath: string, retryBuildMode: string | null) => `
 const API = '${apiPath}';
-function flash(message, isError) {
-  var el = document.getElementById('flash');
-  el.textContent = message;
-  el.style.display = 'block';
-  el.className = isError ? 'flash error' : 'flash';
+async function retryWorkflow() {
+  const response = await fetch(API + '/validate-and-generate', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ buildMode: '${retryBuildMode ?? ""}' }) });
+  const result = await response.json();
+  if (!response.ok && response.status !== 200) { flash('Retry failed: ' + (result.error && (result.error.message || result.error) || response.status), true); return; }
+  flash('Workflow started for the existing generation.');
+  setTimeout(function () { location.reload(); }, 600);
 }
-function extractError(result, fallback) {
-  if (!result || !result.error) return fallback;
-  if (typeof result.error === 'string') return result.error;
-  return result.error.message || result.error.code || fallback;
+async function regenerate() {
+  const response = await fetch(API + '/regenerate', { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' });
+  const result = await response.json();
+  if (!response.ok && response.status !== 200) { flash('Recovery failed: ' + (result.error && (result.error.message || result.error) || response.status), true); return; }
+  if (result.recovered && result.recovered.healedWorkflowStart) { flash('Workflow healed for the existing generation.'); }
+  else { flash('New generation started on the same site.'); }
+  setTimeout(function () { location.reload(); }, 600);
 }
 function serviceRow(name, description) {
   const div = document.createElement('div');
@@ -400,6 +415,30 @@ function textField(id: string, label: string, value: string, type = "text") {
 }
 
 async function IntakeEditorPage(c: Context<{ Bindings: Env }>, draft: IntakeDraft): Promise<Response> {
+  // A REJECTED attempt whose stored body is not a valid draft payload cannot
+  // drive the structured editor — render the diagnostic view instead so the
+  // operator can still read the raw submission and its rejection reason.
+  if (draft.status === "REJECTED" && !validateIntakeDraftPayload(draft.payload).valid) {
+    return RejectedIntakeDiagnosticPage(c, draft);
+  }
+  // Crash-safety + recovery affordances (FDR decision 137): a converted draft
+  // whose governed generation has NO build means the workflow start failed
+  // (offer the heal); a generation whose latest build is terminally
+  // failed/gated opens the recovery regeneration path.
+  let workflowNeverStarted = false;
+  let latestBuildState: string | null = null;
+  if (draft.convertedSiteGenerationId) {
+    const governedGenerationId = draft.recoveredSiteGenerationId ?? draft.convertedSiteGenerationId;
+    const buildRow = await c.env.DB.prepare(
+      "SELECT state FROM builds WHERE site_generation_id = ? ORDER BY created_at DESC, id DESC LIMIT 1"
+    )
+      .bind(governedGenerationId)
+      .first<{ state: string }>();
+    latestBuildState = buildRow?.state ?? null;
+    workflowNeverStarted = !buildRow;
+  }
+  const recoveryOpen =
+    latestBuildState === "FAILED" || latestBuildState === "DEGRADED" || latestBuildState === "HUMAN_REVIEW_REQUIRED";
   const business = draft.payload.business;
   const prefs = draft.payload.designPreferences ?? {};
   const converted = Boolean(draft.convertedSiteGenerationId);
@@ -427,17 +466,51 @@ async function IntakeEditorPage(c: Context<{ Bindings: Env }>, draft: IntakeDraf
             This draft is immutable after Validate &amp; Generate. Later factual changes are Fact Updates inside a Revision
             Request on the site page.
           </p>
-          <div class="actions">
-            <span class="muted" style={{ "margin-right": "auto" }}>
-              Status: {draft.status}
-            </span>
-            <a class="badge ready" href={`/sites/${draft.convertedSiteId}`}>
-              Open site review
-            </a>
-          </div>
+          <a class="badge ready" href={`/sites/${draft.convertedSiteId}`}>
+            Open site review
+          </a>
+          {workflowNeverStarted ? (
+            <>
+              <p style={{ margin: "0.75rem 0 0" }}>
+                The workflow for this generation was never started (start failed or crashed before the first Build).
+              </p>
+              <button type="button" class="secondary" onclick="retryWorkflow()">
+                Retry workflow start
+              </button>
+            </>
+          ) : null}
+          {recoveryOpen ? (
+            <>
+              <p style={{ margin: "0.75rem 0 0" }}>
+                The latest build ended <strong>{latestBuildState}</strong> with no publishable release. Recovery starts a
+                NEW generation on this same site and Build Mode from a fresh immutable submission built from this draft's
+                current payload — history is preserved, nothing is auto-published.
+              </p>
+              <button type="button" class="secondary" onclick="regenerate()">
+                Start new generation (recovery)
+              </button>
+            </>
+          ) : null}
         </div>
       ) : (
         <>
+          {draft.status === "REJECTED" ? (
+            <div class="card">
+              <h2>Rejected submission — rescue path</h2>
+              <p>
+                Rejection reason: <strong>{draft.rejectionReason ?? "unknown"}</strong>
+              </p>
+              <p class="muted">
+                This public submission was rejected before acceptance ({draft.rejectionReason === "TURNSTILE_FAILED"
+                  ? "Turnstile verification failed"
+                  : draft.rejectionReason === "RATE_LIMITED"
+                    ? "the source had exhausted its submission budget for the hour"
+                    : "schema validation failed"}
+                ). The client's data below is intact. Review it, correct anything, then Save (mark In Review) and Validate &amp;
+                Generate as usual — the rejection no longer blocks anything.
+              </p>
+            </div>
+          ) : null}
           <div class="card">
             <h2>{draft.businessName}</h2>
             <p class="muted">
@@ -561,7 +634,113 @@ async function IntakeEditorPage(c: Context<{ Bindings: Env }>, draft: IntakeDraf
           </div>
         </>
       )}
-      <script dangerouslySetInnerHTML={{ __html: EDITOR_JS(`/api/admin/intake-drafts/${draft.id}`) }} />
+      <script dangerouslySetInnerHTML={{ __html: EDITOR_JS(`/api/admin/intake-drafts/${draft.id}`, draft.convertedBuildMode) }} />
+    </Layout>
+  );
+}
+
+/**
+ * Read-only diagnostic view for a REJECTED intake attempt whose stored body is
+ * not a valid draft payload (so the structured editor cannot render it). The
+ * raw submission and the rejection reason stay operator-visible — the incident
+ * this page exists for is a real client's brief being invisibly lost.
+ */
+async function RejectedIntakeDiagnosticPage(c: Context<{ Bindings: Env }>, draft: IntakeDraft): Promise<Response> {
+  const validation = validateIntakeDraftPayload(draft.payload);
+  const issues = validation.valid ? [] : validation.issues;
+  return c.html(
+    <Layout active="intakes">
+      <div class="card">
+        <h2>{draft.businessName} — rejected submission (malformed body)</h2>
+        <p>
+          Rejection reason: <strong>{draft.rejectionReason ?? "unknown"}</strong>
+        </p>
+        <p class="muted">
+          Submitted {draft.createdAt.slice(0, 16).replace("T", " ")} · Submitter {draft.submitterName} &lt;
+          {draft.submitterEmail}&gt; (private intake contact). The stored body did not pass draft schema validation, so the
+          structured editor is unavailable — the raw submission is below for manual recovery. Rejected attempts can never
+          start a Site Generation.
+        </p>
+        {issues.length > 0 ? (
+          <ul>
+            {issues.map((issue) => (
+              <li class="muted">
+                {issue.path} — {issue.message}
+              </li>
+            ))}
+          </ul>
+        ) : null}
+        <pre>{JSON.stringify(draft.payload, null, 2)}</pre>
+      </div>
+    </Layout>
+  );
+}
+
+// ── Notifications ledger ─────────────────────────────────────────────────────
+
+function notificationBadge(status: string): { label: string; css: string } {
+  switch (status) {
+    case "SENT":
+      return { label: "Sent", css: "ready" };
+    case "PERMANENT_FAILED":
+      return { label: "Failed", css: "failed" };
+    case "SENDING":
+      return { label: "Sending", css: "review" };
+    default:
+      return { label: "Pending", css: "" };
+  }
+}
+
+async function NotificationsPage(c: Context<{ Bindings: Env }>): Promise<Response> {
+  const notifications = await listAdminNotifications(c.env, { limit: 200 });
+  const failed = notifications.filter((notification) => notification.status === "PERMANENT_FAILED").length;
+  const rows = notifications.map((notification) => {
+    const badge = notificationBadge(notification.status);
+    return (
+      <tr>
+        <td>{notification.createdAt.slice(0, 16).replace("T", " ")}</td>
+        <td>{notification.kind}</td>
+        <td>
+          <span class={`badge ${badge.css}`}>{badge.label}</span>
+          {notification.attempts > 1 ? <div class="muted">{notification.attempts} attempts</div> : null}
+        </td>
+        <td>{notification.subject}</td>
+        <td>
+          {notification.lastError ? <div class="muted">{notification.lastError}</div> : null}
+          {notification.status === "PENDING" && notification.nextAttemptAfter ? (
+            <div class="muted">retry after {notification.nextAttemptAfter.slice(0, 16).replace("T", " ")}</div>
+          ) : null}
+        </td>
+      </tr>
+    );
+  });
+  return c.html(
+    <Layout active="notifications">
+      <div class="card">
+        <h2>Admin notification ledger</h2>
+        <p class="muted">
+          Every operator email (new brief, ready, human review, generation failed) is recorded here with its delivery
+          outcome — a missing email means a failure row on this page, never a missing ledger entry.
+          {failed > 0 ? (
+            <>
+              {" "}
+              <strong>{failed} PERMANENT_FAILED — delivery will not retry; diagnose the transport before relying on email.</strong>
+            </>
+          ) : null}
+        </p>
+        <table>
+          <thead>
+            <tr>
+              <th>Created</th>
+              <th>Kind</th>
+              <th>Status</th>
+              <th>Subject</th>
+              <th>Last error / retry</th>
+            </tr>
+          </thead>
+          <tbody>{rows as never}</tbody>
+        </table>
+      </div>
     </Layout>
   );
 }
@@ -642,6 +821,20 @@ async function SiteReviewPage(c: Context<{ Bindings: Env }>, review: AdminSiteRe
             </>
           ) : null}
         </p>
+        {review.siteAddress ? (
+          <p>
+            <span class="muted">Site Address:</span>{" "}
+            {review.published ? (
+              <a href={review.siteAddress.url} target="_blank" rel="noreferrer">
+                {review.siteAddress.url}
+              </a>
+            ) : (
+              <>
+                {review.siteAddress.url} <span class="badge review">Not published</span>
+              </>
+            )}
+          </p>
+        ) : null}
         {review.generations.map((generation) => (
           <div>
             <h3 class="muted">
@@ -650,12 +843,33 @@ async function SiteReviewPage(c: Context<{ Bindings: Env }>, review: AdminSiteRe
             {generation.builds.map((build) => (
               <div class="card">
                 <strong>Build {build.buildId.slice(0, 8)}</strong> ({build.kind}) —{" "}
-                <span class={`badge ${build.state === "RELEASE_READY" ? "ready" : build.state === "HUMAN_REVIEW_REQUIRED" ? "review" : build.state === "FAILED" || build.state === "DEGRADED" ? "failed" : ""}`}>{build.state}</span>
+                <span class={`badge ${build.state === "RELEASE_READY" ? "ready" : build.state === "HUMAN_REVIEW_REQUIRED" ? (build.qaOutcome?.status === "failed" ? "failed" : "review") : build.state === "FAILED" || build.state === "DEGRADED" ? "failed" : ""}`}>{build.state === "HUMAN_REVIEW_REQUIRED" && build.qaOutcome?.status === "failed" ? "HUMAN_REVIEW_REQUIRED (QA FAILED)" : build.state}</span>
                 <div class="muted">
                   Versions: {build.versions.map((version) => `v${version.versionNumber}`).join(", ")}
                   {build.repairUsed ? " · repair used" : ""}
                   {build.scoreSummary ? ` · ${build.scoreSummary}` : ""}
                 </div>
+                {build.terminalReason ? (
+                  <p style={{ margin: "0.5rem 0 0" }}>
+                    <span class="muted">Why: </span>
+                    {build.terminalReason}
+                  </p>
+                ) : null}
+                {build.state === "HUMAN_REVIEW_REQUIRED" && build.qaOutcome?.status === "failed" ? (
+                  <div class="qa-failed">
+                    <strong>QA FAILED — automation could not reach release quality.</strong>
+                    {build.qaOutcome.visualScore ? ` Visual fidelity ${build.qaOutcome.visualScore} (90 required).` : ""}
+                    <ul>
+                      {build.qaOutcome.reasons.map((reason) => (
+                        <li>{reason}</li>
+                      )) as never}
+                    </ul>
+                    <span class="muted">
+                      This preview did NOT pass the automated release gate. The one allowed repair was already tried. Use the
+                      revision notes below to fix the listed findings, or regenerate.
+                    </span>
+                  </div>
+                ) : null}
                 {build.previewUrl ? (
                   <div>
                     <a href={build.previewUrl} target="_blank" rel="noreferrer">
@@ -731,7 +945,12 @@ export function registerAdminPageRoutes(app: Hono<{ Bindings: Env }>): void {
     if (denied) return denied;
     return await IntakesPage(c);
   });
-  app.get("/intakes/:draftId", async (c) => {
+  app.get("/admin/notifications", async (c) => {
+    const denied = await guard(c);
+    if (denied) return denied;
+    return await NotificationsPage(c);
+  });
+  app.get("/admin/intakes/:draftId", async (c) => {
     const denied = await guard(c);
     if (denied) return denied;
     const draft = await getIntakeDraft(c.env, c.req.param("draftId") as string);

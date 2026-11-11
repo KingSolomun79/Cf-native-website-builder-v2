@@ -1163,6 +1163,17 @@ The successfully published exact Build Version becomes the current Published Ver
 
 A Site has at most one current Published Version.
 
+## 32.5 Site Address and published-site serving
+
+Every Site receives ONE stable public Site Address `https://{site-slug}.wazibiz.co.ke` (FINAL-DECISION-RECORD decision 132, issue #48).
+
+- The address is allocated exactly once at canonical Site creation from the Business name (deterministic slug: Unicode-normalized, diacritic-stripped, lowercased, `-`-separated, DNS 63-char budget including any collision suffix) against a central reserved-name set; collisions append `-2`, `-3`, ... under the UNIQUE constraint with bounded retries; reserved matches fall back to `business-{shortSiteId}`.
+- Allocation at Site creation is mandatory for every NEW Site identity (FINAL-DECISION-RECORD decision 133): historical pre-activation test Sites are grandfathered and MAY have no `site_addresses` row — a valid, non-blocking state. The production-wide backfill of historical Sites is cancelled; the capability-gated backfill route remains for exceptional operator use. A Site without an address row is never served through a Site Address (gateway 404), and no read path lazily allocates one.
+- The address belongs to the Site identity and never changes across Revisions, Builds, Automated Repair, Site Generations, Build Mode changes, Publication, Rollback or later Business name changes.
+- Publication and Rollback change WHICH exact immutable Build Version the address serves — never the address itself. Rollback requires no DNS change, no address-row mutation, no new Worker, Build, Build Version or Approval.
+- Per-version `*.wazibizwebsites.workers.dev` hostnames of published Deployments are internal origins only. One wildcard gateway Worker resolves host -> `site_addresses` -> canonical `site_published_state.current_publication_id` -> the exact `publications` row per request, cross-checks site/version/status consistency (fail closed), constructs the origin only from the trusted `worker_name` + `PUBLISHED_ORIGIN_SUFFIX` configuration, and streams without rewriting approved artifacts.
+- Canonical tags are not injected at Publication; the Site Address is exposed to Builder input only through a future explicit prompt/schema decision (post benchmark tranche), applied before Approval.
+
 ---
 
 # 33. Rollback
@@ -1321,7 +1332,7 @@ V2 guarantees technical/on-page foundations only:
 
 - unique title/page;
 - unique meta description/page;
-- canonical when final base URL known;
+- canonical when final base URL known — the stable Site Address (§32.5) is the Site's final base URL once allocated; its use in generated pages is deferred to the explicit prompt/schema decision recorded in decision 132 and must happen before Approval, never during Publication;
 - semantic headings;
 - crawlable navigation;
 - truthful minimal JSON-LD;

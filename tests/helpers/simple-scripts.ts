@@ -90,7 +90,7 @@ function nav(): string {
 function shell(title: string, main: string): string {
   // The footer is FROZEN SHARED CHROME (GO §18): identical on every page —
   // only <head> metadata and <main> are page-specific.
-  return `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${title}</title><meta name="description" content="${title} — quiet luxury"><meta property="og:title" content="${title}"><meta property="og:description" content="${title}"><link rel="stylesheet" href="site.css"><script src="site.js" defer></script></head><body>${nav()}<main>${main}</main><footer class="site-footer"><p>© <span id="year">2026</span> RankForge Kenya</p></footer></body></html>`;
+  return `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${title}</title><meta name="description" content="${title}: quiet luxury"><meta property="og:title" content="${title}"><meta property="og:description" content="${title}"><link rel="stylesheet" href="site.css"><script src="site.js" defer></script></head><body>${nav()}<main>${main}</main><footer class="site-footer"><p>© <span id="year">2026</span> RankForge Kenya</p></footer></body></html>`;
 }
 
 const img = (slotId: string, alt: string) => `<img src="IMG:${slotId}" data-image-id="${slotId}" alt="${alt}">`;
@@ -112,14 +112,14 @@ function homeHtml(): string {
 
 function aboutHtml(): string {
   return shell(
-    `About — RankForge Kenya`,
+    `About - RankForge Kenya`,
     `<section class="hero about-hero"><div><img src="IMG:about-hero" data-image-id="about-hero" alt="Guiding team at first light"><h1>About</h1><p>Quiet authority since the first season.</p></div></section><section class="section"><div class="section-inner split"><div>${img("about-story", "Craft detail")}</div><div><h2>Our story</h2><p>We are an SEO agency in Nairobi.</p><a href="/services">See services</a></div></div></section>`
   );
 }
 
 function servicesHtml(): string {
   return shell(
-    `Services — RankForge Kenya`,
+    `Services - RankForge Kenya`,
     `<section class="hero services-hero"><div><img src="IMG:services-hero" data-image-id="services-hero" alt="Guides preparing for a drive"><h1>Services</h1><p>Three disciplines, one standard.</p></div></section><section class="section"><div class="section-inner"><div class="rows">` +
       ["Technical audits", "Content systems", "Digital PR"].map((row, index) => `<div class="row"><span class="index">0${index + 1}</span><h3>${row}</h3><p><a href="/contact">Enquire</a></p></div>`).join("") +
       `</div></div></section>`
@@ -128,36 +128,92 @@ function servicesHtml(): string {
 
 function contactHtml(endpoint: string, siteFormId: string): string {
   return shell(
-    `Contact — RankForge Kenya`,
+    `Contact - RankForge Kenya`,
     `<section class="hero contact-hero"><div><img src="IMG:contact-hero" data-image-id="contact-hero" alt="Evening at the camp fire"><h1>Contact</h1><p>Begin the conversation.</p></div></section><section class="section"><div class="section-inner split"><div><form method="post" action="${endpoint}"><input type="hidden" name="siteFormId" value="${siteFormId}"><label for="name">Name</label><input id="name" name="name" required><label for="email">Email</label><input id="email" name="email" type="email" required><label for="message">Message</label><textarea id="message" name="message" required></textarea><button class="cta" type="submit">Send enquiry</button></form></div><div><h2>Reach us</h2><p>ops@wazibizwebsites.example</p></div></div></section>`
   );
 }
 
 export interface SimpleScriptsOptions {
-  /** First visual QA fails (overall 70) so the ONE repair path runs. */
+  /** First visual QA fails (overall 70) so the repair path runs. */
   firstVisualQaFails?: boolean;
   /** Every visual QA fails — final HUMAN_REVIEW_REQUIRED scenario. */
   allVisualQaFails?: boolean;
+  /** Visual QA overall score per call, in order (operator GO 2026-11-09
+   *  bounded-round tests); the last value repeats. Overrides the fail flags.
+   *  Every category mirrors the value, so >=90 releases and <90 fails with
+   *  findings + hard-gate reasons. */
+  visualQaOverallSequence?: number[];
+  /** Captures every repair-stage user prompt (assertion seam for the
+   *  multimodal/structural repair contract). */
+  captureRepairPrompts?: string[];
   /** Return a blueprint that passes schema but fails the quality gate. */
   blueprintFailsGate?: boolean;
   /** The builder omits the CRITICAL about-hero on its page call — the
    *  Builder coverage fail-closed path. */
   builderOmitsAboutHero?: boolean;
+  /** The builder omits BOTH the about-hero and the services-hero — a
+   *  CRITICAL coverage failure implicating TWO pages, so no single-file
+   *  pre-QA repair target exists (issue #14). */
+  builderOmitsTwoHeroes?: boolean;
   /** The builder stylesheet anchors selectors on structure absent from the
    *  four pages and site.js — the DOM-first invented-structure gate. */
   builderInventsCssSelectors?: boolean;
   /** An inner page replaces the shared footer — the frozen shared chrome
    *  gate (SOURCE_INCOMPLETE). */
   builderRestylesChrome?: boolean;
+  /** The ONE pre-QA file repair (issue #14) clears its gate. Default
+   *  (false): the repair returns the same defective file — the repaired
+   *  candidate fails the gate again and the Build terminates FAILED with
+   *  the budget consumed. */
+  preQaRepairSucceeds?: boolean;
 }
 
 export function createSimpleScripts(options: SimpleScriptsOptions = {}): SimplePipelineDeps {
   let visualQaCalls = 0;
   let repairCalls = 0;
+  // Operator GO 2026-11-09 seams: per-call visual scores + repair-prompt
+  // capture for the bounded-improving-rounds tests.
+  const overallForCall = (call: number): number | null => {
+    const sequence = options.visualQaOverallSequence;
+    if (!sequence || sequence.length === 0) return null;
+    return sequence[Math.min(call - 1, sequence.length - 1)];
+  };
+  const sequencedVisualReport = (call: number): unknown | null => {
+    const requested = overallForCall(call);
+    if (requested === null) return null;
+    const value = Math.max(0, Math.min(100, Math.round(requested)));
+    const scores = {
+      macroLayout: value, typography: value, spacingRhythm: value, surfaceColor: value,
+      imageTreatment: value, components: value, signatureElements: value, responsive: value,
+      overall: value,
+    };
+    if (value >= 90) {
+      return { version: "1", scores, findings: [], summary: "Sequenced visual pass." };
+    }
+    return {
+      version: "1",
+      scores,
+      findings: [
+        {
+          rank: 1,
+          title: "Sequenced composition defect",
+          reference: "The blueprint's composition as specified",
+          candidate: "The rendered candidate at this round",
+          direction: "Structural HTML repair per the finding",
+        },
+      ],
+      summary: "Sequenced visual fail.",
+    };
+  };
   const aboutPage = () => {
     let html = aboutHtml();
-    if (options.builderOmitsAboutHero) html = html.replace(/<img src="IMG:about-hero"[^>]*>/, "");
+    if (options.builderOmitsAboutHero || options.builderOmitsTwoHeroes) html = html.replace(/<img src="IMG:about-hero"[^>]*>/, "");
     if (options.builderRestylesChrome) html = html.replace(/<footer class="site-footer">[\s\S]*?<\/footer>/, `<footer><p>© 2026 Different Business</p></footer>`);
+    return html;
+  };
+  const servicesPage = () => {
+    let html = servicesHtml();
+    if (options.builderOmitsTwoHeroes) html = html.replace(/<img src="IMG:services-hero"[^>]*>/, "");
     return html;
   };
 
@@ -192,6 +248,27 @@ export function createSimpleScripts(options: SimpleScriptsOptions = {}): SimpleP
     const respondRaw = (content: string) => ({ content, provider: "simple-script", model: "@cf/zai-org/glm-5.3" });
     // DOM-first order (v8 GO): the four page calls are 1-4, the stylesheet is
     // call 5, site.js stays call 6.
+    // PRE-QA FILE REPAIR (issue #14): the ONE targeted one-file regeneration
+    // with the gate findings injected. The script either clears the exact
+    // gate (preQaRepairSucceeds) or returns the same defective file — the
+    // repaired candidate fails again and the Build terminates FAILED with the
+    // repair budget consumed. This branch must precede the plain call-5/6
+    // branches: a repair prompt embeds the original call prompt.
+    if (user.includes("REPAIR DIRECTIVE (the ONE bounded pre-QA file repair)")) {
+      if (!options.preQaRepairSucceeds) {
+        return user.includes('"site.js"') ? respondRaw(SIMPLE_JS) : respondRaw(aboutPage());
+      }
+      if (user.includes('"site.js"')) {
+        // Adopt the stylesheet's unanchored hooks — the exact gate findings.
+        // The hook token is quoted DOTLESS because that is what the shared
+        // js-vocabulary scanner reads (mirroring 'nav-open' above).
+        return respondRaw(
+          `${SIMPLE_JS}\n(function () { var revealHook = 'js-reveal'; document.querySelectorAll('.' + revealHook).forEach(function (el) { el.classList.add('is-visible'); }); })();`
+        );
+      }
+      if (user.includes('"about.html"')) return respondRaw(aboutHtml());
+      throw new Error(`pre-QA repair script has no fix for this target: ${user.slice(-300)}`);
+    }
     if (user.includes("call 5 of 6")) {
       return respondRaw(
         options.builderInventsCssSelectors
@@ -210,12 +287,14 @@ export function createSimpleScripts(options: SimpleScriptsOptions = {}): SimpleP
       return respondRaw(
         page === "home" ? homeHtml()
         : page === "about" ? aboutPage()
-        : page === "services" ? servicesHtml()
+        : page === "services" ? servicesPage()
         : contactHtml(endpoint, siteFormId)
       );
     }
     if (user.includes("Compare the CANDIDATE renders against the REFERENCE screenshots")) {
       visualQaCalls += 1;
+      const sequenced = sequencedVisualReport(visualQaCalls);
+      if (sequenced !== null) return respond(sequenced);
       const fail = options.allVisualQaFails || (options.firstVisualQaFails && visualQaCalls === 1);
       if (fail) {
         return respond({
@@ -252,6 +331,8 @@ export function createSimpleScripts(options: SimpleScriptsOptions = {}): SimpleP
     // judged against the Blueprint + Creative Direction, no Reference.
     if (user.includes("Judge the CANDIDATE renders of an ORIGINAL_DESIGN website")) {
       visualQaCalls += 1;
+      const sequenced = sequencedVisualReport(visualQaCalls);
+      if (sequenced !== null) return respond(sequenced);
       const fail = options.allVisualQaFails || (options.firstVisualQaFails && visualQaCalls === 1);
       if (fail) {
         return respond({
@@ -286,14 +367,15 @@ export function createSimpleScripts(options: SimpleScriptsOptions = {}): SimpleP
     }
     if (user.includes("QA PACKAGE (complete repair brief)")) {
       repairCalls += 1;
-      if (repairCalls > 1) {
-        throw new Error("SIMPLE repair script invoked twice — the one-repair budget was violated");
+      if (repairCalls > 3) {
+        throw new Error(`SIMPLE repair script invoked ${repairCalls} times — the bounded repair-round budget (max 3, operator GO 2026-11-09) was violated`);
       }
+      options.captureRepairPrompts?.push(user);
       // Changed-files repair (hardening F-repair): the repair returns ONLY the
       // changed file; the deterministic merge must reproduce the full bundle.
       return respond({
         files: [{ path: "index.html", content: homeHtml() }],
-        notes: "scripted repair: home file replaced",
+        notes: `scripted repair round ${repairCalls}: home file replaced`,
       });
     }
     throw new Error(`simple script has no output for prompt: ${user.slice(0, 120)}`);

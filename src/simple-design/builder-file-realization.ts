@@ -98,27 +98,67 @@ function validateCss(css: string, motionExists: boolean, failures: string[]): vo
 
 // Shared JS may legitimately be small — reject prose/meta-description and
 // obviously non-code output; Technical QA judges runtime details later.
-function validateJs(js: string, failures: string[]): void {
+function validateJs(js: string, failures: string[], stateHookGroups?: StateHookGroup[]): void {
   const codeIndicators = ["function", "=>", "addEventListener", "querySelector", "document.", "const ", "let ", "var "];
   if (!codeIndicators.some((indicator) => js.includes(indicator))) {
     failures.push("site.js does not look like JavaScript source (no code constructs found)");
   }
   const hits = metaMarkerHits(js);
   if (hits.length > 0) failures.push(`site.js contains meta/abbreviation marker(s): ${hits.join(", ")}`);
+  // STATE-HOOK ADOPTION (2026-09-15 correction, live evidence: site.css minted
+  // `.js-reveal { opacity: 1; }` and no page or site.js ever referenced it —
+  // discovered only by the end-of-stage CSS gate after all six calls
+  // succeeded). A stylesheet selector anchored on NO markup class can only be
+  // anchored by site.js, so the site-js call is validated to adopt it HERE.
+  // One adopted token anchors the whole selector group — the same semantics as
+  // the DOM-first CSS gate, so the two gates can never disagree.
+  if (stateHookGroups && stateHookGroups.length > 0) {
+    const vocabulary = jsQuotedTokenVocabulary(js);
+    for (const group of stateHookGroups) {
+      if (group.tokens.length > 0 && !group.tokens.some((token) => vocabulary.has(token.replace(/^[.#]/, "")))) {
+        failures.push(
+          `site.js never references the stylesheet state hook(s) ${group.tokens.join(" or ")} — stylesheet selector "${group.selector}" is anchored on NO class or id in the four documents (invented structure)`
+        );
+      }
+    }
+  }
+}
+
+/** Quoted identifiers in site.js — the accepted-token vocabulary the DOM-first
+ *  CSS gate reads, exported so both gates share one definition of what it
+ *  means for site.js to "reference" a class. */
+export function jsQuotedTokenVocabulary(js: string): Set<string> {
+  const tokens = new Set<string>();
+  for (const match of js.matchAll(/['"`]([a-zA-Z_-][\w-]*)['"`]/g)) tokens.add(match[1]);
+  return tokens;
+}
+
+/** A stylesheet selector whose class/id tokens are anchored on NO markup —
+ *  its ONLY possible anchor is site.js. */
+export interface StateHookGroup {
+  selector: string;
+  tokens: string[];
+}
+
+export interface BuilderFileValidationOptions {
+  blueprintMotionExists?: boolean;
+  /** site-js only: unanchored stylesheet selector groups that site.js must
+   *  adopt (see validateJs). */
+  stateHookGroups?: StateHookGroup[];
 }
 
 /** Deterministic validation for ONE realized Builder file. */
 export function validateBuilderFile(
   kind: BuilderFileKind,
   source: string,
-  options?: { blueprintMotionExists?: boolean }
+  options?: BuilderFileValidationOptions
 ): BuilderFileValidationResult {
   const failures: string[] = [];
   if (typeof source !== "string" || source.length === 0) {
     return { passed: false, failures: [`${kind} realization is empty`] };
   }
   if (kind === "site-css") validateCss(source, options?.blueprintMotionExists ?? true, failures);
-  else if (kind === "site-js") validateJs(source, failures);
+  else if (kind === "site-js") validateJs(source, failures, options?.stateHookGroups);
   else validatePage(source, `${kind} page`, failures);
   return { passed: failures.length === 0, failures };
 }
@@ -126,7 +166,7 @@ export function validateBuilderFile(
 /** Whole-bundle convenience: every file of a realized bundle, same rules. */
 export function validateBuilderFileBundle(
   bundle: Pick<SiteBundle, "pages" | "sharedCss" | "sharedJs">,
-  options?: { blueprintMotionExists?: boolean }
+  options?: BuilderFileValidationOptions
 ): BuilderFileValidationResult {
   const failures: string[] = [];
   for (const page of ["home", "about", "services", "contact"] as const) {

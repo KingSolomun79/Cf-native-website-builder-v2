@@ -65,6 +65,10 @@ export async function deleteObject(env: Env, key: string): Promise<void> {
   await env.SITE_BUCKET.delete(key);
 }
 
+export async function objectExists(env: Env, key: string): Promise<boolean> {
+  return (await env.SITE_BUCKET.head(key)) !== null;
+}
+
 export function visionInputDerivativeKey(
   clientSlug: string,
   version: number,

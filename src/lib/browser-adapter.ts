@@ -176,6 +176,11 @@ export interface BrowserPage {
   readComputedStyle(selector: string, props: readonly string[]): Promise<Record<string, string>>;
   readInteractionState(selector: string): Promise<Record<string, string>>;
   countMatches(selector: string): Promise<number>;
+  /** Tap-target audit (operator GO 2026-11-10): measures rendered interactive
+   *  controls (nav/header/footer links, buttons, CTA-ish elements) against the
+   *  44x36px touch minimum. Returns the violation count plus up to 5 offender
+   *  samples ("label WxH") for the repair brief. */
+  measureTapTargets(): Promise<{ violations: number; offenders: string[] }>;
   hover(selector: string): Promise<void>;
   focus(selector: string): Promise<void>;
   pressPointerDown(selector: string): Promise<void>;
@@ -370,6 +375,24 @@ function makePlaywrightPage(page: import("@cloudflare/playwright").Page): Browse
     },
     async countMatches(selector) {
       return page.evaluate(`document.querySelectorAll(${JSON.stringify(selector)}).length`);
+    },
+    async measureTapTargets() {
+      return page.evaluate(`(() => {
+        const minW = 44, minH = 36;
+        const offenders = [];
+        const seen = new Set();
+        document.querySelectorAll("header a, nav a, footer a, button, a[class*='cta'], a[class*='btn'], [class*='cta'][href]")
+          .forEach((el) => {
+            if (seen.has(el)) return;
+            seen.add(el);
+            const label = (el.textContent || el.getAttribute("aria-label") || "").trim().replace(/\\s+/g, " ").slice(0, 24);
+            if (!label) return;
+            const rect = el.getBoundingClientRect();
+            if (rect.width === 0 || rect.height === 0) return;
+            if (rect.width < minW || rect.height < minH) offenders.push(label + " " + Math.round(rect.width) + "x" + Math.round(rect.height));
+          });
+        return { violations: offenders.length, offenders: offenders.slice(0, 5) };
+      })()`);
     },
     async hover(selector) { await page.hover(selector); },
     async focus(selector) { await page.focus(selector); },

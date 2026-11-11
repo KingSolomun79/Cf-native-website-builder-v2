@@ -10,10 +10,13 @@ import { submitClientIntake } from "../src/routes/public-client-intake";
 import {
   attemptAdminNotificationSend,
   enqueueAdminNotification,
+  listAdminNotifications,
   notifyBuildTerminal,
   processDueAdminNotifications,
 } from "../src/domain/admin-notifications";
+import { registerAdminPageRoutes } from "../src/routes/admin-pages";
 import { canonicalStructuredFacts } from "./helpers/canonical-facts";
+import { createAccessHarness, type AccessHarness } from "./helpers/access-test";
 
 function adminTransportCalls(): Array<{ to: string; from: string; subject: string }> {
   const calls = (globalThis as unknown as { __adminEmailCalls?: Array<{ to: string; from: string; subject: string }> }).__adminEmailCalls ?? [];
@@ -190,5 +193,68 @@ describe("admin notifications", () => {
     await notifyBuildTerminal(env, { ...input, terminal: "FAILED" });
     const rows = await env.DB.prepare("SELECT COUNT(*) AS n FROM admin_notifications WHERE dedupe_key = 'build-terminal:notify-build-failed:FAILED'").first<{ n: number }>();
     expect(rows?.n).toBe(1);
+  });
+});
+
+// ── Notifications ledger VIEW (incident remediation 2026-09-23): a failed
+// admin email was always recorded but never shown — the missed INTAKE_NEW is
+// exactly the production incident this page exists to expose. ────────────────
+
+const pageAccess: AccessHarness = await createAccessHarness("admin-notifications");
+
+describe("admin notifications ledger view", () => {
+  it("lists recent notifications with delivery outcome and last error", async () => {
+    const healthy = runtimeEnv();
+    await enqueueAdminNotification(healthy, {
+      kind: "INTAKE_NEW",
+      dedupeKey: "view:sent-case",
+      subject: "Ledger view — sent case",
+      bodyText: "body",
+    });
+    await processDueAdminNotifications(healthy);
+
+    const permanent = runtimeEnv({ withAdminRecipient: false });
+    await enqueueAdminNotification(permanent, {
+      kind: "SITE_HUMAN_REVIEW",
+      dedupeKey: "view:failed-case",
+      subject: "Ledger view — failed case",
+      bodyText: "body",
+    });
+    await processDueAdminNotifications(permanent);
+
+    const list = await listAdminNotifications(healthy);
+    const sent = list.find((row) => row.subject === "Ledger view — sent case");
+    const failed = list.find((row) => row.subject === "Ledger view — failed case");
+    expect(sent).toMatchObject({ status: "SENT", kind: "INTAKE_NEW", attempts: 1 });
+    expect(sent?.sentAt).toBeTruthy();
+    expect(failed).toMatchObject({ status: "PERMANENT_FAILED", kind: "SITE_HUMAN_REVIEW" });
+    expect(failed?.lastError).toContain("not configured");
+  });
+
+  it("serves the Access-gated /admin/notifications page showing the ledger", async () => {
+    const env = runtimeEnv();
+    await enqueueAdminNotification(env, {
+      kind: "INTAKE_NEW",
+      dedupeKey: "view:page-case",
+      subject: "Ledger page — visible case",
+      bodyText: "body",
+    });
+
+    const app = new Hono<{ Bindings: Env }>();
+    registerAdminPageRoutes(app);
+
+    // Configured Access + no assertion -> fail closed (401).
+    pageAccess.stubFetch();
+    const denied = await app.request("https://admin.example.com/admin/notifications", {}, { ...(env as unknown as Env), ...pageAccess.envVars });
+    expect(denied.status).toBe(401);
+
+    const response = await app.request("https://admin.example.com/admin/notifications", {
+      headers: { "Cf-Access-Jwt-Assertion": await pageAccess.signToken() },
+    }, { ...(env as unknown as Env), ...pageAccess.envVars });
+    expect(response.status).toBe(200);
+    const html = await response.text();
+    expect(html).toContain("Admin notification ledger");
+    expect(html).toContain("Ledger page — visible case");
+    expect(html).toContain("INTAKE_NEW");
   });
 });

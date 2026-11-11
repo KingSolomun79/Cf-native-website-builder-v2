@@ -132,6 +132,8 @@ export default defineWorkersConfig({
       "tests/v2-admin-drafts.test.ts",
       "tests/v2-admin-notifications.test.ts",
       "tests/v2-admin-revision.test.ts",
+      "tests/v2-admin-review-qa-outcome.test.ts",
+      "tests/v2-revision-blueprint-reuse.test.ts",
       "tests/v2-business-hours.test.ts",
       "tests/v2-qa-capture-marker.test.ts",
       "tests/v2-stage-liveness.test.ts",
@@ -152,9 +154,14 @@ export default defineWorkersConfig({
       "tests/v2-operator-capability.test.ts",
       "tests/v2-llm-model-routing.test.ts",
       "tests/v2-retention.test.ts",
+      "tests/v2-benchmark-harness.test.ts",
+      "tests/v2-benchmark-driver.test.ts",
       "tests/v2-cpu-budget.test.ts",
       "tests/v2-workflow-reconciliation.test.ts",
       "tests/v2-image-orchestration.test.ts",
+      // Stable Site Addresses + wildcard gateway (issue #48).
+      "tests/v2-site-address.test.ts",
+      "tests/v2-site-gateway.test.ts",
       // Retained platform infrastructure tests.
       "tests/browser-lifecycle.test.ts",
       "tests/browser-adapter-spy.test.ts",

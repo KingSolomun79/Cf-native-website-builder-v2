@@ -199,6 +199,45 @@ describe("validateBuilderFile: the shared script must be code", () => {
   });
 });
 
+// 2026-09-15 correction (live production evidence, build ec2ef1c4): site.css
+// minted `.js-reveal { opacity: 1; }` and site.js never referenced it — the
+// unanchored selector was only discovered by the END-of-stage CSS gate, after
+// all six calls had succeeded. The adoption contract is now enforced at the
+// site-js PER-FILE seam: every stylesheet selector anchored on NO markup class
+// must be referenced by site.js (one adopted token anchors the whole selector —
+// the same semantics as the DOM-first gate).
+describe("validateBuilderFile: site.js adopts the stylesheet's unanchored state hooks", () => {
+  it("§18b a script referencing one token of every unanchored selector passes", () => {
+    const adopting = `${CODE_JS}\nvar revealHook = 'js-reveal'; var errorHook = 'field-error';`;
+    const result = validateBuilderFile("site-js", adopting, {
+      stateHookGroups: [
+        { selector: ".js-reveal", tokens: [".js-reveal"] },
+        { selector: ".field-error, .form-success", tokens: [".field-error", ".form-success"] },
+      ],
+    });
+    expect(result.passed).toBe(true);
+  });
+
+  it("§18c an unadopted hook fails the site-js file and names the invented selector", () => {
+    const result = validateBuilderFile("site-js", CODE_JS, {
+      stateHookGroups: [{ selector: ".js-reveal", tokens: [".js-reveal"] }],
+    });
+    expect(result.passed).toBe(false);
+    expect(result.failures.some((f) => f.includes(".js-reveal") && f.includes("invented structure"))).toBe(true);
+  });
+
+  it("§18d the adoption check is per SELECTOR group: one adopted token anchors the whole group", () => {
+    const result = validateBuilderFile("site-js", `${CODE_JS}\nvar errorHook = 'field-error';`, {
+      stateHookGroups: [{ selector: ".field-error, .form-success", tokens: [".field-error", ".form-success"] }],
+    });
+    expect(result.passed).toBe(true);
+  });
+
+  it("§18e without hook groups the JS gate is unchanged", () => {
+    expect(validateBuilderFile("site-js", CODE_JS).passed).toBe(true);
+  });
+});
+
 describe("validateBuilderFileBundle: the six realized files together", () => {
   it("§19 a complete bundle passes; any incomplete file is reported with its identity", () => {
     const bundle = {

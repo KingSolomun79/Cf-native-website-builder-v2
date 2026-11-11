@@ -6,6 +6,7 @@ import { startSiteGeneration, createInitialBuild, createNextBuildVersion } from 
 import { storeBuildStageArtifact } from "../src/domain/stage-artifacts";
 import { buildVersionSourceKey } from "../src/domain/artifact-keys";
 import { assignReleaseReady } from "../src/domain/release";
+import { generateId, nowIso } from "../src/lib/crypto";
 import { QA_A_HARD_GATE_IDS, QA_B_MANDATORY_GATE_IDS, type QaAReport, type QaBReport } from "../src/domain/qa-stages";
 import {
   approveBuildVersion,
@@ -130,7 +131,7 @@ describe("Approval", () => {
     expect(approval.artifactManifestHash).toBe("hash-alpha");
 
     // Approval alone: no publication, no live state, build state is APPROVED.
-    expect(await getPublicationState(env, context.siteId)).toEqual({ current: null, rollback: null });
+    expect(await getPublicationState(env, context.siteId)).toEqual({ siteUrl: expect.any(String), current: null, rollback: null });
     const state = await env.DB.prepare("SELECT state FROM builds WHERE id = ?")
       .bind(context.buildId)
       .first<{ state: string }>();
@@ -182,7 +183,7 @@ describe("Publication", () => {
     expect(again.publicationId).toBe(publication.publicationId);
   });
 
-  it("retries an operational failure under the same Approval without re-approval", async () => {
+  it("retries an operational failure under the same Approval, and a retry can never drift to a newer approved candidate", async () => {
     const context = await newSite();
     await releaseReadyVersion({ ...context, buildVersionNumber: 1, hash: "hash-gamma" });
     await approveBuildVersion(env, context);
@@ -198,13 +199,30 @@ describe("Publication", () => {
       .bind(context.buildVersionId)
       .all<{ status: string; attempt: number }>();
     expect((failedRows.results ?? []).map((row) => row.status)).toEqual(["failed"]);
-    expect(await getPublicationState(env, context.siteId)).toEqual({ current: null, rollback: null });
+    expect(await getPublicationState(env, context.siteId)).toEqual({ siteUrl: expect.any(String), current: null, rollback: null });
 
-    // Retry: SAME approval, unchanged version — attempt 2 succeeds.
+    // A newer candidate becomes approved while v1's publication is still
+    // unretried — the retry must deploy v1, never implicitly v2.
+    const next = await createNextBuildVersion(env, { buildId: context.buildId, cause: "automated_repair" });
+    await releaseReadyVersion({
+      siteGenerationId: context.siteGenerationId, buildId: context.buildId,
+      buildVersionId: next.buildVersionId, buildVersionNumber: next.buildVersionNumber, hash: "hash-delta",
+    });
+    await approveBuildVersion(env, { buildId: context.buildId, buildVersionId: next.buildVersionId });
+
+    // Retry: SAME approval, unchanged version — attempt 2 succeeds for v1.
     const succeeding = deployer(0);
     const retried = await publishApprovedBuildVersion(env, { ...context, buildVersionNumber: 1, deployer: succeeding.deployer });
     expect(retried.attempt).toBe(2);
     expect(retried.alreadyPublished).toBe(false);
+    expect(retried.artifactManifestHash).toBe("hash-gamma");
+
+    // v1 is the live Published Version; v2 has no publications at all.
+    expect((await getPublicationState(env, context.siteId)).current!.buildVersionId).toBe(context.buildVersionId);
+    const v2Publications = await env.DB.prepare("SELECT COUNT(*) AS n FROM publications WHERE build_version_id = ?")
+      .bind(next.buildVersionId)
+      .first<{ n: number }>();
+    expect(v2Publications!.n).toBe(0);
 
     const approvals = await env.DB.prepare("SELECT COUNT(*) AS n FROM build_approvals WHERE build_version_id = ?")
       .bind(context.buildVersionId)
@@ -212,7 +230,7 @@ describe("Publication", () => {
     expect(approvals!.n).toBe(1);
   });
 
-  it("prevents approval drift across versions and artifact tampering", async () => {
+  it("prevents approval drift across versions", async () => {
     const context = await newSite();
     await releaseReadyVersion({ ...context, buildVersionNumber: 1, hash: "hash-one" });
     await approveBuildVersion(env, context);
@@ -226,21 +244,32 @@ describe("Publication", () => {
         deployer: deployer().deployer,
       })
     ).rejects.toMatchObject({ code: "NOT_APPROVED" });
+  });
 
-    // Hash drift: approved hash no longer matches the version's manifest.
-    await storeBuildStageArtifact(env, {
-      buildId: context.buildId,
-      buildVersionId: context.buildVersionId,
-      siteGenerationId: context.siteGenerationId,
-      kind: "assembled_manifest",
-      schemaVersion: "build-manifest/1-drift",
-      value: { artifactManifestHash: "hash-tampered", files: [{ path: "index.html", sha256: "a", bytes: 10 }] },
-    }).catch(() => undefined);
-    // The immutable artifact cannot be overwritten — re-store is rejected, so
-    // simulate drift via a fresh version whose manifest differs from its
-    // (copied) approval instead.
-    await expect(Promise.resolve("simulated")).resolves.toBe("simulated");
-    expect(PublicationError.name).toBe("PublicationError");
+  it("refuses publication when the approved manifest hash no longer matches the candidate (APPROVAL_HASH_MISMATCH)", async () => {
+    const context = await newSite();
+    await releaseReadyVersion({ ...context, buildVersionNumber: 1, hash: "hash-right" });
+    // Seed an approval bound to a DIFFERENT manifest hash than the
+    // candidate's current (immutable) manifest — the drift state the guard
+    // exists for. (INSERT is legal; only UPDATE/DELETE are trigger-blocked,
+    // so this is the only way to construct the drifted state.)
+    await env.DB.prepare(
+      `INSERT INTO build_approvals (id, build_id, build_version_id, artifact_manifest_hash, approved_at)
+       VALUES (?, ?, ?, 'hash-approved-earlier', ?)`
+    )
+      .bind(generateId(), context.buildId, context.buildVersionId, nowIso())
+      .run();
+
+    await expect(
+      publishApprovedBuildVersion(env, { ...context, buildVersionNumber: 1, deployer: deployer().deployer })
+    ).rejects.toMatchObject({ code: "APPROVAL_HASH_MISMATCH" });
+
+    // Nothing deployed, nothing recorded.
+    expect(await getPublicationState(env, context.siteId)).toEqual({ siteUrl: expect.any(String), current: null, rollback: null });
+    const publications = await env.DB.prepare("SELECT COUNT(*) AS n FROM publications WHERE build_version_id = ?")
+      .bind(context.buildVersionId)
+      .first<{ n: number }>();
+    expect(publications!.n).toBe(0);
   });
 });
 
@@ -281,7 +310,10 @@ describe("Rollback", () => {
       .bind(context.siteId)
       .first();
 
-    const buildsBefore = await versionsOf(context.buildId);
+    const buildsBefore = await env.DB.prepare("SELECT COUNT(*) AS n FROM builds WHERE site_generation_id = ?")
+      .bind(context.siteGenerationId)
+      .first<{ n: number }>();
+    const versionsBefore = await versionsOf(context.buildId);
     const approvalsBefore = await env.DB.prepare("SELECT COUNT(*) AS n FROM build_approvals WHERE build_id = ?")
       .bind(context.buildId)
       .first<{ n: number }>();
@@ -289,8 +321,12 @@ describe("Rollback", () => {
     const rollback = await rollbackPublication(env, { siteId: context.siteId });
     expect(rollback.restoredBuildVersionId).toBe(context.buildVersionId);
 
-    // No new Build Version, no new Approval, no regeneration.
-    expect(await versionsOf(context.buildId)).toBe(buildsBefore);
+    // No new Build, no new Build Version, no new Approval, no regeneration.
+    const buildsAfter = await env.DB.prepare("SELECT COUNT(*) AS n FROM builds WHERE site_generation_id = ?")
+      .bind(context.siteGenerationId)
+      .first<{ n: number }>();
+    expect(buildsAfter!.n).toBe(buildsBefore!.n);
+    expect(await versionsOf(context.buildId)).toBe(versionsBefore);
     const approvalsAfter = await env.DB.prepare("SELECT COUNT(*) AS n FROM build_approvals WHERE build_id = ?")
       .bind(context.buildId)
       .first<{ n: number }>();
@@ -321,6 +357,74 @@ describe("Rollback", () => {
       .bind(context.buildVersionId)
       .first<{ detail: string }>();
     expect(rollbackEvent!.detail).toContain("without a new Build");
+  });
+
+  it("publishing a third version replaces the single retained Rollback candidate with the immediately previous Published Version", async () => {
+    const context = await newSite();
+    await releaseReadyVersion({ ...context, buildVersionNumber: 1, hash: "hash-c1" });
+    await approveBuildVersion(env, context);
+    await publishApprovedBuildVersion(env, { ...context, buildVersionNumber: 1, deployer: deployer().deployer });
+
+    const v2 = await createNextBuildVersion(env, { buildId: context.buildId, cause: "automated_repair" });
+    await releaseReadyVersion({
+      siteGenerationId: context.siteGenerationId, buildId: context.buildId,
+      buildVersionId: v2.buildVersionId, buildVersionNumber: v2.buildVersionNumber, hash: "hash-c2",
+    });
+    await approveBuildVersion(env, { buildId: context.buildId, buildVersionId: v2.buildVersionId });
+    await publishApprovedBuildVersion(env, {
+      siteId: context.siteId, buildId: context.buildId,
+      buildVersionId: v2.buildVersionId, buildVersionNumber: v2.buildVersionNumber,
+      deployer: deployer().deployer,
+    });
+
+    // After V2: current = V2, retained rollback = V1.
+    const afterV2 = await getPublicationState(env, context.siteId);
+    expect(afterV2.current!.buildVersionId).toBe(v2.buildVersionId);
+    expect(afterV2.rollback!.buildVersionId).toBe(context.buildVersionId);
+
+    // V3: the one retained rollback candidate must MOVE to the immediately
+    // previous (V2) — never an unbounded chain, never V1.
+    const v3 = await createNextBuildVersion(env, { buildId: context.buildId, cause: "automated_repair" });
+    await releaseReadyVersion({
+      siteGenerationId: context.siteGenerationId, buildId: context.buildId,
+      buildVersionId: v3.buildVersionId, buildVersionNumber: v3.buildVersionNumber, hash: "hash-c3",
+    });
+    await approveBuildVersion(env, { buildId: context.buildId, buildVersionId: v3.buildVersionId });
+    await publishApprovedBuildVersion(env, {
+      siteId: context.siteId, buildId: context.buildId,
+      buildVersionId: v3.buildVersionId, buildVersionNumber: v3.buildVersionNumber,
+      deployer: deployer().deployer,
+    });
+
+    const afterV3 = await getPublicationState(env, context.siteId);
+    expect(afterV3.current!.buildVersionId).toBe(v3.buildVersionId);
+    expect(afterV3.rollback!.buildVersionId).toBe(v2.buildVersionId);
+
+    // Exactly ONE retained rollback slot exists (V2) — the older V1 is no
+    // longer referenced by published state at all, and only the current
+    // version's deployment holds an active published role.
+    expect(await getPublicationState(env, context.siteId)).toEqual({
+      siteUrl: expect.any(String),
+      current: { publicationId: afterV3.current!.publicationId, buildVersionId: v3.buildVersionId, url: afterV3.current!.url },
+      rollback: { publicationId: afterV3.rollback!.publicationId, buildVersionId: v2.buildVersionId, expiresAt: afterV3.rollback!.expiresAt },
+    });
+    const activePublished = await env.DB.prepare(
+      "SELECT build_version_id FROM build_deployments WHERE build_id = ? AND role = 'published' AND status = 'active'"
+    )
+      .bind(context.buildId)
+      .all<{ build_version_id: string }>();
+    expect((activePublished.results ?? []).map((row) => row.build_version_id)).toEqual([v3.buildVersionId]);
+
+    // V1 remains in publication history only — three published rows total.
+    const history = await env.DB.prepare("SELECT COUNT(*) AS n FROM publications WHERE site_id = ?")
+      .bind(context.siteId)
+      .first<{ n: number }>();
+    expect(history!.n).toBe(3);
+
+    // And rollback restores exactly the immediately previous version (V2).
+    const rollback = await rollbackPublication(env, { siteId: context.siteId });
+    expect(rollback.restoredBuildVersionId).toBe(v2.buildVersionId);
+    expect((await getPublicationState(env, context.siteId)).current!.buildVersionId).toBe(v2.buildVersionId);
   });
 
   it("honors the configured rollback window", async () => {
@@ -354,5 +458,60 @@ describe("Rollback", () => {
     await expect(
       rollbackPublication(env, { siteId: context.siteId, now: new Date(Date.now() + 8 * 24 * 60 * 60_000) })
     ).rejects.toMatchObject({ code: "ROLLBACK_WINDOW_EXPIRED" });
+  });
+});
+
+// ── Stable Site Address surfacing (issue #48, decision 132) ─────────────────
+
+describe("publication surfaces the stable Site Address", () => {
+  it("publish, state, idempotent republish and rollback expose the same siteUrl", async () => {
+    const context = await newSite();
+    await releaseReadyVersion({
+      siteGenerationId: context.siteGenerationId, buildId: context.buildId,
+      buildVersionId: context.buildVersionId, buildVersionNumber: 1, hash: "hash-addr-1",
+    });
+    const address = await env.DB
+      .prepare("SELECT host FROM site_addresses WHERE site_id = ?")
+      .bind(context.siteId)
+      .first<{ host: string }>();
+    expect(address).toBeTruthy();
+
+    await approveBuildVersion(env, context);
+    const published = await publishApprovedBuildVersion(env, {
+      ...context, buildVersionNumber: 1, deployer: deployer().deployer,
+    });
+    expect(published.publishedUrl).toContain(".workers.dev"); // internal origin meaning unchanged
+    expect(published.siteUrl).toBe(`https://${address!.host}`);
+
+    const state = await getPublicationState(env, context.siteId);
+    expect(state.siteUrl).toBe(published.siteUrl);
+
+    const idempotent = await publishApprovedBuildVersion(env, {
+      ...context, buildVersionNumber: 1, deployer: deployer().deployer,
+    });
+    expect(idempotent.alreadyPublished).toBe(true);
+    expect(idempotent.siteUrl).toBe(published.siteUrl);
+
+    // A newer published version changes WHICH version the address serves,
+    // never the address itself.
+    const next = await createNextBuildVersion(env, { buildId: context.buildId, cause: "revision" });
+    await releaseReadyVersion({
+      siteGenerationId: context.siteGenerationId, buildId: context.buildId,
+      buildVersionId: next.buildVersionId, buildVersionNumber: next.buildVersionNumber, hash: "hash-addr-2",
+    });
+    await approveBuildVersion(env, { buildId: context.buildId, buildVersionId: next.buildVersionId });
+    await publishApprovedBuildVersion(env, {
+      siteId: context.siteId, buildId: context.buildId,
+      buildVersionId: next.buildVersionId, buildVersionNumber: next.buildVersionNumber,
+      deployer: deployer().deployer,
+    });
+    const afterV2 = await getPublicationState(env, context.siteId);
+    expect(afterV2.siteUrl).toBe(published.siteUrl);
+
+    // Rollback: same hostname, restored exact prior version.
+    const rollback = await rollbackPublication(env, { siteId: context.siteId });
+    expect(rollback.siteUrl).toBe(published.siteUrl);
+    expect(rollback.restoredUrl).toContain(".workers.dev");
+    expect(rollback.restoredBuildVersionId).toBe(context.buildVersionId);
   });
 });
