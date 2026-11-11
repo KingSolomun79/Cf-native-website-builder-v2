@@ -11,7 +11,7 @@
 
 import type { Env } from "../env.d";
 import type { RawAiGenerate } from "../domain/ai-boundary";
-import { generateZaiCodingPlan, resolveCodingMultimodalModel, type ZaiCodingPlanContentPart } from "../lib/zai-coding-plan";
+import { generateZaiCodingPlan, resolveCodingModel, resolveCodingMultimodalModel, type ZaiCodingPlanContentPart } from "../lib/zai-coding-plan";
 
 export interface SimpleVisionImage {
   base64: string;
@@ -64,6 +64,36 @@ export function createSimpleVisionGenerate(
       ...(options?.temperature !== undefined ? { temperature: options.temperature } : {}),
       stream: true,
       ...(options?.jsonSchema ? { jsonSchema: options.jsonSchema } : { jsonMode: true }),
+      label: `${meta.stage}#${attempt}`,
+    });
+    return { content: result.content, provider: result.provider, model: result.model, finishReason: result.finishReason, reasoningControl: "thinking.type=disabled" };
+  };
+}
+
+// SIMPLE text-only generate seam (operator GO 2026-11-09): the design
+// AUTHORITY stages that carry no images run on the coding model (glm-5.3,
+// ZAI_CODING_MODEL) instead of the multimodal flash tier. First applied to the
+// ORIGINAL_DESIGN Design Blueprint — its input is text-only (Business Facts +
+// Creative Direction) and live evidence (2026-11-02..06, three consecutive
+// builds) showed the flash tier producing schema-invalid first attempts on
+// exactly this stage. Same Coding Plan provider, same transport rules.
+export function createSimpleTextGenerate(
+  env: Env,
+  meta: SimpleVisionMeta,
+  options?: { maxTokens?: number; temperature?: number }
+): RawAiGenerate {
+  const model = resolveCodingModel(env);
+  return async (systemPrompt, userPrompt, attempt) => {
+    const result = await generateZaiCodingPlan(env, {
+      model,
+      messages: [
+        { role: "system", content: systemPrompt },
+        { role: "user", content: userPrompt },
+      ],
+      maxTokens: options?.maxTokens ?? 16_384,
+      ...(options?.temperature !== undefined ? { temperature: options.temperature } : {}),
+      stream: true,
+      jsonMode: true,
       label: `${meta.stage}#${attempt}`,
     });
     return { content: result.content, provider: result.provider, model: result.model, finishReason: result.finishReason, reasoningControl: "thinking.type=disabled" };

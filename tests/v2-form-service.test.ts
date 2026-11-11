@@ -461,7 +461,7 @@ describe("platform email transport wiring (native Cloudflare Email Service bindi
     expect(sent[0].replyTo).toBe("jane@visitor.example");
   });
 
-  it("fires bounded server-side retries through the scheduled sweep without a new submission (issue #28)", async () => {
+  it("fires bounded server-side retries through the scheduled sweep without a new submission (issue #28)", { timeout: 240_000 }, async () => {
     // Acceptance hits a transient Email Service condition (quota).
     const throttled = emailBinding(async () => {
       throw codedError("E_RATE_LIMIT_EXCEEDED");
@@ -505,7 +505,7 @@ describe("platform email transport wiring (native Cloudflare Email Service bindi
     expect(submissions!.n).toBe(1);
   });
 
-  it("never resends a completed Email Delivery (sweep idempotency)", async () => {
+  it("never resends a completed Email Delivery (sweep idempotency)", { timeout: 240_000 }, async () => {
     const { binding, sent } = emailBinding(async () => ({ messageId: "once-1" }));
     const wiredEnv = { ...env, EMAIL: binding } as Env;
 

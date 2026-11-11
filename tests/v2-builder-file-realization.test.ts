@@ -183,7 +183,7 @@ describe("Coding Plan routing and budgets (GO §4/§10)", () => {
 describe("stage discipline: SIX calls, one semantic generation each (GO §4)", () => {
   it("§3 the prompt contract is v8 and carries the raw-output discipline", () => {
     const composed = composeStagePrompt("simple-website-builder");
-    expect(composed.promptVersion).toBe("v8");
+    expect(composed.promptVersion).toBe("v10");
     expect(composed.systemPrompt).toContain("RAW source");
     expect(composed.systemPrompt).toContain("no Markdown fences");
     expect(composed.systemPrompt).toContain("DOM-FIRST");
@@ -624,7 +624,7 @@ describe("provenance, cost telemetry and resume", () => {
     const ctx = await scaffoldBuild("references/simple/dom-first-resume.png");
     const provenance = {
       promptId: "simple-website-builder",
-      promptVersion: "v8",
+      promptVersion: "v10",
       promptDomainContractVersion: "1",
       model: "glm-5.3",
       schemaVersion: "builder-file/page-home/1",
@@ -675,7 +675,7 @@ describe("provenance, cost telemetry and resume", () => {
     const ctx = await scaffoldBuild("references/simple/dom-first-resume2.png");
     const provenance = {
       promptId: "simple-website-builder",
-      promptVersion: "v8",
+      promptVersion: "v10",
       promptDomainContractVersion: "1",
       model: "glm-5.3",
       schemaVersion: "builder-file/page-home/1",

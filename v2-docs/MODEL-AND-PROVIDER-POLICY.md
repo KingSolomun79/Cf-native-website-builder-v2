@@ -22,9 +22,19 @@ or provider note for the ACTIVE LLM path.
 | Stage | Model |
 |---|---|
 | Website Builder (all six file-realization calls) | `glm-5.3` |
-| Site Repair | `glm-5.3` |
-| General / coding / repair default | `glm-5.3` |
-| Blueprint + Visual QA (multimodal) | the Coding Plan GLM model verified by the live multimodal canary (GO §9); preferred candidate `glm-5.3-flash`, overridable via `ZAI_MULTIMODAL_MODEL` |
+| Design Blueprint — ORIGINAL_DESIGN (text-only input; operator GO 2026-11-09) | `glm-5.3` |
+| Design Blueprint — REFERENCE_BOUND (Reference screenshots attached) | the Coding Plan GLM model verified by the live multimodal canary (GO §9); preferred candidate `glm-5.3-flash`, overridable via `ZAI_MULTIMODAL_MODEL` |
+| Visual QA (all modes; screenshot judgement) | the verified multimodal model (`glm-5.3-flash` default) |
+| Site Repair (multimodal since operator GO 2026-11-09 — the repair sees the Reference + candidate renders) | the verified multimodal model (`glm-5.3-flash` default) |
+| General / coding default | `glm-5.3` |
+
+Operator GO 2026-11-09 (model routing): the ORIGINAL_DESIGN Design Blueprint
+carries no images, so it runs on the coding model via the text seam — live
+evidence 2026-11-02..06 showed the flash tier producing schema-invalid first
+attempts on three consecutive builds. The Site Repair moved the opposite way,
+onto the multimodal model: its brief references screenshots it previously
+could not see, and text-only repairs repeatedly shipped CSS-only patches for
+HTML-structure findings.
 
 Multimodal support is never inferred from a model name: it requires the model
 to be listed/allowed by the Coding Plan endpoint, to accept image input, and

@@ -213,7 +213,7 @@ describe("ORIGINAL_DESIGN pipeline (SAME downstream, Reference stages skipped)",
     const visualQa = byStage.get("simple-original-design-visual-qa");
     expect(visualQa).toBeDefined();
     expect(visualQa!.prompt_id).toBe("simple-original-design-visual-qa");
-    expect(visualQa!.prompt_version).toBe("v1");
+    expect(visualQa!.prompt_version).toBe("v3");
 
     // SAME shared downstream stages.
     expect(byStage.get("simple-website-builder")).toBeDefined();
@@ -422,5 +422,63 @@ describe("visual QA mode boundary (issue #24)", () => {
         generate: async () => ({ content: "{}", provider: "simple-script", model: "glm-5.3-flash" }),
       })
     ).rejects.toThrow(/REFERENCE_BOUND visual QA requires Reference visual inputs/);
+  });
+
+  it("all four routed pages ride the ONE visual QA call and are enumerated in the prompt (operator GO 2026-11-09)", async () => {
+    const { siteGenerationId } = await startOriginalGeneration();
+    const initial = await createInitialBuild(env, { siteGenerationId });
+    const keys: Record<string, string> = {
+      home: "candidates/allpages/home-desktop.png",
+      about: "candidates/allpages/about-desktop.png",
+      services: "candidates/allpages/services-desktop.png",
+      contact: "candidates/allpages/contact-desktop.png",
+      homeMobile: "candidates/allpages/home-mobile.png",
+    };
+    for (const key of Object.values(keys)) {
+      await putObject(env, key, await buildDecodableSolidPng(1440, 3200));
+    }
+
+    let capturedUserPrompt = "";
+    const { report } = await runSimpleVisualQaStage(env, {
+      siteGenerationId,
+      buildId: initial.buildId,
+      buildVersionId: initial.buildVersionId,
+      buildVersionNumber: 1,
+      blueprint: simpleBlueprintFixture(),
+      originalDesign: {
+        creativeDirectionBrief: "- Business: Terra & Beam Studio\n- Creative direction: Sun-baked editorial minimalism",
+      },
+      candidateDesktopR2Key: keys.home,
+      candidateMobileR2Key: keys.homeMobile,
+      candidateInnerPageR2Keys: [
+        { page: "about", desktop: keys.about },
+        { page: "services", desktop: keys.services },
+        { page: "contact", desktop: keys.contact },
+      ],
+      generate: async (_systemPrompt, userPrompt) => {
+        capturedUserPrompt = userPrompt;
+        return {
+          content: JSON.stringify({
+            version: "1",
+            scores: {
+              macroLayout: 95, typography: 94, spacingRhythm: 93, surfaceColor: 92,
+              imageTreatment: 91, components: 93, signatureElements: 94, responsive: 92,
+              overall: 94,
+            },
+            findings: [],
+            summary: "All four pages judged.",
+          }),
+          provider: "simple-script",
+          model: "glm-5.3-flash",
+        };
+      },
+    });
+    expect(report.scores.overall).toBe(94);
+    expect(capturedUserPrompt).toContain("ALL FOUR PAGES ARE ATTACHED AND GRADED");
+    expect(capturedUserPrompt).toContain("1. CANDIDATE home desktop full page");
+    expect(capturedUserPrompt).toContain("2. CANDIDATE about desktop full page");
+    expect(capturedUserPrompt).toContain("3. CANDIDATE services desktop full page");
+    expect(capturedUserPrompt).toContain("4. CANDIDATE contact desktop full page");
+    expect(capturedUserPrompt).toContain("5. CANDIDATE home mobile full page");
   });
 });

@@ -26,6 +26,26 @@ function stripTags(html: string): string {
   return html.replace(/<script[\s\S]*?<\/script>/gi, " ").replace(/<[^>]+>/g, " ");
 }
 
+// COPY STYLE (operator GO 2026-11-09): em/en dashes are banned from every
+// string a visitor or crawler can read — visible text, <title>, the meta
+// description and alt attributes. Hyphen-minus in compound words stays legal.
+const DASH_PATTERN = /[\u2014\u2013]/;
+
+export function findCopyStyleDashViolations(html: string): string[] {
+  const offenders: string[] = [];
+  const visible = stripTags(html);
+  if (DASH_PATTERN.test(visible)) offenders.push("visible copy");
+  const title = /<title[^>]*>([\s\S]*?)<\/title>/i.exec(html)?.[1] ?? "";
+  if (DASH_PATTERN.test(title)) offenders.push("title");
+  for (const meta of html.matchAll(/<meta\b[^>]*name="description"[^>]*>/gi)) {
+    if (DASH_PATTERN.test(meta[0])) offenders.push("meta description");
+  }
+  for (const alt of html.matchAll(/\balt\s*=\s*(?:"([^"]*)"|'([^']*)')/gi)) {
+    if (DASH_PATTERN.test(alt[1] ?? alt[2] ?? "")) offenders.push("alt text");
+  }
+  return [...new Set(offenders)];
+}
+
 export interface BundleQaInput {
   bundle: SiteBundle;
   blueprint: DesignBlueprintV2;
@@ -42,6 +62,10 @@ export interface BundleQaInput {
     capturesRendered: number;
     mobileCaptured: boolean;
     failedRequestCount: number;
+    /** Tap-target audit summed over mobile captures (operator GO
+     *  2026-11-10); zero when the evidence predates the audit. */
+    tapTargetViolations: number;
+    tapTargetOffenders: string[];
   } | null;
 }
 
@@ -149,6 +173,16 @@ export function runDeterministicBundleQa(input: BundleQaInput): BundleQaResult {
     // that hero region. No geometry scoring — presence only.
     const heroFinding = findInnerPageHeroMediaFinding(pageId, html, heroSlotIdForPage(pageId));
     if (heroFinding) technical("INNER_PAGE_HERO_MEDIA_MISSING", "blocker", heroFinding);
+
+    // ── COPY STYLE: no em/en dashes anywhere a visitor can read ──
+    const dashViolations = findCopyStyleDashViolations(html);
+    if (dashViolations.length > 0) {
+      technical(
+        "COPY_STYLE_EMDASH",
+        "blocker",
+        `${pageId}: em/en dash characters (U+2014/U+2013) present in ${dashViolations.join(", ")} — rewrite the affected sentences without dashes (split the sentence, or use a comma, colon or parentheses; compound-word hyphens are fine)`
+      );
+    }
   }
 
   // ── Contact form contract (central Form Service, spec KEEP list) ──
@@ -210,6 +244,19 @@ export function runDeterministicBundleQa(input: BundleQaInput): BundleQaResult {
   // ── Render-evidence-backed gates (may be null when assembly failed) ──
   const evidence = input.renderEvidence;
   const evidenceOk = evidence !== null;
+
+  // TAP TARGETS (operator GO 2026-11-10): interactive controls measured below
+  // the 44x36px touch minimum on the mobile render — real fingers cannot hit
+  // them reliably. Live evidence 2026-11-09: the released Growth Bridge
+  // revision shipped 10 such controls (header CTA 25px tall, footer nav links
+  // 19px) while QA passed at 91 because nothing measured touch ergonomics.
+  if (evidenceOk && evidence.tapTargetViolations > 0) {
+    technical(
+      "TAP_TARGET_TOO_SMALL",
+      "blocker",
+      `mobile: ${evidence.tapTargetViolations} interactive control(s) below the 44x36px touch minimum (${evidence.tapTargetOffenders.slice(0, 5).join("; ")}) — enlarge nav/header/footer links and buttons with padding or min-height so every touch target clears 44px wide by 36px tall`
+    );
+  }
 
   const gateResults: TechnicalGateResults = {
     ALL_PAGES_LOAD:

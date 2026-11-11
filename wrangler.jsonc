@@ -119,7 +119,7 @@
     // 2026-09-12): the operator mailbox that receives new client briefs and
     // site-ready / human-review / generation-failed notices. Configuration,
     // not a secret — swap per environment here.
-    "WAZIBIZ_ADMIN_EMAIL": "hello@wazibiz.ke",
+    "WAZIBIZ_ADMIN_EMAIL": "wazibizwebsites@gmail.com",
     // Cloudflare Access (operator GO 2026-09-13, direct production
     // integration): BOTH are REQUIRED. Every /admin/* and /api/admin/* route
     // cryptographically verifies the Access JWT (RS256 signature against the
@@ -140,6 +140,7 @@
     // asserts this exact value so a production release can never carry a
     // retired image model.
     "KIE_MODEL": "nano-banana-2-lite",
+    "SIMPLE_REPAIR_ROUNDS": "3",
     // Durable image lifecycle (issue #58): the poll cadence and the per-attempt
     // provider wait bound for the submit -> sleep -> poll state machine.
     // Worst-case durable poll steps = 12 slots x 2 attempts x ceil(timeout /

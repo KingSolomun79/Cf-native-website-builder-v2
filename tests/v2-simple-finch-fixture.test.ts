@@ -91,7 +91,7 @@ describe("known-good Blueprint builder test (spec section 61)", () => {
       siteFormId: "site:finch-fixture",
       slotIds,
       resolvedSlotIds: slotIds,
-      renderEvidence: { capturesRendered: 9, mobileCaptured: true, failedRequestCount: 0 },
+      renderEvidence: { capturesRendered: 9, mobileCaptured: true, failedRequestCount: 0, tapTargetViolations: 0, tapTargetOffenders: [] },
     });
     expect(qa.truthFindings).toEqual([]);
     expect(qa.technicalBlockerCount).toBe(0);

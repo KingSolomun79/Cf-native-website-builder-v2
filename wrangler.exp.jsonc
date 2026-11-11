@@ -98,6 +98,7 @@
     "WAZIBIZ_ADMIN_EMAIL": "hello@wazibiz.ke",
     "KIE_API_URL": "https://api.kie.ai",
     "KIE_MODEL": "nano-banana-2-lite",
+    "SIMPLE_REPAIR_ROUNDS": "3",
     "KIE_POLL_INTERVAL_MS": "30000",
     "KIE_ATTEMPT_TIMEOUT_MS": "900000",
     // ZAI GLM CODING PLAN (operator GO 2026-09-11): the ONE LLM provider.

@@ -23,9 +23,9 @@ contradictory clauses inside the retained detailed body.
 | Stage | prompt id/version | Detailed body |
 |---|---|---|
 | Design Blueprint Generator (multimodal — Reference screenshots attached) | `simple-design-blueprint/v5` | `simple/01-design-blueprint.md` |
-| Website Builder — the ONE visual owner | `simple-website-builder/v8` | `simple/02-website-builder.md` |
-| Visual QA | `simple-visual-qa/v2` | `simple/03-visual-qa.md` |
-| Site Repair — the ONE repair | `simple-site-repair/v1` | `simple/04-site-repair.md` |
+| Website Builder — the ONE visual owner (v10: copy style + touch targets 44x36 + mobile marker composition — no em/en dashes in copy, no stock AI phrasing) | `simple-website-builder/v10` | `simple/02-website-builder.md` |
+| Visual QA (v4: all-page renders; mobile defects outrank desktop polish) | `simple-visual-qa/v4` | `simple/03-visual-qa.md` |
+| Site Repair — the ONE repair (v3: multimodal sight + structural-defect rule + copy style) | `simple-site-repair/v3` | `simple/04-site-repair.md` |
 
 ## ORIGINAL_DESIGN — SIMPLE pipeline stages (issue #24, enabled 2026-09-12)
 
@@ -37,6 +37,6 @@ schema; both Visual QA prompts output the SAME report schema.
 | Stage | prompt id/version | Detailed body |
 |---|---|---|
 | Original Design Blueprint Generator (text-only — Business Facts + Creative Direction, no Reference) | `simple-original-design-blueprint/v1` | `simple/05-original-design-blueprint.md` |
-| Website Builder — the ONE visual owner (SHARED with REFERENCE_BOUND) | `simple-website-builder/v8` | `simple/02-website-builder.md` |
-| Original Design Visual QA (candidate renders vs Blueprint + Creative Direction; no Reference) | `simple-original-design-visual-qa/v1` | `simple/06-original-design-visual-qa.md` |
-| Site Repair — the ONE repair (SHARED with REFERENCE_BOUND) | `simple-site-repair/v1` | `simple/04-site-repair.md` |
+| Website Builder — the ONE visual owner (SHARED with REFERENCE_BOUND) | `simple-website-builder/v10` | `simple/02-website-builder.md` |
+| Original Design Visual QA (candidate renders vs Blueprint + Creative Direction; no Reference; v3: all-page renders; mobile defects outrank desktop polish) | `simple-original-design-visual-qa/v3` | `simple/06-original-design-visual-qa.md` |
+| Site Repair — the ONE repair (SHARED with REFERENCE_BOUND) | `simple-site-repair/v3` | `simple/04-site-repair.md` |

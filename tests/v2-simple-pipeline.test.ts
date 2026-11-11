@@ -185,42 +185,50 @@ describe("SIMPLE pipeline end-to-end (experiment/simplified-design-pipeline)", (
     expect(records?.n).toBe(0);
   });
 
-  it("pre-QA repair consumed the budget: a repaired build whose QA still fails → HUMAN_REVIEW_REQUIRED, never a post-QA repair version", async () => {
+  it("pre-QA repair counts as ONE bounded round (operator GO 2026-11-09/10): a repaired build whose QA fails without improving → HUMAN_REVIEW_REQUIRED after exactly one post-QA round; a resumed entry stops on the durable non-improvement baseline", async () => {
     const siteGenerationId = await startGeneration("references/simple/pre-qa-budget.png");
     const outcome = await runBuildPipeline(env, {
       siteGenerationId,
       deps: createSimpleScripts({ builderInventsCssSelectors: true, preQaRepairSucceeds: true, allVisualQaFails: true }),
     });
 
-    // The ONE pre-QA repair carried the build through the builder gates; the
-    // failing QA escalates WITHOUT a second (post-QA) repair.
+    // The pre-QA repair carried the build through the builder gates (round 1
+    // of the composed budget); the failing QA gets ONE improving post-QA
+    // round (round 2), which fails at the same 70 — the improvement gate
+    // stops the loop and escalates. Supersedes the #14 ONE-total policy.
     expect(outcome.terminal).toBe("HUMAN_REVIEW_REQUIRED");
     expect(outcome.repairApplied).toBe(true);
     expect(outcome.reasons[0]).toContain("visual fidelity 70 < 90");
 
-    // Exactly two versions: the pre-QA repair version, and NO post-QA repair
-    // version after it — the ONE repair covered both invocation points.
+    // Exactly three versions: v1 build, v2 pre-QA repair, v3 post-QA round.
     const versions = await env.DB.prepare("SELECT version_number FROM build_versions WHERE build_id = ? ORDER BY version_number")
       .bind(outcome.buildId)
       .all<{ version_number: number }>();
-    expect(versions.results.map((v) => v.version_number)).toEqual([1, 2]);
+    expect(versions.results.map((v) => v.version_number)).toEqual([1, 2, 3]);
 
-    // The post-QA repair stage never ran for this build.
+    // Exactly one post-QA repair round ran (the non-improving stop prevented
+    // a third).
     const postQaRepairRuns = await env.DB.prepare("SELECT COUNT(*) AS n FROM ai_stage_runs WHERE build_id = ? AND stage = 'simple-site-repair'")
       .bind(outcome.buildId)
       .first<{ n: number }>();
-    expect(postQaRepairRuns?.n).toBe(0);
+    expect(postQaRepairRuns?.n).toBe(1);
 
-    // A resumed engine entry (fresh pipeline run, same Build) hits the durable
-    // budget guard: the failing QA escalates with the budget reason and NO
-    // third Build Version is ever created.
+    // A resumed engine entry (fresh pipeline run, same Build) honors the
+    // DURABLE improvement baseline: the newest completed round (v3, 70) did
+    // not improve on its predecessor (v2, 70), so it escalates with the
+    // non-improvement reason and NO fourth Build Version is ever created.
     const resumed = await runBuildPipeline(env, { siteGenerationId, buildId: outcome.buildId, deps: createSimpleScripts({ allVisualQaFails: true }) });
     expect(resumed.terminal).toBe("HUMAN_REVIEW_REQUIRED");
-    expect(resumed.reasons).toContain("repair budget already consumed — no further automated repair is allowed");
+    const events = await env.DB.prepare(
+      "SELECT detail FROM build_workflow_events WHERE build_id = ? AND stage = 'simple_final_qa' ORDER BY created_at, id"
+    )
+      .bind(outcome.buildId)
+      .all<{ detail: string }>();
+    expect(events.results.some((event) => event.detail.includes("did not improve (70 → 70)"))).toBe(true);
     const versionsAfterResume = await env.DB.prepare("SELECT version_number FROM build_versions WHERE build_id = ? ORDER BY version_number")
       .bind(outcome.buildId)
       .all<{ version_number: number }>();
-    expect(versionsAfterResume.results.map((v) => v.version_number)).toEqual([1, 2]);
+    expect(versionsAfterResume.results.map((v) => v.version_number)).toEqual([1, 2, 3]);
   });
 
   it("repaired candidate fails the deterministic gate again → FAILED with the budget consumed, no additional repair", async () => {

@@ -103,14 +103,22 @@ describe("fail-closed Cloudflare Access admin guard", () => {
     expect(body.error.code).toBe("ADMIN_ACCESS_NOT_CONFIGURED");
   });
 
-  it("applies the identical contract to the /admin page surface", async () => {
-    const denied = await get("https://admin-test.example.com/admin/intakes");
+  it("applies the identical contract to the admin page surface at the root", async () => {
+    // Canonical pages moved to / on the admin hostname (the /admin prefix was
+    // redundant on the subdomain); the Access contract must hold identically.
+    const denied = await get("https://admin-test.example.com/intakes");
     expect(denied.status).toBe(401);
     const unconfigured = await get(
-      "https://admin-test.example.com/admin/intakes",
+      "https://admin-test.example.com/intakes",
       {},
       envWith({ CF_ACCESS_TEAM_DOMAIN: undefined, CF_ACCESS_AUD: undefined })
     );
     expect(unconfigured.status).toBe(503);
+  });
+
+  it("redirects legacy /admin/* page paths to the short equivalents", async () => {
+    // Redirects leak nothing: the canonical targets stay Access-guarded.
+    const redirected = await get("https://admin-test.example.com/admin/intakes");
+    expect(redirected.status).toBe(302);
   });
 });

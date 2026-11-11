@@ -35,6 +35,7 @@ function makePage(spec: { markerMatches: number }) {
       ],
       images: [{ displayedWidth: 100, naturalWidth: 200, naturalHeight: 100 }],
     })),
+    measureTapTargets: vi.fn(async () => ({ violations: 0, offenders: [] })),
     screenshot: vi.fn(async () => new Uint8Array([9, 9, 9])),
     close: vi.fn(async () => {}),
   };
