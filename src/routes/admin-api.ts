@@ -18,6 +18,7 @@ import {
   generateRevisionFromNotes,
 } from "../domain/admin-site-notes";
 import { getAdminSiteReview } from "../domain/admin-review";
+import { acceptDefaultAdaptations } from "./admin-adaptation-contract";
 import { parseCreativeDirection } from "../domain/creative-direction";
 import { startInitialBuildWorkflowIdempotent } from "../domain/workflow-start";
 
@@ -269,4 +270,5 @@ export function registerAdminApiRoutes(app: Hono<{ Bindings: Env }>): void {
   app.get("/api/admin/sites/:siteId", getSiteReview);
   app.post("/api/admin/sites/:siteId/notes", postSiteNote);
   app.post("/api/admin/sites/:siteId/generate-revision", postGenerateRevision);
+  app.post("/api/admin/sites/:siteId/generations/:siteGenerationId/accept-default-adaptations", acceptDefaultAdaptations);
 }

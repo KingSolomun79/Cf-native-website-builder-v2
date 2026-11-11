@@ -248,6 +248,68 @@ export function classifyReferenceSuitability(signals: SuitabilitySignal[]): Suit
 
 // A concrete Adaptation Contract must cover every adaptable limitation before
 // generation may continue.
+// Operator one-click default Adaptation Contract (operator GO 2026-11-11).
+// When intake classifies a Reference SUPPORTED_WITH_LIMITATIONS and no
+// contract was supplied, the admin review surface offers THIS deterministic
+// default: every detected limitation feature is declared unsupported AND
+// paired with a concrete accepted substitute, so validateAdaptationContract
+// passes by construction. Known limitation kinds carry curated substitutes;
+// unknown kinds get a safe generic substitute that still satisfies coverage.
+export const DEFAULT_ADAPTATION_CONTRACT_VERSION = "operator-default-2026-11-11";
+
+const DEFAULT_SUBSTITUTES: Record<string, { reason: string; substituteOutcome: string; qaException: string }> = {
+  custom_cursor: {
+    reason: "Custom cursor behavior is not reproduced; it is a device-level interaction, not a visual identity carrier.",
+    substituteOutcome: "The standard system cursor is used everywhere; hover/active states carry the same feedback through color and motion tokens.",
+    qaException: "Visual QA must not penalize the absence of custom cursor behavior in static captures.",
+  },
+  complex_slider: {
+    reason: "Complex specialized slider choreography is approximated; exact gesture physics are not reproducible statically.",
+    substituteOutcome: "The slider becomes an accessible static grid or scroll-snap band with the same content mass and card treatment.",
+    qaException: "Visual QA judges the slider band's static composition, not its interactive choreography.",
+  },
+  heavy_parallax: {
+    reason: "Heavy parallax choreography is not reproduced; scroll-linked layer motion is not reproducible in static composition.",
+    substituteOutcome: "Parallax hero bands become full-bleed photographic bands with overlay gradients at the same heights and visual mass.",
+    qaException: "Visual QA must not penalize the absence of scroll parallax motion; it judges static captures of the adapted bands.",
+  },
+  exotic_typography: {
+    reason: "The reference's proprietary/unavailable font cannot be licensed or embedded.",
+    substituteOutcome: "The closest metric-compatible open font family is used with the same scale, weight discipline and tracking.",
+    qaException: "Visual QA judges typographic hierarchy and scale, not the exact reference typeface.",
+  },
+  unreliable_scroll_flattening: {
+    reason: "The reference's static flattening is unreliable under scroll (scroll-transform layout).",
+    substituteOutcome: "Viewport checkpoint captures are the composition authority; the generated site reproduces the checkpoint composition at rest.",
+    qaException: "Visual QA compares against viewport checkpoint captures, not the reference's full-page flatten.",
+  },
+};
+
+export function defaultAdaptationContract(features: string[]): AdaptationContract {
+  const unique = [...new Set(features)].filter((feature) => feature.length > 0);
+  if (unique.length === 0) {
+    // Defensive: an empty feature list can never occur on the
+    // SUPPORTED_WITH_LIMITATIONS path; refuse loudly rather than fabricate.
+    throw new Error("defaultAdaptationContract requires at least one limitation feature");
+  }
+  return {
+    version: DEFAULT_ADAPTATION_CONTRACT_VERSION,
+    unsupportedFeatures: unique.map((feature) => ({
+      feature,
+      reason: DEFAULT_SUBSTITUTES[feature]?.reason ?? `Reference feature '${feature}' is declared unsupported by the operator default adaptation.`,
+    })),
+    acceptedApproximations: unique.map((feature) => ({
+      replaces: feature,
+      substituteOutcome: DEFAULT_SUBSTITUTES[feature]?.substituteOutcome
+        ?? `The band using '${feature}' is realized as an accessible static composition preserving its visual mass and content.`,
+    })),
+    qaExceptions: unique.map((feature) =>
+      DEFAULT_SUBSTITUTES[feature]?.qaException
+        ?? `Visual QA must not penalize the adapted treatment of '${feature}'.`
+    ),
+  };
+}
+
 export function validateAdaptationContract(
   contract: AdaptationContract,
   decision: SuitabilityDecision

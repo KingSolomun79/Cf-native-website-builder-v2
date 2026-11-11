@@ -39,6 +39,7 @@
 import { NonRetryableError } from "cloudflare:workflows";
 import { StageExecutionCollisionError } from "./stage-execution";
 import { StageArtifactError } from "./stage-artifacts";
+import { ReferenceIntakeError } from "./reference-intake";
 import { ImageBudgetExceededError } from "./image-pipeline";
 import { AiStageSchemaInvalidError } from "./ai-boundary";
 import { SimpleWebsiteBuilderError } from "../simple-design/website-builder";
@@ -97,6 +98,15 @@ export function classifyStageFailure(error: unknown): StageFailureClass {
   // Builder's whole budget — the pipeline handles them in-step; this backstop
   // guarantees no engine retry can ever become a second Builder attempt.
   if (error instanceof AiStageSchemaInvalidError || error instanceof SimpleWebsiteBuilderError) {
+    return "DETERMINISTIC_REVIEW_REQUIRED";
+  }
+  // Operator GO 2026-11-11: a missing Adaptation Contract is a deterministic
+  // OPERATOR decision gap — no engine retry can supply it. Live evidence
+  // 2026-11-11: the misclassification kept the reference-capture step (and
+  // the whole instance) retrying for ~an hour before WORKFLOW_EXECUTION_
+  // EXHAUSTED. Terminal: the Build fails fast with its marker event, and the
+  // admin review surface offers the one-click default contract.
+  if (error instanceof ReferenceIntakeError && error.code === "ADAPTATION_CONTRACT_REQUIRED") {
     return "DETERMINISTIC_REVIEW_REQUIRED";
   }
   // Everything else — including StageExecutionInProgressError (single-flight

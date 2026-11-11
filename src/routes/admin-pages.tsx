@@ -20,6 +20,7 @@ import { requireCloudflareAccess } from "../domain/admin-access";
 import { getIntakeDraft, listIntakeDrafts, validateIntakeDraftPayload, type IntakeDraft } from "../domain/intake-draft";
 import { listAdminNotifications } from "../domain/admin-notifications";
 import { getAdminSiteReview, type AdminSiteReview } from "../domain/admin-review";
+import { defaultAdaptationContract } from "../domain/reference-evidence-schema";
 
 type Bindings = Env;
 
@@ -51,6 +52,12 @@ const STYLES = `
   .badge.ready { border-color: var(--ok-line); color: var(--ok-ink); }
   .badge.review { border-color: #c98a3d; color: #f0c387; }
   .badge.failed { border-color: var(--err-line); color: var(--err-ink); }
+  .adapt-card { border: 1px solid #c98a3d; background: #2a2118; color: #f0c387; border-radius: 8px; padding: 0.9rem 1rem; margin: 0.8rem 0; font-size: 0.9rem; }
+  .adapt-card .chips { display: flex; gap: 0.4rem; flex-wrap: wrap; margin: 0.5rem 0; }
+  .adapt-card .chip { border: 1px solid #c98a3d; border-radius: 999px; padding: 0.1rem 0.6rem; font-size: 0.75rem; }
+  .adapt-card details { margin: 0.5rem 0; }
+  .adapt-card summary { cursor: pointer; color: var(--muted); font-size: 0.8rem; }
+  .adapt-card pre { font-size: 0.72rem; }
   .qa-failed { border: 1px solid var(--err-line); background: var(--err-bg); color: var(--err-ink); border-radius: 8px; padding: 0.75rem 1rem; margin: 0.7rem 0; font-size: 0.9rem; }
   .qa-failed strong { color: var(--err-ink); }
   .qa-failed ul { margin: 0.45rem 0 0.45rem; padding-left: 1.2rem; }
@@ -755,6 +762,18 @@ function flash(message, isError) {
   el.style.display = 'block';
   el.className = isError ? 'flash error' : 'flash';
 }
+async function acceptAdaptations(siteGenerationId) {
+  var btn = document.getElementById('adapt-btn');
+  btn.disabled = true;
+  flash('Accepting the default adaptation contract and starting a new generation...', false);
+  try {
+    var response = await fetch(API + '/generations/' + siteGenerationId + '/accept-default-adaptations', { method: 'POST', headers: { 'content-type': 'application/json' } });
+    var result = await response.json().catch(function () { return null; });
+    if (!response.ok) { flash('Accept failed: ' + ((result && result.error && (result.error.message || result.error.code)) || response.status), true); btn.disabled = false; return; }
+    flash('New generation started (' + (result.siteGenerationId || '').slice(0, 8) + '). Reloading...', false);
+    setTimeout(function () { location.reload(); }, 800);
+  } catch (e) { flash('Accept failed: ' + e.message, true); btn.disabled = false; }
+}
 async function addNote() {
   const note = document.getElementById('new-note').value.trim();
   if (!note) { flash('Write the note first.', true); return; }
@@ -835,6 +854,36 @@ async function SiteReviewPage(c: Context<{ Bindings: Env }>, review: AdminSiteRe
             )}
           </p>
         ) : null}
+        {(() => {
+          const pending = review.generations
+            .flatMap((generation) => generation.builds)
+            .filter((build) => build.state === "FAILED" && build.adaptationRequired && build.adaptationRequired.length > 0);
+          const latest = pending[pending.length - 1];
+          if (!latest) return null;
+          const generation = review.generations.find((generation) => generation.builds.includes(latest))!;
+          const preview = defaultAdaptationContract(latest.adaptationRequired!);
+          return (
+            <div class="adapt-card">
+              <strong>Inspiration site needs adaptation decisions.</strong> The last build stopped because the reference was
+              classified SUPPORTED_WITH_LIMITATIONS and no Adaptation Contract was supplied.
+              <div class="chips">
+                {latest.adaptationRequired!.map((feature) => (
+                  <span class="chip">{feature}</span>
+                )) as never}
+              </div>
+              <details>
+                <summary>Preview the default adaptation contract</summary>
+                <pre>{JSON.stringify(preview, null, 2) as never}</pre>
+              </details>
+              <div class="actions">
+                <span class="muted spacer">Starts a fresh generation on this site with the contract above — the failed history stays untouched.</span>
+                <button type="button" class="secondary" id="adapt-btn" onclick={`acceptAdaptations('${generation.id}')`}>
+                  Accept default adaptations and retry
+                </button>
+              </div>
+            </div>
+          );
+        })()}
         {review.generations.map((generation) => (
           <div>
             <h3 class="muted">

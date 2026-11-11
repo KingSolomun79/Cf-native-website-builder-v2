@@ -28,7 +28,7 @@
 
 import type { Env } from "../env.d";
 import { appendBuildWorkflowEvent, createInitialBuild, createNextBuildVersion } from "../domain/lifecycle";
-import { runReferenceIntake, getFrozenReferenceEvidence, type ReferenceCaptureFn } from "../domain/reference-intake";
+import { runReferenceIntake, getFrozenReferenceEvidence, ReferenceIntakeError, type ReferenceCaptureFn } from "../domain/reference-intake";
 import { getEffectiveBusinessFacts } from "../domain/revision";
 import { getAcceptedImageMap, type ImageGenerationProvider } from "../domain/image-pipeline";
 import { runImageGenerationDurable } from "../domain/image-orchestration";
@@ -242,13 +242,31 @@ export async function runSimpleBuildPipeline(
 
     if (buildMode === "REFERENCE_BOUND") {
       await stepDo("simple: reference capture", async () => {
-        await runReferenceIntake(env, {
-          siteGenerationId: input.siteGenerationId,
-          buildId,
-          buildVersionId: version.buildVersionId,
-          buildVersionNumber: version.buildVersionNumber,
-          capture: deps.capture,
-        });
+        try {
+          await runReferenceIntake(env, {
+            siteGenerationId: input.siteGenerationId,
+            buildId,
+            buildVersionId: version.buildVersionId,
+            buildVersionNumber: version.buildVersionNumber,
+            capture: deps.capture,
+          });
+        } catch (error) {
+          // Operator GO 2026-11-11: persist the detected limitation features
+          // as a structured marker event BEFORE the deterministic failure
+          // propagates — the admin review surface and the one-click default
+          // contract endpoint read exactly this marker.
+          if (error instanceof ReferenceIntakeError && error.code === "ADAPTATION_CONTRACT_REQUIRED" && error.limitationFeatures?.length) {
+            await appendBuildWorkflowEvent(env, {
+              buildId,
+              buildVersionId: version.buildVersionId,
+              fromState: "REFERENCE_CHECK",
+              toState: "FAILED",
+              stage: "simple_reference_capture",
+              detail: `ADAPTATION_CONTRACT_REQUIRED awaiting operator adaptation decisions [adaptation-features: ${error.limitationFeatures.join(", ")}]`,
+            });
+          }
+          throw error;
+        }
         return null;
       });
       frozen = await getFrozenReferenceEvidence(env, input.siteGenerationId);
