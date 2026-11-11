@@ -326,7 +326,7 @@ describe("Nano Banana screen-free adaptation covers every page hero", () => {
 describe("Mobile hero mass rule ships in the builder prompt", () => {
   it("the composed builder prompt contains the hero media rule and the mobile 35-50svh floor", async () => {
     const composed = composeStagePrompt("simple-website-builder");
-    expect(composed.promptVersion).toBe("v8");
+    expect(composed.promptVersion).toBe("v10");
     expect(composed.systemPrompt).toContain("FOUR-PAGE HERO MEDIA");
     expect(composed.systemPrompt).toContain("35–50svh");
     const blueprint = composeStagePrompt("simple-design-blueprint");
@@ -334,7 +334,7 @@ describe("Mobile hero mass rule ships in the builder prompt", () => {
     expect(blueprint.systemPrompt).toContain("pageHeroes");
     expect(blueprint.systemPrompt).not.toContain("mediaSlotId");
     const visualQa = composeStagePrompt("simple-visual-qa");
-    expect(visualQa.promptVersion).toBe("v2");
+    expect(visualQa.promptVersion).toBe("v4");
     expect(visualQa.systemPrompt).toContain("photographic hero treatment");
   });
 });

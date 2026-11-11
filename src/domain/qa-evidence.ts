@@ -42,7 +42,14 @@ export interface PageCapture {
   fullPageScreenshot: Uint8Array;
   firstViewportScreenshot?: Uint8Array;
   geometry: GeometryProfile;
-  runtime?: { consoleErrors: string[]; failedRequests: string[] };
+  runtime?: {
+    consoleErrors: string[];
+    failedRequests: string[];
+    /** Tap-target audit at this viewport (operator GO 2026-11-10): rendered
+     *  interactive controls below the 44x36px touch minimum. Populated on
+     *  mobile-width captures; absent on older evidence and desktop widths. */
+    tapTargets?: { violations: number; offenders: string[] };
+  };
 }
 
 export type QaCaptureFn = (spec: Array<{ page: PageId; viewportWidth: number; firstViewport: boolean }>) => Promise<PageCapture[]>;
@@ -94,6 +101,9 @@ export interface QaEvidenceBundle {
     geometry: GeometryProfile;
     consoleErrorCount: number;
     failedRequestCount: number;
+    /** Tap-target audit at mobile widths (operator GO 2026-11-10); absent on
+     *  pre-GO bundles and desktop-width captures. */
+    tapTargets?: { violations: number; offenders: string[] };
   }>;
   createdAt: string;
 }
@@ -154,6 +164,7 @@ export async function buildStandardEvidenceBundle(
       geometry: capture.geometry,
       consoleErrorCount: capture.runtime?.consoleErrors.length ?? 0,
       failedRequestCount: capture.runtime?.failedRequests.length ?? 0,
+      ...(capture.runtime?.tapTargets ? { tapTargets: capture.runtime.tapTargets } : {}),
     });
   }
 

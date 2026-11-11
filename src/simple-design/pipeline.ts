@@ -50,6 +50,7 @@ import {
   materializeAcceptedImageDescriptors,
   materializeBlueprintImageSlots,
   materializeBlueprintPromptRecords,
+  DESIGN_BLUEPRINT_V2_SCHEMA_VERSION,
   type DesignBlueprintV2,
   type QaPackage,
   type SiteBundle,
@@ -123,6 +124,17 @@ interface QaOutcome {
 }
 
 const PAGE_FILES: Record<string, string> = { home: "index.html", about: "about.html", services: "services.html", contact: "contact.html" };
+
+// Redesign-intent detection for blueprint reuse (operator GO 2026-11-09).
+// Deliberately CONSERVATIVE toward regeneration: only unmistakable redesign
+// language opts a revision out of reusing the parent's accepted Design
+// Blueprint. Layout/composition FIX requests ("fix the overflow", "centre the
+// content", "make the cards even") are realization defects, not redesigns —
+// they reuse the blueprint and steer the builder. Exported for tests.
+export function revisionRequestsRedesign(note: string | undefined): boolean {
+  if (!note) return false;
+  return /start afresh|start over|start from scratch|redesign|new design|fresh design|different design|completely different|change the design|overall design/i.test(note);
+}
 
 // Same copy semantics as the legacy pipeline's private helper: Accepted
 // Image attempts stay valid project-controlled assets for the repair version
@@ -272,7 +284,29 @@ export async function runSimpleBuildPipeline(
       });
     }
 
+    // Governing human revision instruction (operator GO 2026-09-12): a
+    // revision Build carries its Revision Request's requestNote into the
+    // SAME Builder v8/model/path as a bounded intent block. Initial builds
+    // have none. Since the blueprint-reuse GO (2026-11-09) it ALSO steers the
+    // two design-level decisions below (blueprint reuse vs regeneration).
+    let humanRevisionInstruction: string | undefined;
+    const buildKindRow = await env.DB.prepare("SELECT kind, parent_build_id FROM builds WHERE id = ?").bind(buildId).first<{ kind: string; parent_build_id: string | null }>();
+    if (buildKindRow?.kind === "revision") {
+      const requestRow = await env.DB.prepare("SELECT request_note FROM revision_requests WHERE build_id = ?")
+        .bind(buildId)
+        .first<{ request_note: string | null }>();
+      if (requestRow?.request_note) humanRevisionInstruction = requestRow.request_note;
+    }
+
     // ── DESIGN BLUEPRINT (the ONE design-authority artifact) ───────────────
+    //
+    // Blueprint reuse on revision (operator GO 2026-11-09): a revision whose
+    // note does NOT request a redesign reuses the parent Build's accepted
+    // Design Blueprint (and its Accepted Images) instead of re-rolling the
+    // design authority from scratch — revisions improve ONE design; live
+    // evidence 2026-11-02..06 showed regeneration turning careful fix notes
+    // into fidelity-0 rebuilds. An explicit redesign note regenerates, with
+    // the note riding the Blueprint call as a bounded intent block.
     const blueprintResult = await stepDo("simple: design blueprint", (): Promise<
       | { kind: "ok"; blueprint: DesignBlueprintV2; artifactR2Key: string; schemaVersion: string }
       | { kind: "review"; reason: string }
@@ -281,6 +315,43 @@ export async function runSimpleBuildPipeline(
       // Artifact reuse lives inside the stage (frozen blueprint IS the result;
       // v1 artifacts resume through the stage's read-only compat path).
       return (async () => {
+        if (buildKindRow?.kind === "revision" && buildKindRow.parent_build_id && !revisionRequestsRedesign(humanRevisionInstruction)) {
+          const parentLatest = await env.DB.prepare(
+            "SELECT id, version_number FROM build_versions WHERE build_id = ? ORDER BY version_number DESC LIMIT 1"
+          )
+            .bind(buildKindRow.parent_build_id)
+            .first<{ id: string; version_number: number }>();
+          const parentBlueprint = parentLatest
+            ? await getBuildStageArtifact<unknown>(env, parentLatest.id, "design_blueprint")
+            : null;
+          if (parentBlueprint && (parentBlueprint.value as { version?: unknown })?.version === "2") {
+            const blueprintValue = parentBlueprint.value as DesignBlueprintV2;
+            const stored = await storeBuildStageArtifactIdempotent(env, {
+              buildId,
+              buildVersionId: version.buildVersionId,
+              siteGenerationId: input.siteGenerationId,
+              kind: "design_blueprint",
+              schemaVersion: DESIGN_BLUEPRINT_V2_SCHEMA_VERSION,
+              value: blueprintValue,
+              provenance: parentBlueprint.provenance,
+            });
+            // The reused blueprint's slots are the parent's slots verbatim, so
+            // the parent's Accepted Images transfer exactly (hero slots are
+            // deterministic; supporting slots carry the same model-chosen ids).
+            if (parentLatest) await reuseAcceptedImages(env, parentLatest.id, version.buildVersionId);
+            await appendBuildWorkflowEvent(env, {
+              buildId,
+              buildVersionId: version.buildVersionId,
+              fromState: buildMode === "ORIGINAL_DESIGN" ? "REFERENCE_CHECK" : "REFERENCE_EVIDENCE",
+              toState: "BLUEPRINT",
+              stage: "simple_design_blueprint",
+              detail: `Reused the parent Build's accepted Design Blueprint and Accepted Images (operator GO 2026-11-09: no redesign requested — the revision improves ONE design instead of re-rolling it); parent build ${buildKindRow.parent_build_id.slice(0, 8)} v${parentLatest?.version_number}`,
+            });
+            return { kind: "ok" as const, blueprint: blueprintValue, artifactR2Key: stored.artifactR2Key, schemaVersion: DESIGN_BLUEPRINT_V2_SCHEMA_VERSION };
+          }
+          // No reusable parent blueprint (e.g. the parent failed before the
+          // blueprint stage): fall through to normal generation, never fake.
+        }
         try {
           const produced = await runSimpleDesignBlueprintStage(env, {
             siteGenerationId: input.siteGenerationId,
@@ -305,6 +376,9 @@ export async function runSimpleBuildPipeline(
                   ...(frozen!.evidence.referenceUrl ? { referenceUrl: frozen!.evidence.referenceUrl } : {}),
                   visualInputs: frozen!.evidence.visualInputs ?? [],
                 }),
+            ...(humanRevisionInstruction && revisionRequestsRedesign(humanRevisionInstruction)
+              ? { humanRevisionInstruction }
+              : {}),
             ...(deps.visionGenerate ? { generate: deps.visionGenerate } : {}),
             ...(deps.generate ? { generate: deps.generate } : {}),
           });
@@ -460,6 +534,17 @@ export async function runSimpleBuildPipeline(
           ?? existingPkg?.value.candidateScreenshotKeys.desktop;
         const candidateMobile = evidenceBundle?.bundle.captures.find((c) => c.page === "home" && c.viewportWidth === 390)?.artifactR2Key
           ?? existingPkg?.value.candidateScreenshotKeys.mobile;
+        // All-page judgement (operator GO 2026-11-09): the inner routed pages'
+        // desktop renders ride the SAME single visual QA call so every page is
+        // graded, not only home.
+        const candidateInnerPages = evidenceBundle
+          ? (["about", "services", "contact"] as const)
+            .map((page) => ({
+              page,
+              desktop: evidenceBundle.bundle.captures.find((c) => c.page === page && c.viewportWidth === 1440)?.artifactR2Key,
+            }))
+            .filter((entry): entry is { page: "about" | "services" | "contact"; desktop: string } => Boolean(entry.desktop))
+          : [];
 
         const deterministic = runDeterministicBundleQa({
           bundle,
@@ -476,6 +561,15 @@ export async function runSimpleBuildPipeline(
                 capturesRendered: evidenceBundle.bundle.captures.length,
                 mobileCaptured: evidenceBundle.bundle.captures.some((c) => c.viewportWidth === 390),
                 failedRequestCount: evidenceBundle.bundle.captures.reduce((sum, c) => sum + c.failedRequestCount, 0),
+                tapTargetViolations: evidenceBundle.bundle.captures.reduce(
+                  (sum, c) => sum + (c.tapTargets?.violations ?? 0),
+                  0
+                ),
+                tapTargetOffenders: [
+                  ...new Set(
+                    evidenceBundle.bundle.captures.flatMap((c) => c.tapTargets?.offenders ?? [])
+                  ),
+                ].slice(0, 10),
               }
             : null,
         });
@@ -500,6 +594,7 @@ export async function runSimpleBuildPipeline(
                 : { referenceVisualInputs: visualInputs }),
               candidateDesktopR2Key: candidateDesktop,
               ...(candidateMobile ? { candidateMobileR2Key: candidateMobile } : {}),
+              ...(candidateInnerPages.length > 0 ? { candidateInnerPageR2Keys: candidateInnerPages } : {}),
               ...(deps.visionGenerate ? { generate: deps.visionGenerate } : {}),
               ...(deps.generate ? { generate: deps.generate } : {}),
             })).report;
@@ -546,6 +641,7 @@ export async function runSimpleBuildPipeline(
             desktop: candidateDesktop ?? "",
             ...(candidateMobile ? { mobile: candidateMobile } : {}),
           },
+          ...(candidateInnerPages.length > 0 ? { candidateInnerPageScreenshotKeys: candidateInnerPages } : {}),
         });
 
         const release = await finalizeSimpleRelease(
@@ -582,18 +678,8 @@ export async function runSimpleBuildPipeline(
       });
     };
 
-    // Governing human revision instruction (operator GO 2026-09-12): a
-    // revision Build carries its Revision Request's requestNote into the
-    // SAME Builder v8/model/path as a bounded intent block. Initial builds
-    // have none.
-    let humanRevisionInstruction: string | undefined;
-    const buildKindRow = await env.DB.prepare("SELECT kind FROM builds WHERE id = ?").bind(buildId).first<{ kind: string }>();
-    if (buildKindRow?.kind === "revision") {
-      const requestRow = await env.DB.prepare("SELECT request_note FROM revision_requests WHERE build_id = ?")
-        .bind(buildId)
-        .first<{ request_note: string | null }>();
-      if (requestRow?.request_note) humanRevisionInstruction = requestRow.request_note;
-    }
+    // Governing human revision instruction (operator GO 2026-09-12): fetched
+    // above the Blueprint step since the reuse GO (2026-11-09) — see there.
 
     const buildOutcome = await stepDo(
       `simple: website build (v${version.buildVersionNumber})`,
@@ -694,141 +780,224 @@ export async function runSimpleBuildPipeline(
 
     return await runRepairAndFinalQa(first);
 
-    // ── ONE repair → re-render → final QA (no second repair, spec §49-53) ──
+    // ── Bounded improving repair rounds (operator GO 2026-11-09, superseding
+    // the single-repair §49-53 policy) ─────────────────────────────────────
+    // Each round is ONE semantic repair call on a NEW immutable Build Version
+    // (the per-version ONE-repair rule is untouched). Up to
+    // SIMPLE_REPAIR_ROUNDS rounds (default 3, clamped 1-3) run while the
+    // visual score STRICTLY improves; a pass, a non-improving round, a
+    // preflight failure or an exhausted budget escalates to
+    // HUMAN_REVIEW_REQUIRED exactly as before. Live evidence 2026-11-02..06:
+    // one blind text-only round went 80→85 on the lucky build and 85→84
+    // (worse) on the final one, with hard composition gates still failing.
     async function runRepairAndFinalQa(first: QaOutcome): Promise<SimplePipelineOutcome> {
-      // Durable repair-position truth: the latest version carries the repair.
-      const latest = await env.DB.prepare(
-        "SELECT id, version_number FROM build_versions WHERE build_id = ? ORDER BY version_number DESC LIMIT 1"
-      )
-        .bind(buildId)
-        .first<{ id: string; version_number: number }>();
-      if (!latest) throw new Error(`Build ${buildId} has no Build Version`);
+      const maxRounds = Math.max(1, Math.min(3, Number.parseInt(env.SIMPLE_REPAIR_ROUNDS ?? "3", 10) || 3));
+      let current = first;
+      let sourceCtx: SimpleVersionContext = {
+        siteGenerationId: input.siteGenerationId,
+        siteId,
+        buildId,
+        buildVersionId: version.buildVersionId,
+        buildVersionNumber: version.buildVersionNumber,
+      };
+      let lastVisualScore = current.pkg.visual?.scores.overall ?? null;
 
-      let repairCtx: SimpleVersionContext;
-      if (latest.version_number === version.buildVersionNumber) {
-        const created = await stepDo("simple: repair version", async () => {
-          const next = await createNextBuildVersion(env, { buildId, cause: "simple_one_repair", detail: "SIMPLE pipeline ONE repair (spec sections 49-53)" });
-          return { buildVersionId: next.buildVersionId, buildVersionNumber: next.buildVersionNumber };
-        });
-        await stepDo("simple: repair inheritance", async () => {
-          await reuseAcceptedImages(env, version.buildVersionId, created.buildVersionId);
-          await storeBuildStageArtifactIdempotent(env, {
+      while (!current.releaseReady) {
+        // Durable repair-position truth: versions beyond v1 are repair rounds.
+        const latest = await env.DB.prepare(
+          "SELECT id, version_number FROM build_versions WHERE build_id = ? ORDER BY version_number DESC LIMIT 1"
+        )
+          .bind(buildId)
+          .first<{ id: string; version_number: number }>();
+        if (!latest) throw new Error(`Build ${buildId} has no Build Version`);
+
+        const roundsUsed = latest.version_number - 1;
+        const roundNumber = roundsUsed + 1;
+        if (roundsUsed >= maxRounds) {
+          const reasons = [`repair budget exhausted after ${roundsUsed} round(s): ${current.reasons.slice(0, 3).join("; ").slice(0, 240)}`];
+          await appendBuildWorkflowEvent(env, {
+            buildId,
+            buildVersionId: latest.id,
+            fromState: "CONFIRMATION",
+            toState: "HUMAN_REVIEW_REQUIRED",
+            stage: "simple_final_qa",
+            detail: `Final QA still failing after ${roundsUsed} repair round(s): ${current.reasons.slice(0, 4).join("; ").slice(0, 280)}`,
+          });
+          return terminal("HUMAN_REVIEW_REQUIRED", reasons, {
+            repairApplied: roundsUsed > 0,
+            builderStrategy,
+            designBlueprintR2Key: blueprintArtifactR2Key,
+            previewUrl: current.previewUrl,
+          });
+        }
+
+        let repairCtx: SimpleVersionContext;
+        if (latest.version_number === sourceCtx.buildVersionNumber) {
+          const created = await stepDo(`simple: repair version (v${roundNumber + 1})`, async () => {
+            const next = await createNextBuildVersion(env, {
+              buildId,
+              cause: "simple_repair_round",
+              detail: `SIMPLE pipeline repair round ${roundNumber} of at most ${maxRounds} (operator GO 2026-11-09)`,
+            });
+            return { buildVersionId: next.buildVersionId, buildVersionNumber: next.buildVersionNumber };
+          });
+          await stepDo(`simple: repair inheritance (v${created.buildVersionNumber})`, async () => {
+            await reuseAcceptedImages(env, sourceCtx.buildVersionId, created.buildVersionId);
+            await storeBuildStageArtifactIdempotent(env, {
+              buildId,
+              buildVersionId: created.buildVersionId,
+              siteGenerationId: input.siteGenerationId,
+              kind: "design_blueprint",
+              schemaVersion: blueprintSchemaVersion,
+              value: blueprint,
+            });
+            return null;
+          });
+          repairCtx = {
+            siteGenerationId: input.siteGenerationId,
+            siteId,
             buildId,
             buildVersionId: created.buildVersionId,
+            buildVersionNumber: created.buildVersionNumber,
+          };
+        } else {
+          // A prior engine entry already created this round's version — resume it.
+          repairCtx = {
             siteGenerationId: input.siteGenerationId,
-            kind: "design_blueprint",
-            schemaVersion: blueprintSchemaVersion,
-            value: blueprint,
+            siteId,
+            buildId,
+            buildVersionId: latest.id,
+            buildVersionNumber: latest.version_number,
+          };
+        }
+
+        await stepDo(`simple: repair (v${repairCtx.buildVersionNumber})`, async () => {
+          const repaired = await runSimpleSiteRepairStage(env, {
+            siteGenerationId: input.siteGenerationId,
+            buildId,
+            buildVersionId: repairCtx.buildVersionId,
+            buildVersionNumber: repairCtx.buildVersionNumber,
+            bundle: (await loadBundle(env, sourceCtx.buildVersionId))!,
+            blueprint,
+            facts,
+            qaPackage: current.pkg,
+            acceptedImages: acceptedImageDescriptors,
+            formServiceEndpoint,
+            siteFormId,
+            referenceVisualInputs: visualInputs,
+            ...(current.pkg.candidateScreenshotKeys.desktop ? { candidateDesktopR2Key: current.pkg.candidateScreenshotKeys.desktop } : {}),
+            ...(current.pkg.candidateScreenshotKeys.mobile ? { candidateMobileR2Key: current.pkg.candidateScreenshotKeys.mobile } : {}),
+            ...(current.pkg.candidateInnerPageScreenshotKeys && current.pkg.candidateInnerPageScreenshotKeys.length > 0
+              ? { candidateInnerPageR2Keys: current.pkg.candidateInnerPageScreenshotKeys }
+              : {}),
+            ...(deps.visionGenerate ? { generate: deps.visionGenerate } : {}),
+            ...(deps.generate ? { generate: deps.generate } : {}),
+          });
+          await appendBuildWorkflowEvent(env, {
+            buildId,
+            buildVersionId: repairCtx.buildVersionId,
+            fromState: "FIX",
+            toState: "CONFIRMATION",
+            stage: "simple_repair",
+            detail: `Repair round ${roundNumber}/${maxRounds} applied → new immutable Build Version v${repairCtx.buildVersionNumber}; notes: ${(repaired.bundle.notes ?? "none").slice(0, 200)}`,
           });
           return null;
         });
-        repairCtx = {
-          siteGenerationId: input.siteGenerationId,
-          siteId,
-          buildId,
-          buildVersionId: created.buildVersionId,
-          buildVersionNumber: created.buildVersionNumber,
-        };
-      } else {
-        // A prior engine entry already created the repair version — resume it.
-        repairCtx = {
-          siteGenerationId: input.siteGenerationId,
-          siteId,
-          buildId,
-          buildVersionId: latest.id,
-          buildVersionNumber: latest.version_number,
-        };
+
+        const repairedBundle = await loadBundle(env, repairCtx.buildVersionId);
+        if (!repairedBundle) {
+          // Unreachable in practice (the repair step stores it), but a resumed
+          // entry whose repair call failed schema validation lands here: this
+          // round's budget is consumed — escalate, never re-repair.
+          await appendBuildWorkflowEvent(env, {
+            buildId,
+            buildVersionId: repairCtx.buildVersionId,
+            fromState: "CONFIRMATION",
+            toState: "HUMAN_REVIEW_REQUIRED",
+            stage: "simple_repair",
+            detail: `repair bundle missing after repair round ${roundNumber} — automation stops`,
+          });
+          return terminal("HUMAN_REVIEW_REQUIRED", [`SIMPLE repair round ${roundNumber} produced no valid bundle; HUMAN_REVIEW_REQUIRED`], {
+            repairApplied: true,
+            builderStrategy,
+            designBlueprintR2Key: blueprintArtifactR2Key,
+            previewUrl: current.previewUrl,
+          });
+        }
+
+        const repairedAssembled = await assembleAndPreview(repairCtx, repairedBundle);
+        if ("preflightBlockers" in repairedAssembled) {
+          const reasons = [
+            `repaired candidate failed deterministic Technical Preflight after repair round ${roundNumber} — automation stops`,
+            ...repairedAssembled.preflightBlockers.map((blocker) => `${blocker.id}: ${blocker.detail}`),
+          ];
+          await appendBuildWorkflowEvent(env, {
+            buildId,
+            buildVersionId: repairCtx.buildVersionId,
+            fromState: "CONFIRMATION",
+            toState: "HUMAN_REVIEW_REQUIRED",
+            stage: "simple_final_qa",
+            detail: reasons.join("; ").slice(0, 400),
+          });
+          return terminal("HUMAN_REVIEW_REQUIRED", reasons, {
+            repairApplied: true,
+            builderStrategy,
+            designBlueprintR2Key: blueprintArtifactR2Key,
+            previewUrl: current.previewUrl,
+          });
+        }
+
+        const evaluated = await evaluateVersion(repairCtx, repairedAssembled.previewUrl);
+        const roundScore = evaluated.pkg.visual?.scores.overall ?? null;
+
+        if (evaluated.releaseReady) {
+          await appendBuildWorkflowEvent(env, {
+            buildId,
+            buildVersionId: repairCtx.buildVersionId,
+            fromState: "CONFIRMATION",
+            toState: "RELEASE_READY",
+            stage: "simple_final_qa",
+            detail: `Final QA passed after repair round ${roundNumber} (visual ${roundScore ?? "n/a"})`,
+          });
+          return terminal("RELEASE_READY", [], {
+            releaseReadyBuildVersionId: repairCtx.buildVersionId,
+            artifactManifestHash: repairedAssembled.manifestHash,
+            previewUrl: repairedAssembled.previewUrl,
+            repairApplied: true,
+            builderStrategy,
+            designBlueprintR2Key: blueprintArtifactR2Key,
+          });
+        }
+
+        // Improvement gate: a round that does not strictly raise the visual
+        // score is the stopping signal — further rounds would churn without
+        // progress. Escalate with the current reasons.
+        if (lastVisualScore !== null && roundScore !== null && roundScore <= lastVisualScore) {
+          await appendBuildWorkflowEvent(env, {
+            buildId,
+            buildVersionId: repairCtx.buildVersionId,
+            fromState: "CONFIRMATION",
+            toState: "HUMAN_REVIEW_REQUIRED",
+            stage: "simple_final_qa",
+            detail: `Final QA still failing after repair round ${roundNumber} and the visual score did not improve (${lastVisualScore} → ${roundScore}): ${evaluated.reasons.slice(0, 3).join("; ").slice(0, 240)}`,
+          });
+          return terminal("HUMAN_REVIEW_REQUIRED", evaluated.reasons, {
+            artifactManifestHash: repairedAssembled.manifestHash,
+            previewUrl: repairedAssembled.previewUrl,
+            repairApplied: true,
+            builderStrategy,
+            designBlueprintR2Key: blueprintArtifactR2Key,
+          });
+        }
+
+        lastVisualScore = roundScore ?? lastVisualScore;
+        current = evaluated;
+        sourceCtx = repairCtx;
       }
 
-      await stepDo(`simple: repair (v${repairCtx.buildVersionNumber})`, async () => {
-        const repaired = await runSimpleSiteRepairStage(env, {
-          siteGenerationId: input.siteGenerationId,
-          buildId,
-          buildVersionId: repairCtx.buildVersionId,
-          buildVersionNumber: repairCtx.buildVersionNumber,
-          bundle: (await loadBundle(env, version.buildVersionId))!,
-          blueprint,
-          facts,
-          qaPackage: first.pkg,
-          acceptedImages: acceptedImageDescriptors,
-          formServiceEndpoint,
-          siteFormId,
-          referenceVisualInputs: visualInputs,
-          ...(first.pkg.candidateScreenshotKeys.desktop ? { candidateDesktopR2Key: first.pkg.candidateScreenshotKeys.desktop } : {}),
-          ...(first.pkg.candidateScreenshotKeys.mobile ? { candidateMobileR2Key: first.pkg.candidateScreenshotKeys.mobile } : {}),
-          ...(deps.visionGenerate ? { generate: deps.visionGenerate } : {}),
-          ...(deps.generate ? { generate: deps.generate } : {}),
-        });
-        await appendBuildWorkflowEvent(env, {
-          buildId,
-          buildVersionId: repairCtx.buildVersionId,
-          fromState: "FIX",
-          toState: "CONFIRMATION",
-          stage: "simple_repair",
-          detail: `ONE repair applied → new immutable Build Version v${repairCtx.buildVersionNumber}; notes: ${(repaired.bundle.notes ?? "none").slice(0, 200)}`,
-        });
-        return null;
-      });
-
-      const repairedBundle = await loadBundle(env, repairCtx.buildVersionId);
-      if (!repairedBundle) {
-        // Unreachable in practice (the repair step stores it), but a resumed
-        // entry whose repair call failed schema validation lands here: the
-        // repair budget is consumed — escalate, never re-repair.
-        await appendBuildWorkflowEvent(env, {
-          buildId,
-          buildVersionId: repairCtx.buildVersionId,
-          fromState: "CONFIRMATION",
-          toState: "HUMAN_REVIEW_REQUIRED",
-          stage: "simple_repair",
-          detail: "repair bundle missing after the ONE repair attempt — automation stops",
-        });
-        return terminal("HUMAN_REVIEW_REQUIRED", ["SIMPLE repair produced no valid bundle; HUMAN_REVIEW_REQUIRED (spec section 53)"], {
-          repairApplied: true,
-          builderStrategy,
-          designBlueprintR2Key: blueprintArtifactR2Key,
-          previewUrl: first.previewUrl,
-        });
-      }
-
-      const repairedAssembled = await assembleAndPreview(repairCtx, repairedBundle);
-      if ("preflightBlockers" in repairedAssembled) {
-        const reasons = [
-          "repaired candidate failed deterministic Technical Preflight after the ONE repair — automation stops (spec section 53)",
-          ...repairedAssembled.preflightBlockers.map((blocker) => `${blocker.id}: ${blocker.detail}`),
-        ];
-        await appendBuildWorkflowEvent(env, {
-          buildId,
-          buildVersionId: repairCtx.buildVersionId,
-          fromState: "CONFIRMATION",
-          toState: "HUMAN_REVIEW_REQUIRED",
-          stage: "simple_final_qa",
-          detail: reasons.join("; ").slice(0, 400),
-        });
-        return terminal("HUMAN_REVIEW_REQUIRED", reasons, {
-          repairApplied: true,
-          builderStrategy,
-          designBlueprintR2Key: blueprintArtifactR2Key,
-          previewUrl: first.previewUrl,
-        });
-      }
-
-      const final = await evaluateVersion(repairCtx, repairedAssembled.previewUrl);
-      await appendBuildWorkflowEvent(env, {
-        buildId,
-        buildVersionId: repairCtx.buildVersionId,
-        fromState: "CONFIRMATION",
-        toState: final.releaseReady ? "RELEASE_READY" : "HUMAN_REVIEW_REQUIRED",
-        stage: "simple_final_qa",
-        detail: final.releaseReady
-          ? `Final QA passed after the ONE repair (visual ${final.pkg.visual?.scores.overall ?? "n/a"})`
-          : `Final QA still failing after the ONE repair: ${final.reasons.slice(0, 4).join("; ").slice(0, 280)}`,
-      });
-      return terminal(final.releaseReady ? "RELEASE_READY" : "HUMAN_REVIEW_REQUIRED", final.reasons, {
-        releaseReadyBuildVersionId: final.releaseReady ? repairCtx.buildVersionId : null,
-        artifactManifestHash: repairedAssembled.manifestHash,
-        previewUrl: repairedAssembled.previewUrl,
-        repairApplied: true,
+      return terminal("RELEASE_READY", [], {
+        releaseReadyBuildVersionId: sourceCtx.buildVersionId,
+        repairApplied: sourceCtx.buildVersionNumber > version.buildVersionNumber,
         builderStrategy,
         designBlueprintR2Key: blueprintArtifactR2Key,
       });

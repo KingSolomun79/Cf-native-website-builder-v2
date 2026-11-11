@@ -107,7 +107,7 @@ function qaInput(bundle: SiteBundle): BundleQaInput {
     siteFormId,
     slotIds: SLOT_IDS,
     resolvedSlotIds: SLOT_IDS,
-    renderEvidence: { capturesRendered: 9, mobileCaptured: true, failedRequestCount: 0 },
+    renderEvidence: { capturesRendered: 9, mobileCaptured: true, failedRequestCount: 0, tapTargetViolations: 0, tapTargetOffenders: [] },
   };
 }
 

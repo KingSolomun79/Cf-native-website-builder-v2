@@ -217,7 +217,7 @@ async function scaffoldBuild(): Promise<{ siteGenerationId: string; buildId: str
 }
 
 describe("SIMPLE repair transport pin (#2)", () => {
-  it("a preflight-rejected candidate (no renders) repairs on the Z.AI Coding Plan — glm-5.3, streaming, thinking disabled; no Workers AI binding, no legacy gateway", async () => {
+  it("a preflight-rejected candidate (no renders) repairs on the Z.AI Coding Plan — the verified multimodal model (glm-5.3-flash), streaming, thinking disabled; no Workers AI binding, no legacy gateway (operator GO 2026-11-09)", async () => {
     const ctx = await scaffoldBuild();
     const repairPayload = JSON.stringify({
       files: [{ path: "site.css", content: "/* repaired css */ :root { --accent: #7c3aed; } .hero { min-height: 55vh; }" }],
@@ -278,10 +278,11 @@ describe("SIMPLE repair transport pin (#2)", () => {
       globalThis.fetch = originalFetch;
     }
 
-    // Coding Plan transport: coding endpoint, glm-5.3, stream = true,
+    // Coding Plan transport: coding endpoint, the verified multimodal model
+    // (operator GO 2026-11-09 — the repair SEES screenshots), stream = true,
     // thinking disabled; reasoning_content was sent but never entered source
     expect(bodies.length).toBe(1);
-    expect(bodies[0].model).toBe("glm-5.3");
+    expect(bodies[0].model).toBe("glm-5.3-flash");
     expect(bodies[0].stream).toBe(true);
     expect(bodies[0].thinking).toEqual({ type: "disabled" });
 
@@ -293,7 +294,7 @@ describe("SIMPLE repair transport pin (#2)", () => {
     expect(result.changedPaths).toEqual(["site.css"]);
     expect(result.bundle.sharedCss).toContain("repaired css");
     expect(result.bundle.pages.home).toBe(repairBundle().pages.home);
-    expect(result.provenance?.model).toBe("glm-5.3");
+    expect(result.provenance?.model).toBe("glm-5.3-flash");
   });
 
   it("the changed-files output schema accepts only the six bundle files", () => {

@@ -81,7 +81,7 @@ function qaInput(overrides?: Partial<BundleQaInput>): BundleQaInput {
     siteFormId,
     slotIds: SLOT_IDS,
     resolvedSlotIds: SLOT_IDS,
-    renderEvidence: { capturesRendered: 9, mobileCaptured: true, failedRequestCount: 0 },
+    renderEvidence: { capturesRendered: 9, mobileCaptured: true, failedRequestCount: 0, tapTargetViolations: 0, tapTargetOffenders: [] },
     ...overrides,
   };
 }
@@ -192,11 +192,64 @@ describe("SIMPLE deterministic technical checks (spec section 38)", () => {
 
   it("render evidence feeds the capture-backed gates", () => {
     const failed = runDeterministicBundleQa(
-      qaInput({ renderEvidence: { capturesRendered: 9, mobileCaptured: true, failedRequestCount: 3 } })
+      qaInput({ renderEvidence: { capturesRendered: 9, mobileCaptured: true, failedRequestCount: 3, tapTargetViolations: 0, tapTargetOffenders: [] } })
     );
     expect(failed.gates.RUNTIME_CONSOLE_NETWORK_CLEAN).toBe(false);
     const noRender = runDeterministicBundleQa(qaInput({ renderEvidence: null }));
     expect(noRender.gates.ALL_PAGES_LOAD).toBe(false);
+  });
+
+  it("mobile tap targets below the 44x36 minimum are blockers naming the offenders (operator GO 2026-11-10)", () => {
+    const result = runDeterministicBundleQa(
+      qaInput({
+        renderEvidence: {
+          capturesRendered: 9,
+          mobileCaptured: true,
+          failedRequestCount: 0,
+          tapTargetViolations: 10,
+          tapTargetOffenders: ["Talk to us on WhatsApp 171x25", "Home 42x19", "Growth Bridge 153x31"],
+        },
+      })
+    );
+    const finding = result.technicalFindings.find((candidate) => candidate.id === "TAP_TARGET_TOO_SMALL");
+    expect(finding).toBeDefined();
+    expect(finding?.severity).toBe("blocker");
+    expect(finding?.detail).toContain("10 interactive control(s)");
+    expect(finding?.detail).toContain("Talk to us on WhatsApp 171x25");
+    expect(finding?.detail).toContain("44px wide by 36px tall");
+    expect(result.technicalBlockerCount).toBeGreaterThan(0);
+    const clean = runDeterministicBundleQa(qaInput());
+    expect(clean.technicalFindings.some((candidate) => candidate.id === "TAP_TARGET_TOO_SMALL")).toBe(false);
+  });
+
+  it("em dashes in visible copy are copy-style blockers naming the offending locations (operator GO 2026-11-09)", () => {
+    const bundle = goodBundle();
+    bundle.pages.home = page(
+      "Home",
+      `<link rel="stylesheet" href="site.css"><section class="hero"><img src="IMG:${[...SLOT_IDS][0]}" data-image-id="${[...SLOT_IDS][0]}" alt="hero image"></section><p>Quality leads — not empty clicks, delivered end to end.</p>`
+    );
+    const result = runDeterministicBundleQa(qaInput({ bundle }));
+    const finding = result.technicalFindings.find((candidate) => candidate.id === "COPY_STYLE_EMDASH");
+    expect(finding).toBeDefined();
+    expect(finding?.severity).toBe("blocker");
+    expect(finding?.detail).toContain("home:");
+    expect(finding?.detail).toContain("visible copy");
+    expect(result.technicalBlockerCount).toBeGreaterThan(0);
+  });
+
+  it("en dashes in title, meta description and alt text are caught; plain hyphens are not", () => {
+    const bundle = goodBundle();
+    bundle.pages.about = `${head("About").replace(
+      '<meta name="description" content="About meta description">',
+      '<meta name="description" content="Nairobi SEO \u2013 measurable growth">'
+    ).replace("<title>About</title>", "<title>About RankForge \u2013 SEO that works</title>")}<body>${nav()}<main><h1>About RankForge</h1><link rel="stylesheet" href="site.css"><section class="hero about-hero"><img src="IMG:about-hero" data-image-id="about-hero" alt="about hero \u2013 team at work"></section><p>Part-time and lead-generation experts.</p></main><footer><p>Business footer line</p></footer><script src="site.js" defer></script></body></html>`;
+    const result = runDeterministicBundleQa(qaInput({ bundle }));
+    const finding = result.technicalFindings.find((candidate) => candidate.id === "COPY_STYLE_EMDASH");
+    expect(finding).toBeDefined();
+    expect(finding?.detail).toContain("title");
+    expect(finding?.detail).toContain("meta description");
+    expect(finding?.detail).toContain("alt text");
+    expect(finding?.detail).toContain("about:");
   });
 });
 

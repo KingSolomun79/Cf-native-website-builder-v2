@@ -133,6 +133,7 @@
     // asserts this exact value so a production release can never carry a
     // retired image model.
     "KIE_MODEL": "nano-banana-2-lite",
+    "SIMPLE_REPAIR_ROUNDS": "3",
     // Durable image lifecycle (issue #58): the poll cadence and the per-attempt
     // provider wait bound for the submit -> sleep -> poll state machine.
     // Worst-case durable poll steps = 12 slots x 2 attempts x ceil(timeout /

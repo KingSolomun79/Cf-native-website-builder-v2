@@ -22,6 +22,9 @@ export interface SimpleQaPackageInput {
   /** Null for ORIGINAL_DESIGN — no Reference exists (issue #24). */
   referenceScreenshotKeys: { desktop: string; mobile?: string } | null;
   candidateScreenshotKeys: { desktop: string; mobile?: string };
+  /** Inner routed pages' desktop renders (operator GO 2026-11-09) — the ONE
+   *  repair's sight. Optional for pre-GO packages and render failures. */
+  candidateInnerPageScreenshotKeys?: Array<{ page: "about" | "services" | "contact"; desktop: string }>;
 }
 
 export function buildSimpleQaPackage(input: SimpleQaPackageInput): QaPackage {
@@ -41,6 +44,9 @@ export function buildSimpleQaPackage(input: SimpleQaPackageInput): QaPackage {
     reasons: [],
     referenceScreenshotKeys: input.referenceScreenshotKeys,
     candidateScreenshotKeys: input.candidateScreenshotKeys,
+    ...(input.candidateInnerPageScreenshotKeys && input.candidateInnerPageScreenshotKeys.length > 0
+      ? { candidateInnerPageScreenshotKeys: input.candidateInnerPageScreenshotKeys }
+      : {}),
   };
 }
 

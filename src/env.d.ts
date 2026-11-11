@@ -52,6 +52,11 @@ export interface Env {
   // (consumed by src/lib/zai-coding-plan.ts maxDurationMs). Defaults to
   // 600_000ms when unset.
   SIMPLE_STREAM_MAX_DURATION_MS?: string;
+  // Bounded improving repair rounds per Build (operator GO 2026-11-09):
+  // 1-3, default 3. Each round is ONE semantic repair call on a NEW immutable
+  // Build Version; the loop stops early on release-ready or a non-improving
+  // visual score. Consumed by src/simple-design/pipeline.ts.
+  SIMPLE_REPAIR_ROUNDS?: string;
 
   // Visual-input preparation bounds for capture/analysis preprocessing
   // (consumed by src/domain/stage-execution.ts and src/lib/vision-input.ts).

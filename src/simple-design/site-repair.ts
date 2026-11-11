@@ -23,8 +23,7 @@ import {
   type QaPackage,
   type SiteBundle,
 } from "./contracts";
-import { bytesToBase64, mimeForKey } from "./vision";
-import { generateZaiCodingPlan, resolveCodingModel } from "../lib/zai-coding-plan";
+import { bytesToBase64, createSimpleVisionGenerate, mimeForKey } from "./vision";
 import { SIMPLE_PAGE_FILES } from "./bundle-qa";
 import type { SimpleBuilderVisualInput } from "./contracts";
 
@@ -121,6 +120,10 @@ export interface RunSimpleSiteRepairInput {
   referenceVisualInputs?: SimpleBuilderVisualInput[];
   candidateDesktopR2Key?: string;
   candidateMobileR2Key?: string;
+  /** All-page repair sight (operator GO 2026-11-09): the inner routed pages'
+   *  desktop renders, attached after home so the repair sees what the judge
+   *  saw. */
+  candidateInnerPageR2Keys?: Array<{ page: "about" | "services" | "contact"; desktop: string }>;
   generate?: RawAiGenerate;
 }
 
@@ -131,37 +134,29 @@ export interface SimpleSiteRepairResult {
   changedPaths: RepairFilePath[];
 }
 
-// SIMPLE repair seam (operator GO 2026-09-11, ZAI CODING PLAN UNIFICATION
-// §26; live §28 evidence 2026-09-11): the repair runs on the ONE Coding Plan
-// provider with the coding model (glm-5.3) — stream: true, thinking disabled,
-// json_object mode. TEXT-ONLY, always: on the Coding Plan endpoint glm-5.3
-// rejects non-text content parts with 400 "messages.content.type is invalid,
-// allowed values: ['text']" (multimodal on this endpoint is glm-5.3-flash per
-// the §9 canary; the repair's model routing is glm-5.3 per GO §27). The
-// repair's visual context is carried by the QA package's textual findings and
-// the prompt's textual image manifest. No Workers AI, no AI Gateway, no
-// provider fallback.
+// SIMPLE repair seam (operator GO 2026-11-09, superseding the 2026-09-11
+// text-only routing): the repair runs MULTIMODAL on the ONE Coding Plan
+// provider with the canary-verified multimodal model (glm-5.3-flash,
+// ZAI_MULTIMODAL_MODEL overrides) — stream: true, thinking disabled,
+// json_object mode — so it SEES the Reference and Candidate screenshots its
+// brief already references. Live evidence 2026-11-02..06: the text-only
+// repair could not see the layout defects it was told to fix and repeatedly
+// shipped CSS-only patches for HTML-structure findings (silhouette order,
+// first-viewport composition), leaving final QA failing after the repair. The
+// historical constraint (glm-5.3 rejects non-text parts on this endpoint)
+// stands — which is exactly why the repair rides the MULTIMODAL model now. No
+// Workers AI, no AI Gateway, no provider fallback. Injected test seams win.
 function simpleRepairGenerate(
   env: Env,
-  _images: Array<{ base64: string; mimeType: string }>,
-  meta: { stage: string; buildId: string }
+  images: Array<{ base64: string; mimeType: string }>,
+  meta: { stage: string; buildId: string; buildVersionNumber: number }
 ): RawAiGenerate {
-  const model = resolveCodingModel(env);
-  return async (systemPrompt, userPrompt, attempt) => {
-    const messages = [
-      { role: "system" as const, content: systemPrompt },
-      { role: "user" as const, content: userPrompt },
-    ];
-    const result = await generateZaiCodingPlan(env, {
-      model,
-      messages,
-      maxTokens: 32000,
-      stream: true,
-      jsonMode: true,
-      label: `${meta.stage}#${attempt}`,
-    });
-    return { content: result.content, provider: result.provider, model: result.model, finishReason: result.finishReason, reasoningControl: "thinking.type=disabled" };
-  };
+  return createSimpleVisionGenerate(
+    env,
+    images,
+    { buildId: meta.buildId, stage: "simple-site-repair", buildVersionNumber: meta.buildVersionNumber },
+    { maxTokens: 32000, temperature: 0.2 }
+  );
 }
 
 // The files the deterministic findings implicate: finding details are
@@ -201,11 +196,33 @@ export function buildRepairUserPrompt(input: RunSimpleSiteRepairInput): string {
     .join("\n");
   const failedFiles = failedFilesFromQaPackage(input.qaPackage);
   const hasReference = (input.referenceVisualInputs?.length ?? 0) > 0;
-  const visualMode = !input.candidateDesktopR2Key
-    ? "MODE: deterministic preflight-failure repair. The candidate below was rejected BEFORE rendering — no screenshots exist and none are required. Fix the exact deterministic findings in the failed files listed; do not redesign. "
-    : hasReference
-      ? "Attached images, in order: 1) REFERENCE desktop, 2) CANDIDATE desktop current render, then reference/candidate mobile when available. "
-      : "MODE: ORIGINAL_DESIGN repair. No Reference website exists — the Design Blueprint and the QA findings are the design authority; repair toward the Blueprint, never toward a generic template. ";
+  const innerPageCount = input.candidateInnerPageR2Keys?.length ?? 0;
+  let attachmentList: string;
+  let visualMode: string;
+  if (!input.candidateDesktopR2Key) {
+    visualMode = "MODE: deterministic preflight-failure repair. The candidate below was rejected BEFORE rendering — no screenshots exist and none are required. Fix the exact deterministic findings in the failed files listed; do not redesign. ";
+    attachmentList = "(no screenshots attached)";
+  } else {
+    const attachments = ["REFERENCE desktop (when a Reference exists)"];
+    attachments.push("CANDIDATE home desktop current render");
+    for (const entry of input.candidateInnerPageR2Keys ?? []) attachments.push(`CANDIDATE ${entry.page} desktop current render`);
+    if (input.candidateMobileR2Key) {
+      attachments.push("REFERENCE mobile (when available)");
+      attachments.push("CANDIDATE home mobile current render");
+    }
+    attachmentList = attachments.map((line, index) => `${index + 1}. ${line}`).join("\n");
+    visualMode = hasReference
+      ? "Attached images, in order — STUDY THEM against the findings before editing. "
+      : "MODE: ORIGINAL_DESIGN repair. No Reference website exists — the Design Blueprint, the attached candidate renders and the QA findings are the design authority; repair toward the Blueprint, never toward a generic template. ";
+  }
+  // Structural-defect rule (operator GO 2026-11-09): live evidence showed
+  // CSS-only repairs leaving composition gates failing. When visual fidelity
+  // failed, HTML changes are REQUIRED — layout lives in the markup.
+  const visualOverall = input.qaPackage.visual?.scores.overall ?? null;
+  const structuralRule =
+    visualOverall !== null && visualOverall < 90
+      ? `STRUCTURAL REPAIR REQUIRED: visual fidelity is ${visualOverall} (< 90). Composition/layout findings (silhouette order, first-viewport composition, section mass, marker collisions, unequal grids, overflow) live in the HTML structure — a CSS-only repair CANNOT clear them. You MUST include the changed HTML of the affected page(s) whenever the visual findings describe layout or composition, not only site.css. `
+      : "";
   return `CURRENT SITE BUNDLE (complete repair context — you own HTML/CSS/JS whole):
 ${JSON.stringify(input.bundle)}
 
@@ -220,7 +237,7 @@ PRESERVATION SET (absolute — spec section 50): Business Facts below, contact d
 - hidden input: <input type="hidden" name="siteFormId" value="${input.siteFormId}">
 - fields exactly: name, email, message with labels; no other delivery-control fields
 
-ACCEPTED IMAGES (unchanged mappings): 
+ACCEPTED IMAGES (unchanged mappings):
 ${input.acceptedImages.length > 0 ? images : "(none — keep the bundle image-free)"}
 
 BUSINESS FACTS (unchanged content authority):
@@ -230,7 +247,10 @@ FAILED FILES (deterministic findings implicate these): ${failedFiles.join(", ")}
 
 PROGRESSIVE ENHANCEMENT (hard rule, preserve or restore it): all content stays fully visible in plain HTML+CSS with JavaScript disabled; scroll/entrance animation only animates already-visible elements, and prefers-reduced-motion: reduce keeps everything visible.
 
-${visualMode}Fix the highest-impact visual findings first; clear every truth and technical finding. Smallest coherent change set that materially increases fidelity.
+${visualMode}${innerPageCount > 0 ? `All ${innerPageCount + 1} candidate pages are attached — check each page you change against its own render. ` : ""}${structuralRule}Fix the highest-impact visual findings first; clear every truth and technical finding. Smallest coherent change set that materially increases fidelity — but never a CSS-only patch for an HTML-structure defect.
+
+ATTACHED IMAGES, in order:
+${attachmentList}
 
 OUTPUT (changed files only): return {"files":[{"path":"...","content":"..."}]} — the COMPLETE new content of ONLY the files you change. Allowed paths exactly: index.html, about.html, services.html, contact.html, site.css, site.js. At least one file; omit every unchanged file; never invent paths. Each changed file must be the full final version of that file.`;
 }
@@ -248,15 +268,24 @@ export async function runSimpleSiteRepairStage(env: Env, input: RunSimpleSiteRep
     return { bundle: existing.value, artifactR2Key: existing.artifactR2Key, provenance: existing.provenance, changedPaths };
   }
 
+  // Fixed attachment order matches the prompt's numbered list: reference
+  // desktop, candidate home desktop, inner-page desktops (about, services,
+  // contact), then mobiles when available (operator GO 2026-11-09 — the
+  // repair sees what the judge saw, on every routed page).
   const images: Array<{ base64: string; mimeType: string }> = [];
   const referenceFullPage =
     input.referenceVisualInputs?.find((entry) => entry.kind === "full-page") ?? input.referenceVisualInputs?.[0];
+  const referenceMobile = input.referenceVisualInputs?.find((entry) => /mobile/i.test(entry.kind));
   if (input.candidateDesktopR2Key) {
-    for (const [key, mime] of [
-      ...(referenceFullPage ? [[referenceFullPage.artifact, mimeForKey(referenceFullPage.artifact)] as const] : []),
-      [input.candidateDesktopR2Key, "image/png"] as const,
-      ...(input.candidateMobileR2Key ? [[input.candidateMobileR2Key, "image/png"] as const] : []),
-    ] as Array<[string, string]>) {
+    const attachmentKeys: Array<[string, string]> = [];
+    if (referenceFullPage) attachmentKeys.push([referenceFullPage.artifact, mimeForKey(referenceFullPage.artifact)]);
+    attachmentKeys.push([input.candidateDesktopR2Key, "image/png"]);
+    for (const entry of input.candidateInnerPageR2Keys ?? []) attachmentKeys.push([entry.desktop, "image/png"]);
+    if (input.candidateMobileR2Key) {
+      if (referenceMobile) attachmentKeys.push([referenceMobile.artifact, mimeForKey(referenceMobile.artifact)]);
+      attachmentKeys.push([input.candidateMobileR2Key, "image/png"]);
+    }
+    for (const [key, mime] of attachmentKeys) {
       const body = await getObject(env, key);
       if (!body) continue;
       images.push({ base64: bytesToBase64(new Uint8Array(await new Response(body).arrayBuffer())), mimeType: mime });
@@ -267,7 +296,7 @@ export async function runSimpleSiteRepairStage(env: Env, input: RunSimpleSiteRep
   // an injected test seam always wins.
   const generate: RawAiGenerate =
     input.generate ??
-    simpleRepairGenerate(env, images, { stage: "simple-site-repair", buildId: input.buildId });
+    simpleRepairGenerate(env, images, { stage: "simple-site-repair", buildId: input.buildId, buildVersionNumber: input.buildVersionNumber });
 
   const run = await runSchemaValidatedAiStage<unknown>(env, {
     stage: "simple-site-repair",

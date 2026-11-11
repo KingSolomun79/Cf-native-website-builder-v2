@@ -595,6 +595,10 @@ export interface QaPackage {
    *  there is no Reference, and no fake identity is ever recorded. */
   referenceScreenshotKeys: { desktop: string; mobile?: string } | null;
   candidateScreenshotKeys: { desktop: string; mobile?: string };
+  /** All-page capture provenance (operator GO 2026-11-09): the inner routed
+   *  pages' desktop renders, so the ONE repair can see what visual QA saw.
+   *  Absent on packages built before the GO and when only home rendered. */
+  candidateInnerPageScreenshotKeys?: Array<{ page: "about" | "services" | "contact"; desktop: string }>;
 }
 
 // ── Blueprint image slots → existing KIE machinery (spec section 21) ───────

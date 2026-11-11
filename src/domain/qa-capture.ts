@@ -229,6 +229,18 @@ export function createProductionQaCapture(env: Env, previewUrl: string, options?
           }
           const layout = await page.extractLayout();
 
+          // Tap-target audit (operator GO 2026-11-10): touch ergonomics are
+          // judged at the smallest width, where real fingers tap. Desktop
+          // text links legitimately ride line height; nav/footer/header
+          // controls still must clear 44x36 on mobile.
+          const runtime: PageCapture["runtime"] = {
+            consoleErrors: [],
+            failedRequests: diagnostics.failedResources.map((resource) => `${resource.reason} ${resource.url}`),
+          };
+          if (entry.viewportWidth <= 500) {
+            runtime.tapTargets = await page.measureTapTargets();
+          }
+
           const imageMassRatio = layout.images.length > 0
             ? Number(Math.min(
                 0.9,
@@ -242,10 +254,7 @@ export function createProductionQaCapture(env: Env, previewUrl: string, options?
             viewportWidth: entry.viewportWidth,
             fullPageScreenshot: await page.screenshot({ fullPage: true }),
             geometry: geometryFromRegions(regionsFromLayout(layout, 900), imageMassRatio),
-            runtime: {
-              consoleErrors: [],
-              failedRequests: diagnostics.failedResources.map((resource) => `${resource.reason} ${resource.url}`),
-            },
+            runtime,
           };
           if (entry.firstViewport) {
             capture.firstViewportScreenshot = await page.screenshot({ fullPage: false });

@@ -133,6 +133,7 @@ export default defineWorkersConfig({
       "tests/v2-admin-notifications.test.ts",
       "tests/v2-admin-revision.test.ts",
       "tests/v2-admin-review-qa-outcome.test.ts",
+      "tests/v2-revision-blueprint-reuse.test.ts",
       "tests/v2-business-hours.test.ts",
       "tests/v2-qa-capture-marker.test.ts",
       "tests/v2-stage-liveness.test.ts",
