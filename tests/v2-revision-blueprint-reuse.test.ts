@@ -235,3 +235,68 @@ describe("bounded improving repair rounds (operator GO 2026-11-09)", () => {
     expect(prompt).toContain("never a CSS-only patch for an HTML-structure defect");
   });
 });
+
+describe("engine-restart resume safety (found live 2026-11-11, build c1bdb659)", () => {
+  it("a resumed invocation whose steps replay from cache WITHOUT executing keeps ORIGINAL_DESIGN visual QA on the original-design path (no REFERENCE_BOUND misbranch)", async () => {
+    const { siteGenerationId } = await startGeneration();
+    const initial = await createInitialBuild(env, { siteGenerationId });
+
+    // Engine-faithful step cache: records each SUCCEEDED step's output; a
+    // resumed invocation replays recorded outputs without running callbacks
+    // (exactly what the Cloudflare Workflows engine does after a restart).
+    const stepCache = new Map<string, unknown>();
+    const recordingStep = async <T,>(name: string, fn: () => Promise<T>): Promise<T> => {
+      const result = await fn();
+      stepCache.set(name, result);
+      return result;
+    };
+    const replayingStep = async <T,>(name: string, fn: () => Promise<T>): Promise<T> => {
+      if (stepCache.has(name)) return stepCache.get(name) as T;
+      const result = await fn();
+      stepCache.set(name, result);
+      return result;
+    };
+
+    // Invocation 1: transient crash INSIDE the builder step (engine-style:
+    // the step failed, so it is NOT cached; everything before it is). The
+    // pipeline rethrows the transient error exactly as the workflow instance
+    // would die.
+    const crashingScripts = createSimpleScripts();
+    const originalGenerate = crashingScripts.generate!;
+    let crashed = false;
+    const crashing: typeof crashingScripts = {
+      ...crashingScripts,
+      generate: async (system, user, attempt) => {
+        if (user.includes("Realize the \"home\" page")) {
+          crashed = true;
+          throw new Error("simulated isolate eviction mid-builder");
+        }
+        return originalGenerate(system, user, attempt);
+      },
+    };
+    await expect(
+      runBuildPipeline(env, { siteGenerationId, buildId: initial.buildId, deps: { ...crashing, step: recordingStep as never } })
+    ).rejects.toThrow("simulated isolate eviction mid-builder");
+    expect(crashed).toBe(true);
+
+    // Invocation 2 (same Build — the resumed instance): intake/blueprint
+    // steps replay from cache WITHOUT their callbacks running. Pre-fix, the
+    // ORIGINAL_DESIGN intake callback was the ONLY place creativeContext was
+    // set, so visual QA misbranched to REFERENCE_BOUND and threw "requires
+    // Reference visual inputs"; post-fix the context derives outside the
+    // cached step on every invocation and the build releases.
+    const resumed = await runBuildPipeline(env, {
+      siteGenerationId,
+      buildId: initial.buildId,
+      deps: { ...createSimpleScripts(), step: replayingStep as never },
+    });
+    expect(resumed.terminal).toBe("RELEASE_READY");
+
+    const visualRuns = await env.DB.prepare(
+      "SELECT COUNT(*) AS n FROM ai_stage_runs WHERE build_id = ? AND stage = 'simple-original-design-visual-qa'"
+    )
+      .bind(initial.buildId)
+      .first<{ n: number }>();
+    expect(visualRuns!.n).toBeGreaterThan(0);
+  });
+});

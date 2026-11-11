@@ -277,7 +277,17 @@ export async function runSimpleBuildPipeline(
         return terminal("HUMAN_REVIEW_REQUIRED", [reason]);
       }
     } else {
-      await stepDo("simple: original design intake", async () => {
+      // Resume-safety (found live 2026-11-11, union validation build
+      // c1bdb659): the creative-direction context and checksum were derived
+      // INSIDE the cached step callback — an engine restart replays the step
+      // from cache WITHOUT running the callback, leaving creativeContext null
+      // and sending ORIGINAL_DESIGN visual QA down the REFERENCE_BOUND branch
+      // ("REFERENCE_BOUND visual QA requires Reference visual inputs" -> the
+      // Build died as WORKFLOW_EXECUTION_EXHAUSTED). The derivation is pure
+      // and idempotent from the frozen submission row, so it now runs on
+      // EVERY invocation OUTSIDE the cached step; the step keeps only the
+      // (idempotent) provenance event.
+      const loadOriginalDesignContext = async (): Promise<void> => {
         const submissionRow = await env.DB.prepare(
           "SELECT payload_json FROM onboarding_submissions WHERE id = ?"
         )
@@ -292,6 +302,9 @@ export async function runSimpleBuildPipeline(
         }
         creativeContext = deriveCreativeDirection({ creativeDirection: payload.creativeDirection, facts });
         creativeDirectionSha256 = await creativeDirectionChecksum(payload.creativeDirection);
+      };
+      await loadOriginalDesignContext();
+      await stepDo("simple: original design intake", async () => {
         await appendBuildWorkflowEvent(env, {
           buildId,
           buildVersionId: version.buildVersionId,
