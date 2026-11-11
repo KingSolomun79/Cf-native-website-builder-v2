@@ -64,11 +64,16 @@ export type ReferenceIntakeErrorCode =
 
 export class ReferenceIntakeError extends Error {
   readonly code: ReferenceIntakeErrorCode;
+  /** ADAPTATION_CONTRACT_REQUIRED only (operator GO 2026-11-11): the detected
+   *  limitation features the missing contract must cover, so callers can
+   *  surface them and offer the operator default contract. */
+  readonly limitationFeatures?: string[];
 
-  constructor(code: ReferenceIntakeErrorCode, message: string) {
+  constructor(code: ReferenceIntakeErrorCode, message: string, limitationFeatures?: string[]) {
     super(message);
     this.name = "ReferenceIntakeError";
     this.code = code;
+    this.limitationFeatures = limitationFeatures;
   }
 }
 
@@ -537,7 +542,8 @@ export async function runReferenceIntake(
     if (!contract) {
       throw new ReferenceIntakeError(
         "ADAPTATION_CONTRACT_REQUIRED",
-        `SUPPORTED_WITH_LIMITATIONS Reference requires a concrete Adaptation Contract before generation continues (features: ${decision.signals.map((signal) => signal.feature).join(", ")})`
+        `SUPPORTED_WITH_LIMITATIONS Reference requires a concrete Adaptation Contract before generation continues (features: ${decision.signals.map((signal) => signal.feature).join(", ")})`,
+        decision.signals.map((signal) => signal.feature)
       );
     }
     const validation = validateAdaptationContract(contract, decision);

@@ -29,6 +29,10 @@ export interface AdminBuildSummary {
    *  the ONE repair, escalated to a human" instead of showing both as the
    *  same neutral Human Review badge (operator GO 2026-11-09). */
   qaOutcome: { status: "passed" | "failed"; visualScore: number | null; reasons: string[] } | null;
+  /** Detected reference limitation features when the Build FAILED awaiting
+   *  an Adaptation Contract (operator GO 2026-11-11) — drives the one-click
+   *  default-contract card on the review page. */
+  adaptationRequired: string[] | null;
 }
 
 export interface AdminSiteReview {
@@ -84,6 +88,15 @@ function extractScoreSummary(events: Array<{ stage: string | null; detail: strin
     }
   }
   return null;
+}
+
+const ADAPTATION_FEATURES_MARKER = /\[adaptation-features:\s*([^\]]+)\]/;
+
+function deriveAdaptationRequired(events: Array<{ stage: string | null; detail: string | null }>): string[] | null {
+  const marker = [...events].reverse().find((event) => event.detail?.includes("[adaptation-features:"));
+  if (!marker) return null;
+  const features = ADAPTATION_FEATURES_MARKER.exec(marker.detail ?? "")?.[1]?.split(",").map((f) => f.trim()).filter(Boolean) ?? [];
+  return features.length > 0 ? features : null;
 }
 
 const QA_EVENT_STAGES = new Set(["qa", "simple_qa", "simple_final_qa"]);
@@ -199,6 +212,7 @@ export async function getAdminSiteReview(env: Env, siteId: string): Promise<Admi
         scoreSummary: extractScoreSummary(events.results ?? []),
         terminalReason: extractTerminalReason(events.results ?? []),
         qaOutcome: deriveQaOutcome(events.results ?? []),
+        adaptationRequired: deriveAdaptationRequired(events.results ?? []),
         repairUsed: (versions.results ?? []).length > 1,
       });
     }
