@@ -50,6 +50,10 @@ const STYLES = `
   .badge.ready { border-color: var(--ok-line); color: var(--ok-ink); }
   .badge.review { border-color: #c98a3d; color: #f0c387; }
   .badge.failed { border-color: var(--err-line); color: var(--err-ink); }
+  .qa-failed { border: 1px solid var(--err-line); background: var(--err-bg); color: var(--err-ink); border-radius: 8px; padding: 0.75rem 1rem; margin: 0.7rem 0; font-size: 0.9rem; }
+  .qa-failed strong { color: var(--err-ink); }
+  .qa-failed ul { margin: 0.45rem 0 0.45rem; padding-left: 1.2rem; }
+  .qa-failed li { margin-bottom: 0.2rem; }
   .card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 1.4rem 1.6rem; margin-bottom: 1.4rem; }
   .card h2 { margin-top: 0; font-size: 1.15rem; }
   .card h3 { color: var(--ink); }
@@ -650,12 +654,27 @@ async function SiteReviewPage(c: Context<{ Bindings: Env }>, review: AdminSiteRe
             {generation.builds.map((build) => (
               <div class="card">
                 <strong>Build {build.buildId.slice(0, 8)}</strong> ({build.kind}) —{" "}
-                <span class={`badge ${build.state === "RELEASE_READY" ? "ready" : build.state === "HUMAN_REVIEW_REQUIRED" ? "review" : build.state === "FAILED" || build.state === "DEGRADED" ? "failed" : ""}`}>{build.state}</span>
+                <span class={`badge ${build.state === "RELEASE_READY" ? "ready" : build.state === "HUMAN_REVIEW_REQUIRED" ? (build.qaOutcome?.status === "failed" ? "failed" : "review") : build.state === "FAILED" || build.state === "DEGRADED" ? "failed" : ""}`}>{build.state === "HUMAN_REVIEW_REQUIRED" && build.qaOutcome?.status === "failed" ? "HUMAN_REVIEW_REQUIRED (QA FAILED)" : build.state}</span>
                 <div class="muted">
                   Versions: {build.versions.map((version) => `v${version.versionNumber}`).join(", ")}
                   {build.repairUsed ? " · repair used" : ""}
                   {build.scoreSummary ? ` · ${build.scoreSummary}` : ""}
                 </div>
+                {build.state === "HUMAN_REVIEW_REQUIRED" && build.qaOutcome?.status === "failed" ? (
+                  <div class="qa-failed">
+                    <strong>QA FAILED — automation could not reach release quality.</strong>
+                    {build.qaOutcome.visualScore ? ` Visual fidelity ${build.qaOutcome.visualScore} (90 required).` : ""}
+                    <ul>
+                      {build.qaOutcome.reasons.map((reason) => (
+                        <li>{reason}</li>
+                      )) as never}
+                    </ul>
+                    <span class="muted">
+                      This preview did NOT pass the automated release gate. The one allowed repair was already tried. Use the
+                      revision notes below to fix the listed findings, or regenerate.
+                    </span>
+                  </div>
+                ) : null}
                 {build.previewUrl ? (
                   <div>
                     <a href={build.previewUrl} target="_blank" rel="noreferrer">
